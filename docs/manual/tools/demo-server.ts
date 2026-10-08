@@ -2,8 +2,7 @@
  * Demo copy of server.ts for the user-manual screenshots. Differences from the real server:
  *  - wires the DemoProvider (no network I/O) instead of MetaProvider;
  *  - refuses to start unless LOCAL_SOCIAL_DATA_DIR is under /tmp (never touches ./data);
- *  - uses a legacy interlock stub that is never blocked and never reads ~/.local/share/gestor-instagram;
- *  - never reads the root .env (the env-import endpoint is disabled);
+ *  - ignores the opt-in legacy interlock and `.env` import variables (both stay disabled, as in a default install);
  *  - refuses port 3000 (the real app's port).
  * Run through docs/manual/tools/capture.mjs, or: LOCAL_SOCIAL_DATA_DIR=/tmp/x PORT=3100 NODE_ENV=production npx tsx docs/manual/tools/demo-server.ts
  */
@@ -24,10 +23,10 @@ import { ConnectionService } from '../../../src/services/connections.ts';
 import { AutomationService } from '../../../src/services/automations.ts';
 import { BacklogService } from '../../../src/services/backlog.ts';
 import { createApiHandler } from '../../../src/http/router.ts';
-import { DemoProvider, assertDemoDataDir, createNeverBlockedInterlock } from './demo-provider.ts';
+import { DemoProvider, assertDemoDataDir } from './demo-provider.ts';
 
 const dataDir = assertDemoDataDir(process.env.LOCAL_SOCIAL_DATA_DIR);
-const config = loadConfig({ ...process.env, LOCAL_SOCIAL_DATA_DIR: dataDir }, process.cwd());
+const config = loadConfig({ PORT: process.env.PORT, LOCAL_SOCIAL_DATA_DIR: dataDir }, process.cwd());
 if (config.port === 3000) throw new Error('Refusing to start the demo on port 3000 (reserved for the real app)');
 
 const applicationLock = acquireApplicationLock(config.dataDir);
@@ -47,15 +46,13 @@ const provider = new DemoProvider({
     return { text: parsed.text ?? '', buttons: parsed.buttons ?? [], recipientId: `demo_user_${row.recipient ?? 'x'}` };
   },
 });
-const legacyInterlock = createNeverBlockedInterlock();
-const queue = new QueueService(database, provider, { legacyInterlock });
+const queue = new QueueService(database, provider);
 const scanner = new Scanner(database, provider);
 const connections = new ConnectionService(database, vault, provider);
 const scheduler = new Scheduler(database, scanner, queue, { mediaRefresher: connections });
 const automations = new AutomationService(database);
 const backlog = new BacklogService(database, scanner, queue);
-const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue, legacy: legacyInterlock,
-  importEnvironment: async () => { throw new Error('environment import is disabled in the demo'); } });
+const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue });
 
 const projectRoot = resolve(import.meta.dirname, '../../..');
 const isDevelopment = process.env.NODE_ENV === 'development';

@@ -196,7 +196,7 @@
   <table>
     <thead><tr><th style="width:32%">Necesitas</th><th>Detalle</th></tr></thead>
     <tbody>
-      <tr><td>Un computador propio</td><td>Linux o macOS funcionan directamente. En Windows, usa WSL o Git Bash (ver capítulo 3). Debe quedar encendido mientras quieras que la app responda.</td></tr>
+      <tr><td>Un computador propio</td><td>Linux (probado), macOS o Windows (preparados, pero todavía no probados en un equipo real). Debe quedar encendido mientras quieras que la app responda.</td></tr>
       <tr><td>Node.js 24.21 o superior</td><td>Es el programa que ejecuta la app. Se instala una sola vez (capítulo 3).</td></tr>
       <tr><td>Una cuenta profesional de Instagram</td><td>De tipo <strong>Empresa</strong> o <strong>Creador</strong>. Las cuentas personales no funcionan con la API de Meta. La cuenta debe ser pública.</td></tr>
       <tr><td>Una cuenta de desarrollador de Meta</td><td>Gratuita. Se crea con tu cuenta de Facebook (capítulo 4).</td></tr>
@@ -253,7 +253,7 @@
 
   <div class="callout consejo">
     <span class="callout-title">Consejo</span>
-    <p>¿Cómo abrir una terminal? En macOS, busca «Terminal» en Spotlight. En Linux, presiona <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> en la mayoría de sistemas. En Windows, abre «Ubuntu (WSL)» o «Git Bash». Copia los comandos tal cual y presiona <kbd>Enter</kbd> después de cada uno.</p>
+    <p>¿Cómo abrir una terminal? En macOS, busca «Terminal» en Spotlight. En Linux, presiona <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> en la mayoría de sistemas. En Windows, abre «PowerShell» desde el menú Inicio (o «Ubuntu (WSL)» si lo usas). Copia los comandos tal cual y presiona <kbd>Enter</kbd> después de cada uno.</p>
   </div>
 
   <h2 id="cap3-node">Paso 1: instalar Node.js</h2>
@@ -287,6 +287,8 @@
   <h3>Cambiar el puerto</h3>
   <p>Si el puerto 3000 ya está ocupado por otro programa, elige otro con la variable <code>PORT</code>:</p>
   <pre><code>PORT=3310 npm start</code></pre>
+  <p>En Windows PowerShell se escribe distinto:</p>
+  <pre><code>$env:PORT = "3310"; npm start</code></pre>
   <p>Y abre entonces <code>http://localhost:3310</code>.</p>
 
   <h3>Detener la app</h3>
@@ -298,7 +300,7 @@
       <li><strong>Deja la terminal abierta.</strong> Si cierras la ventana de la terminal, la app se detiene.</li>
       <li><strong>El computador debe quedar encendido</strong> y sin entrar en suspensión. Si el equipo duerme, la app deja de revisar comentarios y de enviar mensajes.</li>
       <li><strong>Solo una copia a la vez.</strong> Si intentas arrancar la app dos veces con la misma carpeta de datos, la segunda se bloquea a propósito.</li>
-      <li><strong>Windows:</strong> el comando <code>npm start</code> usa una sintaxis de Linux/macOS. En Windows ejecútalo dentro de WSL o Git Bash. Si no sabes cómo, pide ayuda a alguien de confianza.</li>
+      <li><strong>Windows y macOS:</strong> <code>npm start</code> funciona igual en PowerShell, <code>cmd</code> y la Terminal de macOS, pero estos sistemas todavía no se probaron en un equipo real. Si algo falla, pide ayuda a alguien de confianza.</li>
     </ul>
   </div>
 
@@ -811,7 +813,7 @@
   </div>
 
   <h2>Retención heredada</h2>
-  <p>En la columna derecha hay un panel llamado <strong>Retención heredada</strong>. Solo aplica si tu cuenta viene de una herramienta anterior que dejó un bloqueo o un historial de rechazos. En ese caso, la cuenta queda <strong>retenida</strong> y no puede enviar mensajes reales hasta que pulses <span class="ui">Revisar estado y reconocer</span> y confirmes con <span class="ui">Reconocer historial</span>. Si el bloqueo de la herramienta anterior sigue presente, la app no te deja reconocerlo. La app nunca borra ni modifica esos archivos externos. Si no usaste otra herramienta antes, no necesitas este panel.</p>
+  <p>En la columna derecha puede aparecer un panel llamado <strong>Retención heredada</strong>. Solo aparece si quien instaló la app activó esta protección (opción avanzada, ver el README) porque tu cuenta viene de una herramienta anterior que dejó un bloqueo o un historial de rechazos. En ese caso, la cuenta queda <strong>retenida</strong> y no puede enviar mensajes reales hasta que pulses <span class="ui">Revisar estado y reconocer</span> y confirmes con <span class="ui">Reconocer historial</span>. Si el bloqueo de la herramienta anterior sigue presente, la app no te deja reconocerlo. La app nunca borra ni modifica esos archivos externos. Si no usaste otra herramienta antes, no necesitas este panel.</p>
 </section>
 
 <!-- ===================== CAPÍTULO 9 ===================== -->
@@ -1348,8 +1350,8 @@
   </figure>
   <ul>
     <li><strong>Modo de envío:</strong> muestra si está activo Dry Run o el modo real. El cambio se hace con el botón de modo del encabezado.</li>
-    <li><strong>Importar configuración existente:</strong> opción avanzada. El botón <span class="ui">Importar .env del proyecto</span> lee una vez un archivo de configuración fijo de la instalación y crea una conexión nueva con el token cifrado. No modifica el archivo ni muestra el secreto. Si no tienes ese archivo, no la necesitas: crea la conexión desde Conexiones.</li>
-    <li><strong>Protección de cuenta heredada:</strong> confirma que las retenciones de herramientas anteriores se revisan antes de cualquier envío real. La app nunca elimina bloqueos ni contadores externos.</li>
+    <li><strong>Importar configuración existente:</strong> opción avanzada. Viene <strong>desactivada</strong>: Ajustes muestra «Importación desactivada» y cómo activarla. Solo si quien instaló la app indicó un archivo con la variable <code>SOCIAL_DESK_IMPORT_ENV_PATH</code>, aparece el botón <span class="ui">Importar .env del proyecto</span>, que lee una vez ese archivo y crea una conexión nueva con el token cifrado. No modifica el archivo ni muestra el secreto. Normalmente no la necesitas: crea la conexión desde Conexiones.</li>
+    <li><strong>Protección de cuenta heredada:</strong> viene <strong>desactivada</strong> («No configurada»). Si se activa, confirma que las retenciones de herramientas anteriores se revisan antes de cualquier envío real. La app nunca elimina bloqueos ni contadores externos.</li>
   </ul>
 
   <h2>Lo que hace la app por ti</h2>
@@ -1594,7 +1596,7 @@
       <tr><td>Botones no editables</td><td>Para cambiarlos, crea una automatización nueva.</td></tr>
       <tr><td>Archivar es irreversible</td><td>No se puede reactivar desde la app.</td></tr>
       <tr><td>«Ya respondido» según el último análisis</td><td>Una respuesta tuya posterior al último análisis no se conoce hasta el siguiente.</td></tr>
-      <tr><td>Windows</td><td>El arranque usa sintaxis de Linux/macOS; en Windows usa WSL o Git Bash.</td></tr>
+      <tr><td>Windows y macOS</td><td>Preparados, pero solo probados con pruebas automáticas, no en un equipo real.</td></tr>
       <tr><td>Solo Instagram</td><td>Sin TikTok, sin comentarios de páginas de Facebook, sin funciones de nube ni de inteligencia artificial.</td></tr>
       <tr><td>Revisión de Meta</td><td>Hoy no está preparada para la revisión de Meta; úsala solo con cuentas propias o que administras.</td></tr>
     </tbody>

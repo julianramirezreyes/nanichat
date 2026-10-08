@@ -7,6 +7,7 @@ import { autoPickAutomation, describeQueuePayload, type PendingItem, type Pendin
 import { GENERAL_MEDIA_OPTION, automationTargetLabel, automationTargetPayload } from './automation-scope';
 import { deriveOnboarding, showOnboarding as shouldShowOnboarding } from './onboarding';
 import { formatElapsed, progressPercent, progressText, reasonLabel, summarizeScan, type ScanProgressDto } from './scan-summary';
+import { DISABLED_FEATURES, ENV_IMPORT_DISABLED_HINT, type Features, legacyPanelAccounts, parseFeatures } from './settings-features';
 import { PUBLIC_REPLY_SAMPLE_USERNAME, describePublicReply, parseVariantLines, previewExamples, publicReplyErrorHint, type PublicReplyDto, variantCountLabel } from './public-reply';
 
 type Account = { accountId: string; connectionId: string; username: string; status: string; monitoringPaused: boolean; sendHoldReason?: string | null; last_sync?: string; last_error?: string; coverage?: string };
@@ -58,6 +59,7 @@ export default function HomePage() {
   const [candidates, setCandidates] = useState<Array<{ connectionId: string; providerAccountId: string; username: string }>>([]);
   const [scanJob, setScanJob] = useState<ScanJob | null>(null);
   const [dialog, setDialog] = useState<(ConfirmOptions & { resolve(value: boolean): void }) | null>(null);
+  const [features, setFeatures] = useState<Features>(DISABLED_FEATURES);
 
   const confirm = useCallback<Confirm>((options) => new Promise<boolean>((resolve) => setDialog({ ...options, resolve })), []);
   function settleDialog(value: boolean) { dialog?.resolve(value); setDialog(null); }
@@ -90,6 +92,8 @@ export default function HomePage() {
 
   useEffect(() => { void fetch('/api/session', { cache: 'no-store' }).then((r) => r.json()).then((value) => setCsrf(value.csrfToken ?? '')).catch(() => setError('No se pudo iniciar la sesión local.')); }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  // Optional features (opt-in by environment variables); unknown or failed answers keep them disabled.
+  useEffect(() => { if (!csrf) return; void api('/api/settings/features').then((value) => setFeatures(parseFeatures(value))).catch(() => setFeatures(DISABLED_FEATURES)); }, [api, csrf]);
   // A single account is selected for the user once; an explicit later choice (even "all") is never overridden.
   useEffect(() => {
     const id = autoSelectAccount({ filter: accountFilter, userChose: userChoseAccount, accountIds: allAccounts.map((item) => item.accountId) });
@@ -176,13 +180,13 @@ export default function HomePage() {
       {loading && <div className="loading-line">Actualizando datos locales…</div>}
       <div className="content">
         {section === 'dashboard' && <DashboardView data={dashboard} accounts={accounts} connections={connections} automations={automations} accountFilter={accountFilter} accountCount={allAccounts.length} accountLabel={accountLabel} onNavigate={setSection} onRefresh={() => void refresh()} />}
-        {section === 'connections' && <ConnectionsView connections={connections} accounts={accounts} candidates={candidates} setCandidates={setCandidates} api={api} act={act} confirm={confirm} />}
+        {section === 'connections' && <ConnectionsView connections={connections} accounts={accounts} candidates={candidates} setCandidates={setCandidates} api={api} act={act} confirm={confirm} features={features} />}
         {section === 'media' && <MediaView accounts={accounts} allAccounts={allAccounts} onSelectAccount={chooseAccount} media={media} selected={accountFilter} onNavigate={setSection} api={api} act={act} />}
         {section === 'automations' && <AutomationView accounts={accounts} media={media} rows={automations} selected={accountFilter} api={api} act={act} confirm={confirm} />}
         {section === 'monitor' && <MonitorView accounts={accounts} status={dashboard?.monitoringEnabled ?? false} onNavigate={setSection} api={api} act={act} />}
         {section === 'backlog' && <BacklogView allAccounts={allAccounts} accounts={accounts} onSelectAccount={chooseAccount} selected={accountFilter} job={scanJob} setJob={setScanJob} rows={automations} api={api} act={act} confirm={confirm} />}
         {section === 'queue' && <QueueView items={queue} total={queueTotal} offset={queueOffset} setOffset={setQueueOffset} state={queueState} setState={(value) => { setQueueOffset(0); setQueueState(value); }} onNavigate={setSection} api={api} act={act} />}
-        {section === 'settings' && <SettingsView mode={mode} act={act} api={api} confirm={confirm} />}
+        {section === 'settings' && <SettingsView mode={mode} act={act} api={api} confirm={confirm} features={features} />}
       </div>
       <footer className="footer-note"><span>Datos y credenciales permanecen en el servidor local.</span><button onClick={() => void refresh()}>Actualizar</button></footer>
     </section>
@@ -259,7 +263,8 @@ function DashboardView({ data, accounts, connections, automations, accountFilter
 
 function focusById(id: string) { const node = document.getElementById(id); node?.scrollIntoView?.({ block: 'center' }); node?.focus(); }
 
-function ConnectionsView({ connections, accounts, candidates, setCandidates, api, act, confirm }: { connections: Connection[]; accounts: Account[]; candidates: Array<{ connectionId: string; providerAccountId: string; username: string }>; setCandidates(value: Array<{ connectionId: string; providerAccountId: string; username: string }>): void; api: Api; act: Act; confirm: Confirm }) {
+function ConnectionsView({ connections, accounts, candidates, setCandidates, api, act, confirm, features }: { connections: Connection[]; accounts: Account[]; candidates: Array<{ connectionId: string; providerAccountId: string; username: string }>; setCandidates(value: Array<{ connectionId: string; providerAccountId: string; username: string }>): void; api: Api; act: Act; confirm: Confirm; features: Features }) {
+  const legacyAccounts = legacyPanelAccounts(features, accounts);
   const [name, setName] = useState(''); const [loginKind, setLoginKind] = useState('instagram_login'); const [appId, setAppId] = useState(''); const [version, setVersion] = useState('v26.0'); const [token, setToken] = useState('');
   const [editing, setEditing] = useState<Connection | null>(null); const [editName, setEditName] = useState(''); const [editAppId, setEditAppId] = useState(''); const [editVersion, setEditVersion] = useState(''); const [editToken, setEditToken] = useState('');
   async function create(event: FormEvent) { event.preventDefault(); const submittedToken = token; setToken(''); await act(async () => { await api('/api/connections', 'POST', { id: crypto.randomUUID(), name, loginKind, appId, graphVersion: version, accessToken: submittedToken }); setName(''); }, 'Conexión guardada; valide para descubrir cuentas.'); }
@@ -292,7 +297,7 @@ function ConnectionsView({ connections, accounts, candidates, setCandidates, api
     {editing && <form className="panel form-panel" onSubmit={(event) => void update(event)}><div><h3>Editar conexión</h3><p className="muted">Deje el token vacío para conservarlo. Si cambia, se invalida la validación anterior.</p></div><div className="form-grid"><Field label="Nombre"><input required value={editName} onChange={(event) => setEditName(event.target.value)} /></Field><Field label="App ID"><input value={editAppId} onChange={(event) => setEditAppId(event.target.value)} /></Field><Field label="Versión Graph"><input required pattern="v[0-9]+\.[0-9]+" value={editVersion} onChange={(event) => setEditVersion(event.target.value)} /></Field><Field label="Nuevo token · captura opcional"><input type="password" autoComplete="new-password" value={editToken} onChange={(event) => setEditToken(event.target.value)} /></Field></div><div className="row-actions"><button className="button primary">Guardar cambios</button><button type="button" className="button secondary" onClick={() => { setEditToken(''); setEditing(null); }}>Cancelar</button></div></form>}
   </div><div className="stack"><div className="panel"><div className="panel-heading"><div><h3>Cuentas seleccionadas</h3><p className="muted">Los ID se obtienen de la respuesta oficial de Meta.</p></div></div>{accounts.length ? accounts.map((account) => <div className="list-row" key={account.accountId}><div><strong>@{account.username}</strong><span className="muted">{account.status === 'valid' ? 'Validada' : account.status} · {account.accountId}</span></div></div>) : <p className="empty-inline">Aún no hay cuentas seleccionadas. Pruebe una conexión y pulse «Seleccionar» en la cuenta que desea usar.</p>}</div>
     <div className="panel"><h3>Cuentas descubiertas</h3>{candidates.length ? candidates.map((candidate) => <div className="list-row" key={candidate.providerAccountId}><div><strong>@{candidate.username}</strong><span className="muted">ID de proveedor: {candidate.providerAccountId}</span></div><button className="button primary small" onClick={() => void act(() => api(`/api/connections/${candidate.connectionId}/select`, 'POST', { account: candidate }), 'Cuenta vinculada con su historial.')}>Seleccionar</button></div>) : <p className="empty-inline">Pulse «Probar y descubrir» en una conexión para listar las cuentas disponibles.</p>}</div>
-    <div className="panel"><h3>Retención heredada</h3><p className="muted">La cuenta importada puede tener un bloqueo o historial de rechazos previos. La aplicación nunca borra ni modifica esos archivos.</p>{accounts.map((account) => <div className="list-row" key={`legacy-${account.accountId}`}><strong>@{account.username}</strong><button className="button secondary small" onClick={() => void acknowledgeLegacy(account)}>Revisar estado y reconocer</button></div>)}</div></div></div>;
+    {legacyAccounts.length > 0 && <div className="panel"><h3>Retención heredada</h3><p className="muted">{features.legacyInterlock ? 'Una cuenta usada antes con otra herramienta puede tener un bloqueo o historial de rechazos previos. La aplicación nunca borra ni modifica esos archivos.' : 'Esta cuenta conserva una retención de una configuración heredada anterior. Revísela y reconózcala para liberarla.'}</p>{legacyAccounts.map((account) => <div className="list-row" key={`legacy-${account.accountId}`}><strong>@{account.username}</strong><button className="button secondary small" onClick={() => void acknowledgeLegacy(account)}>Revisar estado y reconocer</button></div>)}</div>}</div></div>;
 }
 
 function MediaView({ accounts, allAccounts, onSelectAccount, media, selected, onNavigate, api, act }: { accounts: Account[]; allAccounts: Account[]; onSelectAccount(id: string): void; media: Media[]; selected: string; onNavigate(id: string): void; api: Api; act: Act }) {
@@ -560,15 +565,15 @@ function QueueView({ items, total, offset, setOffset, state, setState, onNavigat
   </div>;
 }
 
-function SettingsView({ mode, api, act, confirm }: { mode: 'checking' | 'dry' | 'real'; api: Api; act: Act; confirm: Confirm }) {
+function SettingsView({ mode, api, act, confirm, features }: { mode: 'checking' | 'dry' | 'real'; api: Api; act: Act; confirm: Confirm; features: Features }) {
   async function importEnv() {
-    if (!(await confirm({ title: 'Importar .env del proyecto', body: 'Se leerá una vez el archivo .env fijo del proyecto y se importarán únicamente credenciales Meta permitidas, cifradas como una conexión nueva. El archivo no se modifica y el secreto no se muestra.', confirmLabel: 'Importar credenciales' }))) return;
+    if (!(await confirm({ title: 'Importar .env del proyecto', body: 'Se leerá una vez el archivo .env configurado en SOCIAL_DESK_IMPORT_ENV_PATH y se importarán únicamente credenciales Meta permitidas, cifradas como una conexión nueva. El archivo no se modifica y el secreto no se muestra.', confirmLabel: 'Importar credenciales' }))) return;
     await act(() => api('/api/settings/import-root-env', 'POST', { confirmed: true }), 'Conexión importada de forma cifrada. Valídela y seleccione la cuenta.');
   }
   return <div className="panel"><div className="panel-heading"><div><h3>Seguridad y configuración</h3><p className="muted">La aplicación se ejecuta solo en este equipo; el monitoreo no se reactiva al reiniciar.</p></div></div>
     <div className="settings-row"><div><strong>Modo de envío</strong><span className="muted">{mode === 'checking' ? 'Verificando el modo de envío…' : mode === 'dry' ? 'Dry Run activo: no se envían respuestas.' : 'Modo real activo; requiere automatizaciones autorizadas.'}</span></div>{mode === 'checking' ? <Status value="Verificando…" tone="neutral" /> : mode === 'dry' ? <Status value="Dry Run" tone="good" /> : <Status value="Modo real" tone="warn" />}</div>
-    <div className="settings-row"><div><strong>Importar configuración existente</strong><span className="muted">Lee únicamente variables permitidas del archivo .env fijo del proyecto y cifra el token como una conexión nueva. No modifica el archivo ni muestra el secreto.</span></div><button className="button secondary" onClick={() => void importEnv()}>Importar .env del proyecto</button></div>
-    <div className="settings-row"><div><strong>Protección de cuenta heredada</strong><span className="muted">Los bloqueos previos se verifican antes de cualquier modo real. La aplicación nunca elimina bloqueos ni contadores externos.</span></div><Status value="Interlock local activo" tone="good" /></div>
+    <div className="settings-row"><div><strong>Importar configuración existente</strong><span className="muted">{features.envImport ? 'Lee únicamente variables permitidas del archivo .env configurado y cifra el token como una conexión nueva. No modifica el archivo ni muestra el secreto.' : ENV_IMPORT_DISABLED_HINT}</span></div>{features.envImport ? <button className="button secondary" onClick={() => void importEnv()}>Importar .env del proyecto</button> : <Status value="Desactivada" tone="neutral" />}</div>
+    <div className="settings-row"><div><strong>Protección de cuenta heredada</strong><span className="muted">{features.legacyInterlock ? 'Los bloqueos previos se verifican antes de cualquier modo real. La aplicación nunca elimina bloqueos ni contadores externos.' : 'Desactivada: no se lee ninguna carpeta de otra herramienta. Se activa con SOCIAL_DESK_LEGACY_ACCOUNTS_DIR o SOCIAL_DESK_LEGACY_HOLD_USERNAMES.'}</span></div>{features.legacyInterlock ? <Status value="Interlock local activo" tone="good" /> : <Status value="No configurada" tone="neutral" />}</div>
   </div>;
 }
 

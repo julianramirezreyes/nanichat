@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { loadConfig } from '../src/core/config.ts';
 import { openDatabase } from '../src/db/database.ts';
@@ -50,7 +50,7 @@ test('configuration defaults to a loopback-only local app and keeps monitoring o
   assert.equal(config.port, 3000);
   assert.equal(config.monitoringEnabled, false);
   assert.equal(config.dryRun, true);
-  assert.equal(config.dataDir, '/app/data');
+  assert.equal(config.dataDir, resolve('/app', 'data'));
 });
 
 test('vault encrypts with authenticated connection context and refuses missing keys for encrypted state', () => {

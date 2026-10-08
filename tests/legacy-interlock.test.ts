@@ -17,7 +17,7 @@ test('legacy lock adapter blocks pre-existing ownership, acknowledges an unchang
   mkdirSync(directory);
   const counter = join(directory, 'rejection-counter.json');
   writeFileSync(counter, '{"count":3}', { mode: 0o600 });
-  const interlock = createLegacyInterlock(root);
+  const interlock = createLegacyInterlock({ accountsDir: root, holdUsernames: [] });
   const observed = interlock.inspect('Customer');
   assert.equal(observed.blocked, true);
   assert.ok(observed.counterVersion);

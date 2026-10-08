@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { normalizeUsername } from '../core/config.ts';
 
 const COUNTER_FILES = [
   'rejection-counter.json', 'rejection_counter.json', 'private-reply-counter.json',
@@ -9,23 +10,46 @@ const COUNTER_FILES = [
 
 export type LegacyInterlockState = {
   blocked: boolean;
-  reasonCode?: 'legacy_lock_present' | 'legacy_rejection_history';
+  reasonCode?: 'legacy_lock_present' | 'legacy_rejection_history' | 'legacy_historical_rejection';
   lockPresent: boolean;
   counterVersion: string;
+  /** The username is listed in SOCIAL_DESK_LEGACY_HOLD_USERNAMES: it needs an acknowledgement even without a counter file. */
+  holdConfigured: boolean;
 };
 
-export function createLegacyInterlock(accountsRoot: string) {
-  const root = resolve(accountsRoot);
+export type LegacyInterlockOptions = {
+  /** Directory of a legacy tool's per-account folders; null = no file is ever read or written. */
+  accountsDir: string | null;
+  holdUsernames: readonly string[];
+};
 
-  function paths(username: string) {
+export type LegacyInterlock = ReturnType<typeof createLegacyInterlock>;
+
+/** Opt-in: returns undefined (interlock fully disabled) when neither a directory nor hold usernames are configured. */
+export function legacyInterlockFromConfig(config: { legacyAccountsDir: string | null; legacyHoldUsernames: readonly string[] }):
+  LegacyInterlock | undefined {
+  if (!config.legacyAccountsDir && !config.legacyHoldUsernames.length) return undefined;
+  return createLegacyInterlock({ accountsDir: config.legacyAccountsDir, holdUsernames: config.legacyHoldUsernames });
+}
+
+export function createLegacyInterlock(options: LegacyInterlockOptions) {
+  const root = options.accountsDir ? resolve(options.accountsDir) : null;
+  const holdUsernames = new Set(options.holdUsernames.map(normalizeUsername));
+
+  function account(username: string) {
     const normalized = normalizeUsername(username);
     if (!/^[a-z0-9._]{1,30}$/u.test(normalized)) throw new TypeError('Invalid legacy account name');
-    const directory = join(root, normalized);
-    return { directory, lock: join(directory, 'run.lock') };
+    const directory = root ? join(root, normalized) : null;
+    return { normalized, directory, lock: directory ? join(directory, 'run.lock') : null };
   }
 
   function inspect(username: string): LegacyInterlockState {
-    const { directory, lock } = paths(username);
+    const { normalized, directory, lock } = account(username);
+    const holdConfigured = holdUsernames.has(normalized);
+    if (!directory || !lock) {
+      return { blocked: holdConfigured, ...(holdConfigured ? { reasonCode: 'legacy_historical_rejection' as const } : {}),
+        lockPresent: false, counterVersion: 'absent', holdConfigured };
+    }
     const lockPresent = existsSync(lock);
     let counterVersion = 'absent';
     for (const filename of COUNTER_FILES) {
@@ -41,11 +65,13 @@ export function createLegacyInterlock(accountsRoot: string) {
     }
     const hasRejectionHistory = counterVersion !== 'absent';
     return {
-      blocked: lockPresent || hasRejectionHistory,
+      blocked: lockPresent || hasRejectionHistory || holdConfigured,
       ...(lockPresent ? { reasonCode: 'legacy_lock_present' as const }
-        : hasRejectionHistory ? { reasonCode: 'legacy_rejection_history' as const } : {}),
+        : hasRejectionHistory ? { reasonCode: 'legacy_rejection_history' as const }
+          : holdConfigured ? { reasonCode: 'legacy_historical_rejection' as const } : {}),
       lockPresent,
       counterVersion,
+      holdConfigured,
     };
   }
 
@@ -55,7 +81,9 @@ export function createLegacyInterlock(accountsRoot: string) {
   }
 
   async function withExclusiveLock<T>(username: string, operation: () => Promise<T>): Promise<T> {
-    const { directory, lock } = paths(username);
+    const { directory, lock } = account(username);
+    // Without a legacy directory there is no other tool to coordinate with.
+    if (!directory || !lock) return operation();
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const owner = randomBytes(24).toString('base64url');
     let fd: number;
@@ -83,8 +111,4 @@ export function createLegacyInterlock(accountsRoot: string) {
   }
 
   return { inspect, acknowledge, withExclusiveLock };
-}
-
-function normalizeUsername(value: string): string {
-  return value.normalize('NFC').trim().replace(/^@/u, '').toLocaleLowerCase('und');
 }

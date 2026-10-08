@@ -1,6 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import next from 'next';
 import { acquireApplicationLock } from './src/core/application-lock.ts';
@@ -17,7 +15,7 @@ import { ConnectionService } from './src/services/connections.ts';
 import { AutomationService } from './src/services/automations.ts';
 import { BacklogService } from './src/services/backlog.ts';
 import { createApiHandler } from './src/http/router.ts';
-import { createLegacyInterlock } from './src/services/legacy-interlock.ts';
+import { legacyInterlockFromConfig } from './src/services/legacy-interlock.ts';
 import { readImportedEnvironment } from './src/security/env-import.ts';
 
 const config = loadConfig(process.env);
@@ -26,17 +24,20 @@ const database = openDatabase(config.dataDir);
 migrateDatabase(database);
 const vault = createVault(config.dataDir, () => listEncryptedCredentials(database));
 const provider = new MetaProvider(database, vault);
-const legacyInterlock = createLegacyInterlock(join(homedir(), '.local/share/gestor-instagram/accounts'));
-const queue = new QueueService(database, provider, { legacyInterlock });
+// Opt-in (SOCIAL_DESK_LEGACY_ACCOUNTS_DIR / SOCIAL_DESK_LEGACY_HOLD_USERNAMES): undefined means no legacy file is ever read.
+const legacyInterlock = legacyInterlockFromConfig(config);
+const queue = new QueueService(database, provider, legacyInterlock ? { legacyInterlock } : {});
 const scanner = new Scanner(database, provider);
 const connections = new ConnectionService(database, vault, provider);
 // General (account-wide) automations refresh the account's publication list through the same provider path as the UI.
 const scheduler = new Scheduler(database, scanner, queue, { mediaRefresher: connections });
 const automations = new AutomationService(database);
 const backlog = new BacklogService(database, scanner, queue);
-const rootEnvPath = join(process.cwd(), '..', '.env');
-const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue, legacy: legacyInterlock,
-  importEnvironment: async () => readImportedEnvironment(rootEnvPath) });
+// Opt-in (SOCIAL_DESK_IMPORT_ENV_PATH): without it the explicit .env import endpoint is unavailable.
+const importEnvPath = config.importEnvPath;
+const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue,
+  ...(legacyInterlock ? { legacy: legacyInterlock } : {}),
+  ...(importEnvPath ? { importEnvironment: async () => readImportedEnvironment(importEnvPath) } : {}) });
 export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog };
 
 const isDevelopment = process.env.NODE_ENV !== 'production';

@@ -23,7 +23,8 @@ type PublicRow = {
 };
 type PublicEvent = 'intent_recorded' | 'accepted' | 'definitive_rejection' | 'ambiguous' | 'skipped' | 'expired' | 'manual_retry';
 type LegacyQueueInterlock = {
-  inspect(username: string): { counterVersion: string; lockPresent: boolean };
+  /** holdConfigured: the account is a configured legacy hold, so even an absent counter needs an acknowledgement. */
+  inspect(username: string): { counterVersion: string; lockPresent: boolean; holdConfigured?: boolean };
   withExclusiveLock<T>(username: string, operation: () => Promise<T>): Promise<T>;
 };
 
@@ -689,7 +690,7 @@ export class QueueService {
       .get(row.account_id) as { username: string; counter_version: string } | undefined;
     const normalized = row.username.normalize('NFC').trim().replace(/^@/u, '').toLocaleLowerCase('und');
     if (state.counterVersion === 'unreadable') return false;
-    if (state.counterVersion === 'absent' && normalized !== 'modoverbo') return true;
+    if (state.counterVersion === 'absent' && !state.holdConfigured) return true;
     return Boolean(acknowledgement && acknowledgement.username === normalized && acknowledgement.counter_version === state.counterVersion);
   }
 

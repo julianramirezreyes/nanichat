@@ -28,7 +28,7 @@ export type ApiDependencies = {
   clock?: () => number;
   importEnvironment?: () => Promise<ImportedMetaEnvironment>;
   legacy?: {
-    inspect(username: string): { blocked: boolean; reasonCode?: string; lockPresent: boolean; counterVersion: string };
+    inspect(username: string): { blocked: boolean; reasonCode?: string; lockPresent: boolean; counterVersion: string; holdConfigured?: boolean };
     acknowledge(username: string, version: string): { ok: boolean; state: { lockPresent: boolean; counterVersion: string } };
   };
 };
@@ -69,6 +69,12 @@ export function createApiHandler(deps: ApiDependencies) {
     }
   };
 }
+
+/** Stand-in used when the legacy interlock is not configured: never blocks and never touches the filesystem. */
+const DISABLED_LEGACY: NonNullable<ApiDependencies['legacy']> = {
+  inspect: () => ({ blocked: false, lockPresent: false, counterVersion: 'absent', holdConfigured: false }),
+  acknowledge: (_username, version) => ({ ok: version === 'absent', state: { lockPresent: false, counterVersion: 'absent' } }),
+};
 
 class ApiError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
@@ -120,8 +126,9 @@ async function route(
         providerAccountId: text(candidate.providerAccountId), username: text(candidate.username),
         capabilities: [],
       } as never);
+      // Opt-in legacy interlock: without configuration nothing is inspected and no account starts held.
       const legacyState = deps.legacy?.inspect(account.username);
-      if (account.username.replace(/^@/u, '').toLowerCase() === 'modoverbo' || legacyState?.blocked) {
+      if (legacyState?.blocked) {
         deps.automations?.setAccountSendHold(account.accountId,
           legacyState?.reasonCode === 'legacy_lock_present' ? 'legacy_lock_present'
             : legacyState?.reasonCode === 'legacy_rejection_history' ? 'legacy_rejection_history' : 'legacy_historical_rejection');
@@ -190,6 +197,9 @@ async function route(
     if (!enabled && body.confirmed !== true) throw new TypeError('Explicit confirmation is required to disable Dry Run');
     requireService(deps.queue, 'queue').setDryRun(enabled, body.confirmed === true);
     return send(response, 200, { dryRun: enabled });
+  }
+  if (path === '/api/settings/features' && method === 'GET') {
+    return send(response, 200, { envImport: Boolean(deps.importEnvironment), legacyInterlock: Boolean(deps.legacy) });
   }
   if (path === '/api/settings/import-root-env' && method === 'POST') {
     if (body.confirmed !== true) throw new TypeError('Explicit import confirmation is required');
@@ -281,15 +291,17 @@ async function route(
   if (path === '/api/settings/legacy' && method === 'GET') {
     const username = (url.searchParams.get('username') ?? '').replace(/^@/u, '').toLowerCase();
     if (!/^[a-z0-9._]{1,30}$/u.test(username)) throw new TypeError('Invalid username');
-    const result = deps.legacy?.inspect(username) ?? { blocked: username === 'modoverbo', reasonCode: username === 'modoverbo' ? 'legacy_historical_rejection' : undefined, lockPresent: false, counterVersion: 'absent' };
-    return send(response, 200, { username, ...result });
+    const result = (deps.legacy ?? DISABLED_LEGACY).inspect(username);
+    return send(response, 200, { username, enabled: Boolean(deps.legacy), ...result });
   }
   if (path === '/api/settings/legacy/acknowledge' && method === 'POST') {
     if (body.confirmed !== true) throw new TypeError('Explicit historical hold acknowledgement is required');
     const account = accountId(body.accountId, db);
     const row = db.prepare(`SELECT username FROM social_accounts WHERE account_id=?`).get(account) as { username: string };
     const expectedVersion = text(body.counterVersion);
-    const result = deps.legacy?.acknowledge(row.username, expectedVersion);
+    // With the interlock disabled no legacy file is read; a hold left from an earlier configuration can still be
+    // acknowledged explicitly against the "absent" counter version.
+    const result = (deps.legacy ?? DISABLED_LEGACY).acknowledge(row.username, expectedVersion);
     if (!result?.ok) throw new ApiError(409, 'legacy_state_changed');
     const username = row.username.replace(/^@/u, '').toLocaleLowerCase('und');
     db.prepare(`INSERT INTO legacy_account_acknowledgements(account_id, username, counter_version, acknowledged_at)

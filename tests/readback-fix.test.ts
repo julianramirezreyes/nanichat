@@ -28,8 +28,8 @@ async function withDb(run: (db: Db, directory: string) => Promise<void> | void):
 function providerState(db: Db, directory: string) {
   const vault = createVault(directory, () => listEncryptedCredentials(db));
   createConnection(db, { id: 'ig', name: 'p', providerCode: 'META', loginKind: 'instagram_login', graphVersion: 'v26.0', status: 'valid', accessToken: vault.encrypt('ig', 'tok') });
-  addDiscoveredAccount(db, { accountId: 'acc', connectionId: 'ig', providerAccountId: '29055718337365262', username: 'ModoVerbo', status: 'valid' });
-  const account: AccountRef = { accountId: 'acc', connectionId: 'ig', providerAccountId: '29055718337365262', username: 'ModoVerbo' };
+  addDiscoveredAccount(db, { accountId: 'acc', connectionId: 'ig', providerAccountId: '10000000000000001', username: 'Cuenta_Demo', status: 'valid' });
+  const account: AccountRef = { accountId: 'acc', connectionId: 'ig', providerAccountId: '10000000000000001', username: 'Cuenta_Demo' };
   return { vault, account };
 }
 
@@ -49,7 +49,7 @@ async function read(from: Record<string, unknown> | undefined, extra: Record<str
 }
 
 test('readback accepts the sender when its username aliases the account username', async () => {
-  const { result, failure } = await read({ username: ' @modoverbo'.replace('@', ''), id: '17841475720699099' });
+  const { result, failure } = await read({ username: ' @cuenta_demo'.replace('@', ''), id: '17840000000000001' });
   assert.equal(failure, undefined);
   assert.equal(result?.messageId, 'mid');
 });
@@ -62,14 +62,14 @@ test('readback rejects a wrong sender id with a different username, and a sender
 });
 
 test('readback still rejects a different message id or a missing recipient even with a matching username', async () => {
-  const mismatch = await read({ username: 'modoverbo', id: 'x' }, { id: 'different' });
+  const mismatch = await read({ username: 'cuenta_demo', id: 'x' }, { id: 'different' });
   assert.match(String(mismatch.failure), /meta_readback_id_mismatch/);
-  const noRecipient = await read({ username: 'modoverbo', id: 'x' }, { to: [] });
+  const noRecipient = await read({ username: 'cuenta_demo', id: 'x' }, { to: [] });
   assert.match(String(noRecipient.failure), /meta_readback_no_recipient/);
 });
 
 test('readback maps the real object-shaped generic_template attachments with bounded cta buttons', async () => {
-  const { result } = await read({ username: 'modoverbo', id: 'x' }, {
+  const { result } = await read({ username: 'cuenta_demo', id: 'x' }, {
     message: '',
     attachments: { data: [{ generic_template: { title: 'TEST', cta: [
       { title: 'Prueba 1', url: 'https://example.com', type: 'web_url' },
@@ -81,7 +81,7 @@ test('readback maps the real object-shaped generic_template attachments with bou
     { title: 'Prueba 1', url: 'https://example.com', type: 'web_url' },
     { title: 'Prueba 2', url: 'https://example.org', type: 'web_url' },
   ] }]);
-  const many = await read({ username: 'modoverbo', id: 'x' }, { attachments: { data: Array.from({ length: 50 }, () => ({ generic_template: { title: 't'.repeat(900), cta: Array.from({ length: 50 }, () => ({ title: 'b', url: 'https://e.com', type: 'web_url' })) } })) } });
+  const many = await read({ username: 'cuenta_demo', id: 'x' }, { attachments: { data: Array.from({ length: 50 }, () => ({ generic_template: { title: 't'.repeat(900), cta: Array.from({ length: 50 }, () => ({ title: 'b', url: 'https://e.com', type: 'web_url' })) } })) } });
   assert.ok((many.result?.templates?.length ?? 99) <= 5);
   assert.ok((many.result?.templates?.[0]?.buttons.length ?? 99) <= 10);
   assert.ok((many.result?.templates?.[0]?.title?.length ?? 999) <= 640);
@@ -330,7 +330,7 @@ test('POST /api/queue/:id/readback rejects cross-account and non-SENT items and 
 
 // ---- readback diagnostics ----
 
-const OK_FROM = { username: 'modoverbo', id: 'x' };
+const OK_FROM = { username: 'cuenta_demo', id: 'x' };
 
 test('each readback failure has its own safe code and safe diagnostics', async () => {
   const cases: Array<[string, Record<string, unknown> | undefined, Record<string, unknown>, string, Record<string, unknown>]> = [
@@ -342,7 +342,7 @@ test('each readback failure has its own safe code and safe diagnostics', async (
     const { failure } = await read(from, extra);
     assert.equal((failure as { code?: string }).code, code);
     assert.deepEqual((failure as { diagnostics?: unknown }).diagnostics, diagnostics);
-    assert.doesNotMatch(JSON.stringify((failure as { diagnostics?: unknown }).diagnostics), /someoneelse|modoverbo|"recipient"|"tok"|different|hello/);
+    assert.doesNotMatch(JSON.stringify((failure as { diagnostics?: unknown }).diagnostics), /someoneelse|cuenta_demo|"recipient"|"tok"|different|hello/);
   }
   const missing = await read(OK_FROM, { to: undefined });
   assert.equal((missing.failure as { diagnostics: { toShape: string } }).diagnostics.toShape, 'missing');

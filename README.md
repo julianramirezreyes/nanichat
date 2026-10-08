@@ -1,151 +1,242 @@
-# Local Social Automation
+# Social Desk — respuestas automáticas a comentarios de Instagram, en tu propia computadora
 
-A single-user, local-only app that manages Meta (Instagram) connections and automates comment-triggered private replies. It runs a Next.js UI plus a custom Node HTTP server that owns the API, the SQLite database, the credential vault, and the scheduler. The UI copy is in Spanish.
+Social Desk es una aplicación **local y de un solo usuario** que se conecta a tu cuenta de Instagram a través de la API de Meta, vigila los comentarios de tus publicaciones y, cuando un comentario contiene una palabra clave que tú definiste, le envía a esa persona una **respuesta privada** (mensaje directo) y, si lo activas, también una respuesta pública debajo del comentario.
 
-Safety defaults: Dry Run is on, monitoring is off, and nothing is sent unless several explicit switches are turned on (see "Turning on real sends").
+Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de credenciales y el programador de tareas. No hay servidores en la nube ni cuentas de terceros, aparte de la propia API de Meta.
 
-## Requirements
+> **Importante:** por defecto la aplicación **no envía nada**. Arranca en **Dry Run** (modo prueba) y con el **Monitoreo** apagado. Para enviar mensajes reales tienes que desactivar varias protecciones a propósito y confirmar cada una.
 
-- Node.js >= 24.21.0 (uses the built-in `node:sqlite`).
-- No external services. All data stays on this machine.
+## Contenido
 
-## Install and run
+- [Qué hace y qué no hace](#qué-hace-y-qué-no-hace)
+- [Estado y límites](#estado-y-límites)
+- [Requisitos](#requisitos)
+- [Inicio rápido](#inicio-rápido)
+- [Instalar con una IA](#instalar-con-una-ia)
+- [Abrir la aplicación](#abrir-la-aplicación)
+- [Variables de entorno](#variables-de-entorno)
+- [Primeros pasos](#primeros-pasos)
+- [Dónde viven tus datos](#dónde-viven-tus-datos)
+- [Copias de seguridad y qué nunca compartir](#copias-de-seguridad-y-qué-nunca-compartir)
+- [Actualizar a una versión nueva](#actualizar-a-una-versión-nueva)
+- [Manual de usuario (PDF)](#manual-de-usuario-pdf)
+- [Documentación técnica](#documentación-técnica)
+- [Contribuir y ejecutar las pruebas](#contribuir-y-ejecutar-las-pruebas)
+- [Licencia](#licencia)
+
+## Qué hace y qué no hace
+
+**Hace:**
+
+- Guarda conexiones de Meta (Instagram Login o Facebook Login) con el token **cifrado** en tu disco.
+- Lista tus publicaciones y te deja crear **automatizaciones**: palabras clave + texto de respuesta + hasta dos botones con enlace HTTPS. Pueden aplicar a una publicación o a todas las publicaciones de la cuenta (automatización general).
+- **Monitoreo** de comentarios nuevos (cada 60 segundos) que pone en cola las respuestas de los comentarios elegibles.
+- **Revisión pendiente**: analiza comentarios anteriores (últimas 2 h, 24 h, 3 días, 7 días o un rango propio) **sin enviar nada**, para que tú elijas cuáles procesar.
+- **Cola e historial**: muestra cada respuesta (simulada, enviada, fallida, expirada o con resultado desconocido) y su historial de intentos.
+- Respuesta pública opcional bajo el comentario, con variantes que rotan para no repetir siempre el mismo texto.
+
+**No hace:**
+
+- No publica contenido, no responde mensajes directos entrantes y no usa inteligencia artificial.
+- No es un servicio en la nube ni multiusuario: no tiene inicio de sesión; solo acepta conexiones desde la propia máquina (`127.0.0.1` / `localhost`).
+- No soporta TikTok ni otras redes.
+- No reintenta un envío cuyo resultado es dudoso (`UNKNOWN_OUTCOME`): eso lo resuelves tú a mano.
+
+## Estado y límites
+
+- **Herramienta local para una sola persona.** Pensada para administrar tus propias cuentas desde tu computadora.
+- **Reglas de Meta que la aplicación respeta y no puede cambiar:**
+  - Solo se puede enviar **una respuesta privada por comentario**.
+  - La respuesta privada solo es posible dentro de los **7 días** siguientes al comentario. Pasado ese plazo, el elemento queda como `EXPIRED` y no se envía.
+  - Solo se responde a comentarios principales (no a respuestas dentro de un hilo).
+- **Cuentas de otras personas:** usar la aplicación con cuentas que no son tuyas (o que no administras dentro de tu app de Meta) requiere que tu app de Meta pase la **App Review** y obtenga los permisos avanzados correspondientes. Sin eso, Meta rechazará las llamadas.
+- **Permisos de comentarios:** no sabrás si tu token tiene permiso para responder públicamente hasta el primer intento real. Si falta, verás `public_reply_permission_denied` y la respuesta privada no se ve afectada.
+- **Sistema operativo:** el código es multiplataforma (Linux, macOS y Windows nativo, además de Windows con WSL2), pero solo **Linux** se verificó en una ejecución real. macOS y Windows nativo están **verificados solo por pruebas automáticas con una sonda de plataforma simulada; no se probaron en un equipo real**. Detalles en [Sistemas operativos](docs/INSTALACION-CON-IA.md#sistemas-operativos).
+- **Proyecto en evolución:** el comportamiento real de Meta (permisos, cómo se ven los botones, límites de volumen) debe comprobarse con un comentario de prueba controlado antes de usarlo en serio.
+
+## Requisitos
+
+| Requisito | Detalle |
+| --- | --- |
+| Node.js | **24.21.0 o superior** (la app usa el módulo integrado `node:sqlite`). Revisa con `node -v`. |
+| npm | El que viene con Node (probado con npm 11). |
+| git | Para clonar y actualizar el repositorio. |
+| Sistema | Linux (verificado), macOS o Windows nativo/WSL2 (sin probar en un equipo real; ver arriba). |
+| Puerto | `3000` libre (o el que indiques con la variable `PORT`). |
+| Red | Solo para `npm install` (registro de npm) y, al usar la app, para hablar con la API de Meta. |
+
+No necesitas base de datos externa, Docker ni claves de ningún servicio para instalar y abrir la aplicación.
+
+## Inicio rápido
 
 ```bash
+git clone <URL del repositorio> social-automation
+cd social-automation
 npm install
-npm run dev        # development
-npm run build      # production build
-npm run start      # production server (NODE_ENV=production)
+npm run build
+npm start
 ```
 
-The server binds only to `127.0.0.1` and rejects any Host other than `127.0.0.1` or `localhost`. The default port is **3000** (`PORT` environment variable overrides it), so the default URL is http://localhost:3000. For another port, run for example `PORT=3310 npm run dev` and open http://localhost:3310. API writes require a same-origin request, a per-process CSRF token, and `application/json` bodies.
+Luego abre <http://localhost:3000>. Para comprobar que el servidor responde:
 
-Other scripts: `npm test` (node:test with temporary databases) and `npm run typecheck`.
+```bash
+curl http://127.0.0.1:3000/api/health
+# Respuesta esperada: {"status":"ok","ready":true}
+```
 
-Only one instance can run per data directory; a second start is blocked by a lock file (`.application-owner.json`).
+Para detener el servidor, presiona `Ctrl+C` en la terminal donde corre.
 
-## Data directory and key file
+Los mismos comandos funcionan en Linux, macOS, Windows PowerShell y `cmd`: `npm start` ejecuta `node scripts/start.mjs`, que activa el modo producción sin depender de la sintaxis de la terminal. En Windows, si PowerShell bloquea `npm` por la política de ejecución, usa `npm.cmd start` o abre `cmd`.
 
-- Default data directory: `./data` (relative to the working directory); override with `LOCAL_SOCIAL_DATA_DIR`. It is git-ignored.
-- Database: `<data dir>/social-automation.sqlite` (WAL mode, `synchronous=FULL`, foreign keys on).
-- Vault key: `<data dir>/vault.key`, a random 32-byte AES-256-GCM master key kept outside SQLite.
-- Permissions: the data directory is set to `0700` and the key file to `0600` at startup.
-- Access tokens are stored encrypted in SQLite with the key above. They are never returned to the browser, and API responses use allowlisted fields only.
+> **Nota:** `npm install` puede mostrar un aviso de npm sobre `esbuild` y sus *install scripts*. Es inofensivo: el binario de `esbuild` llega en un paquete opcional por plataforma y la app funciona sin aprobar ese script.
 
-### Backup and key loss
+## Instalar con una IA
 
-- Back up the whole data directory (database and `vault.key`) together, while the app is stopped. A database copy without its key cannot decrypt stored tokens, and the key alone is useless without the database. Keep backups private; anyone with both files can read your tokens.
-- If `vault.key` is missing while encrypted credentials exist, or a stored credential cannot be authenticated with the existing key, the app fails closed at startup. It never creates a replacement key silently and never overwrites the database. Restore the matching key from backup, or, if it is lost, move the data directory aside and re-create connections with fresh tokens.
-- A compromised local user account can read the key and database. This app does not protect against that.
+Si usas un asistente de programación con acceso a tu terminal (Claude Code, Codex, Cursor, agentes de ChatGPT, etc.), puede hacer toda la instalación por ti. La guía [docs/INSTALACION-CON-IA.md](docs/INSTALACION-CON-IA.md) está escrita para que la siga una IA **y** la revises tú: incluye las verificaciones previas, los comandos exactos, cómo saber que todo salió bien, una tabla de problemas frecuentes y **reglas de seguridad** que la IA debe respetar (por ejemplo, nunca desactivar Dry Run ni leer tus tokens).
 
-## Connections
+Ve a la sección [Prompt para pegar a tu IA](docs/INSTALACION-CON-IA.md#prompt-para-pegar-a-tu-ia), copia el bloque, reemplaza `<URL del repositorio>` y pégalo en tu asistente.
 
-Create a connection from the Connections view with a name, provider mode, optional App ID, Graph API version, and an access token. The token is sent once and not shown again.
+Si una IA va a **modificar el código**, debe leer además [AGENTS.md](AGENTS.md).
 
-- **Instagram Login** (`graph.instagram.com`): discovery reads the token's own identity (`/me`, id/username/account type) and yields one account.
-- **Facebook Login** (`graph.facebook.com`): discovery lists the Pages the token can access (`/me/accounts`) and the Instagram Business accounts linked to them.
+## Abrir la aplicación
 
-Use "Probar y descubrir" to validate the token and list candidate accounts, then select the account. Changing the token, App ID, or Graph version invalidates validation and pauses that connection's monitoring until it is revalidated. Before every real send the current token must still own the selected account. Disconnect/delete keep history.
+- Dirección por defecto: <http://localhost:3000> (también sirve <http://127.0.0.1:3000>).
+- El servidor escucha **solo** en `127.0.0.1`. Cualquier otro nombre de host recibe un error `421 invalid_local_host`; no es accesible desde otras computadoras de tu red.
+- Para usar otro puerto, define `PORT` (la forma de definir una variable depende de la terminal):
 
-An optional explicit action imports a connection from the fixed parent-directory `.env`; no client-supplied path is accepted.
+  ```bash
+  # Linux / macOS (bash, zsh)
+  PORT=3310 npm start
+  ```
 
-## Monitoring versus catch-up (backlog)
+  ```powershell
+  # Windows PowerShell
+  $env:PORT = "3310"; npm start
+  ```
 
-Scan progress: `GET /api/backlog/jobs/:id` now also returns `progress` `{ mediaDone, mediaTotal, pagesRead, commentsSeen, currentStartedAt? }`, aggregated across all accounts of the job and updated after every provider page (no secrets, nothing about what is read changes, no assumption about Meta ordering). The UI shows a determinate bar (`role="progressbar"`), elapsed time, a Cancel button and, when the job ends, a summary card built from the existing report fields. If you reload the page while a job runs, its id is kept in `sessionStorage` and polling resumes.
+  ```bat
+  :: Windows cmd
+  set PORT=3310
+  npm start
+  ```
 
-Pending review persistence: `GET /api/backlog/pending?accountId=<id>&limit=&offset=` (read-only, account REQUIRED and ownership-checked; default limit 50, max 200) returns `{ total, lastAnalyzedAt, items, limit, offset }`. Items are the stored `eligible` classifications from COMPLETE `backlog`/`catch_up` scans (the exact provenance rule `processEligible` enforces), excluding comments already in `queue_items`, comments past the 7-day private-reply window (server clock) and archived automations. Each item carries `username`, `commentText` (truncated to 280 chars), `matchedKeywords`, `analyzedAt` and a rendered `previewText`/`previewButtons` (no secrets, no raw provider payloads). The 'Revisión pendiente' screen loads it on open and after each analysis, so results survive reloads; the processing path is unchanged (`POST /api/backlog/process` with explicit IDs and `confirmed: true`) and the automation select auto-picks when the account has exactly one enabled automation. `GET /api/queue` items now also include `commentUsername` and a truncated `commentText`; the 'Ver' panel shows the message text and buttons, labelled `WOULD_SEND · No se envió (modo prueba)` for simulated items.
+  Y abre <http://localhost:3310>.
 
-Publications show a type badge, a short caption, the date and a comments link. Media captions and `media_type` (`IMAGE`, `VIDEO`, `CAROUSEL_ALBUM`; anything else is ignored) are fetched with the media list, stored in two nullable columns (schema v9, additive) and refreshed whenever you press "Actualizar publicaciones"; rows saved before the upgrade show "Sin texto · id corto" until refreshed. With exactly one account, the account filter selects it automatically (an explicit choice, including "Todas las cuentas", is never overridden); with several, Publicaciones asks you to pick one inline.
+- Modo desarrollo (recarga en caliente, solo para quien modifica el código): `npm run dev`.
+- Solo puede correr **una instancia por carpeta de datos**. Si intentas iniciar otra con la misma carpeta, se detiene con el error `Application data directory is already running or ownership is uncertain`. Si la aplicación se cerró de golpe, el bloqueo se recupera solo cuando el proceso anterior ya no existe. En macOS y Windows, si ese número de proceso fue reutilizado por otro programa, la aplicación no puede distinguirlo y se niega a arrancar; ver [Problemas frecuentes](docs/INSTALACION-CON-IA.md#problemas-frecuentes).
 
-- **Monitoring** is per account or for all accounts and is off by default (also after every restart). Enabling an automation records a monitoring cutoff of "now"; only comments after that cutoff are candidates. The scheduler polls every 60 seconds by default, checks the first comment page each tick, and continues a saved cursor over later ticks. Coverage is reported as partial until pagination ends.
-- **Catch-up / backlog scan** (windows 2h, 24h, 3d, 7d, custom) only reads and classifies comments. It never sends and never enqueues anything.
-- **Process eligible** is a separate, explicit, confirmed action. You select reviewed comment IDs and the server enqueues them only if each ID was classified `eligible` for that account and automation by a completed (not incomplete, not cancelled) backlog scan. If any ID fails that check, the whole request is rejected and nothing is enqueued. Switching Dry Run off never flushes old simulated items or backlog.
-- A scan that hits a repeated cursor, a provider error, or a page limit ends as incomplete and its classifications cannot be processed.
-- The comment author is read from Meta's top-level `username`, falling back to `from.username` (Meta often omits the former); with neither, the comment is `missing_author` and never eligible.
-- Private replies are only eligible within 7 days of the comment. Own comments, replies in a thread, comments without author/timestamp, and comments matching several automations are not eligible.
+## Variables de entorno
 
-## Automations
+Todas son opcionales. Sin ninguna, la aplicación usa el puerto `3000`, la carpeta `./data` y deja **desactivadas** las dos funciones opcionales (retención heredada e importación de `.env`).
 
-Each automation targets one media item of one account (or, if general, all publications of the account; see below), with one or more keywords (matching ignores case, accents, and extra spacing), a match mode (`contains` matches whole phrases; `exact` requires the whole comment to equal the keyword), a reply template, and up to two HTTPS buttons (title up to 20 characters). An invalid match mode is rejected with a 400; if omitted on create it defaults to `contains`.
+| Variable | Por defecto | Para qué sirve |
+| --- | --- | --- |
+| `PORT` | `3000` | Puerto local (siempre en `127.0.0.1`). |
+| `LOCAL_SOCIAL_DATA_DIR` | `./data` | Carpeta de datos (base de datos, `vault.key`, bloqueo de instancia). |
+| `SOCIAL_DESK_IMPORT_ENV_PATH` | sin definir: **importación desactivada** | Ruta del único archivo `.env` que puede leer el botón «Importar .env del proyecto» (Ajustes). Solo se leen variables permitidas de Meta (`INSTAGRAM_ACCESS_TOKEN`, `META_APP_ID`, `GRAPH_API_VERSION`, …); el token se guarda cifrado. Sin la variable, el botón no aparece y Ajustes muestra cómo activarlo. |
+| `SOCIAL_DESK_LEGACY_ACCOUNTS_DIR` | sin definir: **no se lee ninguna carpeta** | Solo si usaste antes otra herramienta que guarda una carpeta por cuenta con `run.lock` y contadores de rechazos (`rejection-counter.json` y similares). Con ella, una cuenta con bloqueo o historial de rechazos empieza retenida y no envía hasta que reconozcas su historial; mientras envía, la aplicación crea y respeta `run.lock` en esa carpeta. |
+| `SOCIAL_DESK_LEGACY_HOLD_USERNAMES` | vacía | Lista separada por comas de cuentas (`cuenta_uno,cuenta_dos`) que empiezan **retenidas** al seleccionarlas, aunque no haya contador; se liberan con «Revisar estado y reconocer» en Conexiones. |
 
-### General (account-wide) automations
+Las rutas relativas se resuelven desde la carpeta donde inicias el servidor; en las dos rutas `SOCIAL_DESK_*`, `~/` se expande a tu carpeta personal. Un nombre inválido en `SOCIAL_DESK_LEGACY_HOLD_USERNAMES` impide arrancar (falla de forma segura). Ejemplo en PowerShell: `$env:SOCIAL_DESK_IMPORT_ENV_PATH = "C:\ruta\a\.env"; npm start`.
 
-An automation has a **scope**. `media` (the default) targets one publication. `account` ("general", shown as "Todas las publicaciones (general)" in the form and with a "General" badge) targets every publication of that account, old and new, with the same keywords, match mode, template and 0–2 buttons. API: `POST /api/automations` with `scope: "account"` and `mediaId` omitted or `null` (a `mediaId` with `scope: "account"`, a missing/null `mediaId` without it, or an unknown scope is a 400). DTOs expose `scope`; a general automation has `mediaId: null`. Editing (`PUT`) keeps the stored scope: sending a different `scope`, or a `mediaId` for a general automation, is rejected with 409 so history is never reparented; create a new automation instead.
+## Primeros pasos
 
-- **Precedence:** a publication with its own enabled, non-archived automation is handled only by that automation; the general automation applies only to publications without one (it yields). Paused, disabled or archived specific automations do not count, so the general one applies there. The same rule is used when scanning/classifying, in "Revisión pendiente", when enqueueing (`enqueueReviewed`) and in the pre-send recheck: a queued general item whose publication gained its own enabled automation becomes `SKIPPED` (reason `yielded_to_media_automation`) before any intent or POST. Two *enabled* automations that both claim the same comment (two specifics on one publication, or two generals) still make it ambiguous and require review.
-- **Only new comments:** like any automation, monitoring uses the activation time as cutoff, so only comments created after "Activar" are candidates. The existing backlog of old publications is never auto-processed; review it explicitly in "Revisión pendiente" (analysis + "Procesar" with confirmation). The pending list shows the publication (date · type · short caption) next to the automation name.
-- **Monitoring cadence and limits:** specific automations keep the 60-second cadence. For a general automation the scheduler refreshes the account's publication list from Meta at most once every 5 minutes (the same page-one media request as "Actualizar publicaciones", so new publications are picked up), scans each covered publication at most once every 2 minutes (page one plus the existing bounded continuation), never-scanned publications first, and performs at most 25 general publication scans per tick across all accounts. A provider error stops further general scans of that account for the tick. These timestamps are in memory: after a restart the first tick refreshes and scans again (monitoring is off after restart anyway). Dry Run, real authorization, legacy hold, 7-day expiry, owner-replied, reply-thread, missing-author, own-comment, send spacing and `UNKNOWN_OUTCOME` rules are unchanged.
-- **Schema:** v10 rebuilds `automations` (SQLite cannot relax `NOT NULL` in place) to add `scope` and make `media_id` nullable, with `CHECK ((scope='media' AND media_id IS NOT NULL) OR (scope='account' AND media_id IS NULL))`. The rebuild runs in one transaction with foreign keys temporarily off (so `ON DELETE CASCADE` on keywords cannot fire), verifies `PRAGMA foreign_key_check` before committing, and restores foreign keys. Existing rows become `scope='media'` with all IDs unchanged; keywords, queue items, classifications and attempts keep their references. Back up `data/` before the first start of this version.
+El [manual de usuario](#manual-de-usuario-pdf) explica cada pantalla con capturas. En resumen:
 
-### Optional public reply (rotating variants)
+1. **Conexiones:** crea una conexión con un nombre, el tipo de inicio de sesión (Instagram Login o Facebook Login), la versión de Graph API y tu token de acceso (`TU_TOKEN`). El token se envía una sola vez y nunca se vuelve a mostrar.
+2. Pulsa **Probar y descubrir**, revisa las cuentas encontradas (por ejemplo `@tu_cuenta`) y selecciona la que quieres administrar.
+3. **Publicaciones:** pulsa **Actualizar publicaciones** para traer tus publicaciones.
+4. **Automatizaciones:** crea una regla (palabras clave, texto de respuesta, botones opcionales) y actívala. Solo los comentarios posteriores a la activación son candidatos.
+5. **Monitoreo:** enciéndelo por cuenta o para todas. **Siempre arranca apagado**, también después de cada reinicio.
+6. **Cola e historial:** con **Dry Run** activo, verás elementos `SIMULATED` («No se envió (modo prueba)»). Nada sale hacia Meta.
 
-An automation can also answer the commenter **publicly** under the comment, in addition to the private reply. Enable "Responder también públicamente al comentario" in the new-automation form or the edit dialog and enter one variant per line ("Variantes de la respuesta pública"); the form shows the variant count and two random rendered examples with a sample username. Cards show a "Respuesta pública · N variantes" badge. Repeating one text hundreds of times looks like spam, so a variant is picked per reply with rotation.
+> **Importante:** **Dry Run** está activo por defecto y su estado se conserva entre reinicios. Enviar mensajes reales exige, a la vez: desactivar Dry Run con confirmación, **Autorizar real** cada automatización con confirmación, una conexión y cuenta válidas y el Monitoreo encendido. Prueba primero con una cuenta y un comentario controlados.
 
-- **API:** `POST /api/automations` and `PUT /api/automations/:id` accept `publicReplyEnabled` (boolean) and `publicReplyVariants` (array of strings). Values are never coerced: a non-boolean flag, a non-array list, a non-string entry or an invalid variant is a 400; enabling requires at least one variant. On `PUT`, omitted fields keep the stored configuration (scope still cannot change). DTOs expose both fields.
-- **Variant rules:** at most 50 variants, each 1–300 characters after trimming, distinct after normalization (case, accents, spacing), total at most 10,000 characters. Only `{{username}}` and `{{keyword}}` (first matched keyword) are allowed; a literal `@{{username}}` mention is allowed, but links (`http(s)://`, `www.`) and any other `@handle` are rejected.
-- **Rotation:** for each account the last 3 used variants are avoided when the automation has more than 3 variants; otherwise only the immediately previous one is avoided (a single variant necessarily repeats). The exact rendered text is stored on the queue item, so history shows what was posted.
-- **Ordering guarantee — private first, public after, never the reverse:** the public step is only scheduled when the private reply was **accepted** (queue item `SENT` with a message ID), the automation has the public reply enabled with ≥ 1 variant, and global Dry Run is off. It becomes `PENDING` in the **same SQLite transaction** that records the accepted private reply, so a crash can never leave one without the other. A private failure, ambiguous result or skip never schedules a public reply.
-- **The private message is never repeated:** the public step has its own state (`public_reply_state`) and its own append-only attempt table (`public_reply_attempts`). No public outcome (failure, unknown, expiry, retry) changes the private item's `SENT` state or re-sends the private message.
-- **Processing:** the scheduler calls `QueueService.processPublicReply()` after the private step on every tick: at most one public reply per tick, one in flight at a time, never concurrently with a private send of the same account, and at least **20 seconds** between public reply intents (tracked separately from the 10-second private spacing). A durable intent (`SENDING` + `intent_recorded` event) is committed before the POST. Right before posting it re-checks: Dry Run off, account/connection valid and monitoring on, no send hold (and the legacy interlock, if configured), private item `SENT`. Conservatively, if the automation was paused, archived, lost real authorization or had its public reply turned off since the private send, the public reply becomes `SKIPPED`. If more than 24 hours passed since the private send it becomes `EXPIRED` (no POST).
-- **Failures and retries:** an ambiguous result (timeout, network/redirect error, 5xx, malformed body, accepted without reply ID, or a restart while `SENDING`) becomes `UNKNOWN_OUTCOME` and is **never** retried. A permission/OAuth rejection (Meta codes 3, 10, 102, 190, 200–299) is `FAILED` with code `public_reply_permission_denied` ("Falta el permiso para responder comentarios en esta conexión"). Rate limiting (HTTP 429 or Meta codes 4, 17, 32, 613) is provably unsent and is retried at most 3 attempts in total, never sooner than `Retry-After` (otherwise 30 s, 60 s, … capped at 15 minutes); a retry that would land after the 24 h window expires instead. Any other definitive rejection is `FAILED`.
-- **Manual retry:** a `FAILED` public reply (always a definitive rejection, so provably unpublished) shows "Reintentar respuesta pública" in the Queue "Ver" panel (`POST /api/queue/:id/public-reply/retry` with `{accountId}`; ownership checked, only `FAILED`, only within 24 h of the private send). It only resets the public step to `PENDING` and records a `manual_retry` event.
-- **Dry Run / simulated items:** the would-be public text is stored as an inert preview and shown as `WOULD_REPLY_PUBLIC · No se publicó (modo prueba)`; the provider is never called.
-- **Queue DTO:** `GET /api/queue` items include `publicReply: { state, text, attempts, nextAt, safeErrorCode, replyId, preview }` (or `null`); `GET /api/queue/:id/attempts` also returns `publicEvents`. Public states in the UI: Pendiente, Enviando, Publicada, Falló, Resultado desconocido, Omitida, Expirada.
-- **Meta API:** `POST /{ig-comment-id}/replies` with a JSON body `{ "message": "…" }` (never in the URL), response `{ "id": "<new comment id>" }`. Instagram Login uses `graph.instagram.com` with the Instagram user token and needs `instagram_business_basic` + `instagram_business_manage_comments`. Facebook Login uses `graph.facebook.com` with the account's Page token and needs `instagram_basic`, `instagram_manage_comments`, `pages_read_engagement` (and `ads_management`/`ads_read` for Business Manager roles). Meta only allows replies to top-level comments, not to hidden comments or live-video comments. Source: https://developers.facebook.com/docs/instagram-platform/comment-moderation and https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-comment/replies. **Whether your token has the comments permission is unknown until the first real attempt**; without it you will see `public_reply_permission_denied` and the private reply is unaffected.
-- **Interaction with "already answered" detection:** our own public reply is authored by the account, so a later scan classifies that root as `owner_replied` for future classification. It cannot affect the item that produced it: the private reply was already sent (and its pre-send check passed) before the public reply existed, and queue uniqueness prevents re-queueing the comment. Comments the account had already answered before queueing are still excluded.
-- **Schema v11 (additive):** `automations.public_reply_enabled`, `automations.public_reply_variants_json`; `queue_items.public_reply_state`, `public_reply_text`, `public_reply_attempts`, `public_reply_next_at`, `public_reply_variant`, `public_reply_selected_at`; append-only table `public_reply_attempts` with a unique index allowing at most one `accepted` event per queue item. Existing rows keep `public_reply_enabled=0` and no public state. Back up `data/` before the first start of this version. Startup recovery turns any public `SENDING` into `UNKNOWN_OUTCOME`.
+## Dónde viven tus datos
 
-Template variables: `{{username}}` (commenter), `{{comment}}`, `{{keyword}}` (the matched keyword), `{{account}}` (your account username), `{{media}}` (the post permalink, or the media ID if none is stored, truncated to 100 characters). A truncated caption (200 characters) is now stored for display only; templates do not use it. Any other variable is rejected when you save the automation. Rendered text is limited to 1000 characters.
-
-## Dry Run and real sends
-
-Dry Run is the default. In Dry Run (or for an automation not authorized for real sends) matched comments become `SIMULATED` queue items, which are inert.
-
-Real sending requires all of the following:
-
-1. Global Dry Run turned off, with explicit confirmation.
-2. The automation enabled and separately authorized for real sends ("Autorizar real", confirmed).
-3. Account, connection, and token still valid, and monitoring not paused.
-4. For accounts with a legacy hold (the imported `@modoverbo` account starts held): the legacy account lock must not be present, and you must acknowledge the historical counter version in the UI ("Revisar estado y reconocer"). The acknowledgement is bound to the observed counter version; if it changes, you must acknowledge again. The app never modifies or deletes the legacy lock or counter files (read from `~/.local/share/gestor-instagram/accounts`), and it takes the lock only for the duration of its own send.
-5. Items queued under an older automation template version are not sent after the automation is edited.
-
-Before each POST the app commits an immutable send-attempt intent to the database, then re-fetches the comment and re-checks eligibility. Sends are serialized with a minimum 10 second spacing between attempts (default).
-
-## Queue states
-
-| State | Meaning |
+| Qué | Dónde |
 | --- | --- |
-| `SIMULATED` | Created in Dry Run or for a non-real automation. Never sent. |
-| `QUEUED` | Waiting to be sent in real mode. |
-| `SEND_INTENT_RECORDED` / `SENDING` | Intent committed; a POST is in flight or was interrupted. |
-| `SENT` | Meta accepted the send and returned a message ID; a read-back is attempted and its result is recorded as an event. |
-| `FAILED_RETRYABLE` | Provider rate limit (HTTP 429) or comment-refresh failure; retried with bounded backoff, never shorter than a provider `Retry-After`, local delay capped at 15 minutes. After 5 attempts it becomes `FAILED_PERMANENT`. |
-| `FAILED_PERMANENT` | Definitive provider rejection or retries exhausted. |
-| `UNKNOWN_OUTCOME` | The result is ambiguous (timeout, malformed or server failure after dispatch, accepted without message ID, or a restart after intent). Never retried automatically. |
-| `SKIPPED` | Re-check before sending found it no longer allowed. |
-| `EXPIRED` | The comment is at or past the 7-day private-reply window (conservative boundary). Assigned (a) just before a send, after the fresh comment read and before any send intent, so no POST occurs; (b) by a bounded, idempotent sweep (`QueueService.expireStale`) run at startup and on every scheduler tick over `QUEUED`, `FAILED_RETRYABLE` and `SIMULATED` items; and (c) when a retry would land after the window. It never touches `SENT`, `SENDING`, `SEND_INTENT_RECORDED`, `UNKNOWN_OUTCOME` or `FAILED_PERMANENT`. The reason code `private_reply_window_elapsed` is stored on the item; no attempt event is written because nothing was sent. Backlog scan reports count such comments separately as `expiredCount`. |
+| Carpeta de datos | `./data` (relativa a la carpeta desde donde inicias el servidor). Cámbiala con `LOCAL_SOCIAL_DATA_DIR=/ruta/absoluta`. Está en `.gitignore`. |
+| Base de datos | `<carpeta de datos>/social-automation.sqlite` (más sus archivos `-wal` y `-shm`). |
+| Llave de la bóveda | `<carpeta de datos>/vault.key`: llave maestra aleatoria AES-256-GCM de 32 bytes, guardada fuera de la base de datos. |
+| Bloqueo de instancia | `<carpeta de datos>/.application-owner.json` (se borra al cerrar normalmente). |
 
-### Read-back of SENT messages
+La carpeta de datos se crea con permisos `0700` y los archivos con `0600`. Los tokens se guardan cifrados con `vault.key` y nunca se devuelven al navegador.
 
-After Meta accepts a send, one read-back is attempted and recorded as a `readback` event. The sender is accepted when Meta reports either the account's provider id or its own username (compared with the same normalization used elsewhere), because Meta can report the Instagram account id instead of the app-scoped id from Instagram Login. The message id must still match and a recipient must be present. For button messages the real `attachments.data[].generic_template` shape (title and `cta` buttons) is compared with what was sent; the event records only `observedMatches` and a short `matchReason` (`match`, `text_mismatch`, `buttons_mismatch`, `content_unavailable`), never the raw payload, and a mismatch never triggers a resend or state change. When the read fails, the real safe code (for example `meta_readback_mismatch`, `http_5xx`, `timeout`) is stored; `readback_unavailable` is only the fallback.
+Ejemplo con otra carpeta de datos:
 
-In the Queue view, a `SENT` item has a "Verificar lectura" button (`POST /api/queue/:id/readback` with `{accountId}`, same CSRF/Origin guards). It reads the accepted message once, appends another `readback` event, and returns `{observed, safeErrorCode?, matches?}`. It never sends, never changes the item state, and is limited to one call per item every 30 seconds (HTTP 429 `readback_rate_limited`; the limit is in memory and resets on restart).
+```bash
+LOCAL_SOCIAL_DATA_DIR="$HOME/social-desk-datos" npm start      # Linux / macOS
+```
 
-### Resolving UNKNOWN_OUTCOME
+```powershell
+$env:LOCAL_SOCIAL_DATA_DIR = "$HOME\social-desk-datos"; npm start   # Windows PowerShell
+```
 
-The app never re-sends these items and has no control to change their state. To resolve one: open its attempt history (Queue view) to see the recorded events, then check on the Instagram side (for example, the recipient's conversation) whether the message arrived. If it did not, treat the comment as handled manually or create a fresh trigger; do not expect the app to retry. Read-back of a message ID is not proof of how it rendered or whether buttons were clicked.
+En Windows, los permisos `0700`/`0600` no se aplican: protege la carpeta con los permisos de tu usuario de Windows.
 
-## Rate limiting
+> **Importante:** si falta `vault.key` y la base de datos tiene credenciales cifradas, la aplicación **se niega a arrancar** a propósito. Nunca crea una llave nueva en silencio ni sobrescribe la base. **No borres ni regeneres `vault.key`:** restáurala desde tu copia de seguridad.
 
-Defaults are conservative local settings, not a guarantee that Meta will accept the volume: polling every 60 seconds, 10 seconds minimum between send intents, one send at a time, bounded retries as above. Meta's actual limits depend on your app and account; the app records usage headers it sees but does not enforce Meta's quotas.
+## Copias de seguridad y qué nunca compartir
 
-## Known limitations
+- Respalda **toda** la carpeta de datos (base de datos **y** `vault.key` juntas), **con la aplicación detenida**. Una base sin su llave no puede descifrar los tokens, y la llave sola no sirve de nada.
+- Haz una copia **antes de actualizar**: la base de datos se migra sola al arrancar una versión nueva y no se puede volver atrás.
+- Si perdiste la llave, mueve la carpeta de datos a otro lugar y vuelve a crear las conexiones con tokens nuevos.
 
-- Single user, single machine, loopback only; no authentication beyond local access and the CSRF token.
-- No TikTok, cloud deployment, queue infrastructure, or AI features.
-- Captions are stored (display only, truncated to 200 characters), but `{{media}}` is still a permalink or ID.
-- No in-app resolution of `UNKNOWN_OUTCOME` items.
-- Only the first page of comments is checked each monitoring tick; deep history is covered gradually or by a backlog scan, and may remain partial.
-- Already-answered roots: a root comment is excluded from private replies (reason `owner_replied`, shown as "Ya respondido por la cuenta", counted under review) when the locally stored comments contain a reply to it authored by the connected account's own username (case-insensitive, same account only). Detection relies on replies stored by earlier scans; a reply created after the last scan is unknown until the next scan, so run a fresh scan right before processing. There is no live send-time API check of replies. The queue pre-send recheck uses the same stored replies and moves such an item to `SKIPPED` (reason `owner_replied`) before any send intent or POST.
-- Private reply behavior (permissions, 24h/7d rules, button rendering) depends on Meta and must be verified on a real controlled comment before any wider use.
-- The legacy lock/counter adapter reads a fixed local path.
+**Nunca compartas, subas a git ni pegues en un chat (tampoco a una IA):**
+
+- `data/vault.key` ni ningún archivo de la carpeta de datos.
+- Tus tokens de acceso de Meta ni archivos `.env`.
+- Capturas de pantalla o registros que muestren tokens o identificadores de tus cuentas.
+
+Quien tenga la base de datos **y** la llave puede leer tus tokens. Si alguien con acceso a tu usuario del sistema operativo puede leer esos archivos, la aplicación no te protege de eso.
+
+## Actualizar a una versión nueva
+
+1. Detén la aplicación (`Ctrl+C`).
+2. Respalda la carpeta de datos completa (por ejemplo `cp -a data "data-respaldo-$(date +%Y%m%d)"` en Linux/macOS, o `Copy-Item -Recurse data data-respaldo` en PowerShell).
+3. Ejecuta:
+
+   ```bash
+   git pull
+   npm install
+   npm run build
+   npm start
+   ```
+
+Al arrancar, la base de datos se migra automáticamente al esquema nuevo. Una versión anterior de la aplicación **no puede abrir** una base ya migrada (se detiene con `Database schema version … is newer than supported version …`); por eso la copia del paso 2 es tu única forma de volver atrás. La guía para IA incluye un [prompt para actualizar](docs/INSTALACION-CON-IA.md#prompt-para-actualizar-a-la-última-versión).
+
+> **Cambio en esta versión:** la importación de `.env` ya no lee un archivo fijo junto al proyecto y la retención heredada ya no tiene cuentas definidas en el código. Si usabas alguna de las dos, define `SOCIAL_DESK_IMPORT_ENV_PATH`, `SOCIAL_DESK_LEGACY_ACCOUNTS_DIR` o `SOCIAL_DESK_LEGACY_HOLD_USERNAMES` antes de iniciar (ver [Variables de entorno](#variables-de-entorno)). Los reconocimientos guardados en la base se conservan.
+
+## Manual de usuario (PDF)
+
+- Manual con capturas de todas las pantallas: [docs/manual/Manual-Social-Desk.pdf](docs/manual/Manual-Social-Desk.pdf).
+- Para regenerarlo desde `docs/manual/manual.html` (necesitas Google Chrome; usa otro navegador con `CHROME=/ruta/al/navegador`):
+
+  ```bash
+  bash docs/manual/build-pdf.sh
+  ```
+
+- Las capturas se regeneran con datos 100 % ficticios; ver [docs/manual/tools/README.md](docs/manual/tools/README.md).
+
+## Documentación técnica
+
+- [docs/REFERENCIA-TECNICA.md](docs/REFERENCIA-TECNICA.md): arquitectura, esquema y migraciones, estados de la cola, programador, revisión pendiente, lectura de comprobación, respuesta pública, automatizaciones generales, modelo de seguridad y limitaciones conocidas.
+- [AGENTS.md](AGENTS.md): convenciones e invariantes para agentes de IA (y personas) que modifican el código.
+- [docs/INSTALACION-CON-IA.md](docs/INSTALACION-CON-IA.md): instalación paso a paso y solución de problemas.
+
+## Contribuir y ejecutar las pruebas
+
+```bash
+npm test            # pruebas con node:test sobre bases de datos temporales
+npm run typecheck   # verificación de tipos con TypeScript
+```
+
+- Las pruebas nunca tocan `./data` ni llaman a Meta: usan carpetas temporales y proveedores simulados.
+- `npm test` funciona igual en Windows: el propio Node expande el patrón `tests/*.test.ts`.
+- `tests/server.test.ts` levanta el servidor en modo desarrollo en puertos libres elegidos al azar; si tienes un `npm run dev` abierto en la misma carpeta, Next.js lo rechaza con `Another next dev server is already running in this directory.` Detén el servidor de desarrollo antes de correr las pruebas.
+- El proyecto sigue TDD: primero una prueba que falla, luego el código. Lee [AGENTS.md](AGENTS.md) antes de enviar cambios.
+
+## Licencia
+
+Este repositorio **todavía no tiene un archivo de licencia**. Mientras no exista, se aplican los derechos de autor por defecto: puedes ver el código, pero no hay permiso explícito para reutilizarlo o redistribuirlo. La persona dueña del proyecto debe agregar un archivo `LICENSE` con la licencia que elija.

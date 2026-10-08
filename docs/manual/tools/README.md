@@ -1,21 +1,37 @@
-# Manual demo tooling
+# Herramientas de demostración del manual
 
-Regenerates the 21 screenshots in `docs/manual/images/` from a throwaway DEMO instance with 100% synthetic data
-(fake provider, no network, no real data).
+Regeneran las 21 capturas de `docs/manual/images/` a partir de una instancia **DEMO** desechable con datos 100 % ficticios (proveedor falso, sin red, sin datos reales).
 
-```
+```bash
 node docs/manual/tools/capture.mjs
 ```
 
-Needs Node 24 and `/usr/bin/google-chrome` (override with `CHROME_BIN`). Takes about one minute. Add `CAPTURE_DEBUG=1` to see server logs.
+Requisitos: Node 24 (≥ 24.21.0), una compilación al día en `.next` (`npm run build`) y Google Chrome en `/usr/bin/google-chrome` (cámbialo con `CHROME_BIN=/ruta/al/navegador`). Tarda alrededor de un minuto. Agrega `CAPTURE_DEBUG=1` para ver los registros del servidor.
 
-What it does:
+## Qué hace
 
-1. Creates temp data dirs under `/tmp` and starts `demo-server.ts` on port **3100** (production mode, reuses the existing `.next` build; never runs `next build`).
-2. Phase A (empty DB): drives the real UI through first run, connection, discovery and account selection (images 01-04).
-3. Phase B: `seed-demo.ts` fills a second temp dir (connection, 60 comments, automations, queue in varied states, a complete scan), the server restarts on it and the rest is captured (05-21), including the switch to real mode and back.
-4. Stops only the processes it started and deletes the temp dirs and the Chrome profile.
+1. Crea carpetas de datos temporales en `/tmp` e inicia `demo-server.ts` en el puerto **3100** (modo producción; reutiliza la compilación de `.next` existente y nunca ejecuta `next build`).
+2. **Fase A** (base vacía): recorre la interfaz real en el primer uso: conexión, descubrimiento y selección de cuenta (capturas 01–04).
+3. **Fase B:** `seed-demo.ts` llena una segunda carpeta temporal (conexión, 60 comentarios, automatizaciones, cola con estados variados y un escaneo completo), el servidor se reinicia sobre ella y se captura el resto (05–21), incluido el paso a modo real y la vuelta a Dry Run.
+4. Detiene solo los procesos que inició y borra las carpetas temporales y el perfil de Chrome.
 
-Files: `demo-provider.ts` (fake provider, never touches the network), `demo-server.ts` (copy of `server.ts` wired to it; refuses to start unless `LOCAL_SOCIAL_DATA_DIR` is under `/tmp`, refuses port 3000), `seed-demo.ts`, `capture.mjs`.
+## Archivos
 
-Never point these at `./data` or port 3000. If the UI changes, rebuild the app (`npm run build`, by the owner) and re-run the capture.
+| Archivo | Función |
+| --- | --- |
+| `demo-provider.ts` | Proveedor falso; nunca toca la red. |
+| `demo-server.ts` | Copia de `server.ts` conectada al proveedor falso, con la importación de `.env` y la retención heredada desactivadas (como en una instalación por defecto). Se niega a arrancar si `LOCAL_SOCIAL_DATA_DIR` no está bajo `/tmp` y rechaza el puerto 3000. |
+| `seed-demo.ts` | Carga los datos ficticios de la fase B. |
+| `capture.mjs` | Orquesta el servidor demo y Chrome sin cabeza (protocolo DevTools) y guarda las capturas. |
+
+> **Importante:** nunca apuntes estas herramientas a `./data` ni al puerto 3000. Si cambia la interfaz, vuelve a compilar la aplicación (`npm run build`, en una carpeta donde no corra la instancia real o a cargo de la persona dueña) y repite la captura.
+
+## Generar el PDF
+
+Después de regenerar las capturas, vuelve a generar el manual en PDF desde `docs/manual/manual.html`:
+
+```bash
+bash docs/manual/build-pdf.sh
+```
+
+El script usa Google Chrome sin cabeza (`CHROME=/ruta/al/navegador` para otro) y escribe `docs/manual/Manual-Social-Desk.pdf`; acepta opcionalmente otra ruta de salida como primer argumento.
