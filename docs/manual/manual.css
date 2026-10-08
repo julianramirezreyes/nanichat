@@ -65,8 +65,8 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body);
-  font-size: 10.5pt;
-  line-height: 1.55;
+  font-size: 10pt;
+  line-height: 1.5;
   hyphens: auto;
   counter-reset: figure;
 }
@@ -253,7 +253,7 @@ h2 + *, h3 + *, h4 + * { break-before: avoid; page-break-before: avoid; }
 
 .toc > ol > li {
   border-bottom: 1px dotted var(--line);
-  padding: 1.6mm 0;
+  padding: 0.9mm 0;
   break-inside: avoid;
 }
 
@@ -272,8 +272,8 @@ h2 + *, h3 + *, h4 + * { break-before: avoid; page-break-before: avoid; }
 }
 
 .toc ol ol {
-  margin: 0.8mm 0 0 12mm;
-  font-size: 9pt;
+  margin: 0.4mm 0 0 12mm;
+  font-size: 8.5pt;
   color: var(--ink-soft);
   columns: 2;
   column-gap: 8mm;
@@ -377,7 +377,7 @@ ul.checklist > li::before {
 /* ---------- Figuras ---------- */
 
 figure {
-  margin: 2mm 0 6mm;
+  margin: 2mm 0 5mm;
   padding: 0;
   break-inside: avoid;
   page-break-inside: avoid;
@@ -388,7 +388,7 @@ figure {
 figure img {
   display: block;
   max-width: 100%;
-  max-height: 150mm;
+  max-height: 118mm;
   height: auto;
   margin: 0 auto;
   border: 1px solid var(--line);
@@ -397,7 +397,7 @@ figure img {
   object-fit: contain;
 }
 
-figure.narrow img { max-width: 75mm; max-height: 160mm; }
+figure.narrow img { max-width: 60mm; max-height: 135mm; }
 
 figcaption {
   font-size: 8.8pt;

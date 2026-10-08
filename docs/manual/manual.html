@@ -1,0 +1,1607 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Social Desk — Manual de usuario</title>
+  <meta name="description" content="Manual de usuario de Social Desk: instalación, acceso a la API de Meta y uso diario de la automatización de respuestas privadas a comentarios de Instagram.">
+  <link rel="stylesheet" href="manual.css">
+</head>
+<body>
+<div class="sheet">
+
+<!-- ===================== PORTADA ===================== -->
+<section class="cover" aria-label="Portada">
+  <div class="cover-top">
+    <div class="cover-mark" aria-hidden="true">S</div>
+    <h1>Social Desk — Manual de usuario</h1>
+    <p class="subtitle">Responde por mensaje privado, de forma automática y segura, a quienes comentan tus publicaciones de Instagram. Todo funciona en tu propio computador.</p>
+  </div>
+  <div>
+    <div class="cover-band">
+      <div><strong>Versión de la app</strong>0.1.0</div>
+      <div><strong>Edición del manual</strong>Octubre de 2026</div>
+      <div><strong>Para quién</strong>Personas sin conocimientos técnicos que usan la app en su equipo</div>
+    </div>
+    <p class="cover-foot">Social Desk es una herramienta local de un solo usuario. Este manual no está afiliado a Meta, Instagram ni Facebook. Los nombres de botones del panel de Meta cambian con frecuencia: sigue siempre la documentación oficial enlazada en cada capítulo.</p>
+  </div>
+</section>
+
+<!-- ===================== ÍNDICE ===================== -->
+<nav class="toc" aria-labelledby="toc-title">
+  <h1 id="toc-title">Índice</h1>
+  <ol>
+    <li><a href="#cap1"><span class="toc-num">1</span>Qué es Social Desk y cómo funciona</a>
+      <ol><li><a href="#cap1-flujo">El recorrido de un comentario</a></li><li><a href="#cap1-puede">Lo que puede y no puede hacer</a></li><li><a href="#cap1-reglas">Las reglas de Meta</a></li></ol></li>
+    <li><a href="#cap2"><span class="toc-num">2</span>Antes de empezar</a>
+      <ol><li><a href="#cap2-req">Requisitos</a></li><li><a href="#cap2-quien">Quién puede usarla hoy</a></li><li><a href="#cap2-limites">Límites honestos</a></li></ol></li>
+    <li><a href="#cap3"><span class="toc-num">3</span>Instalación y arranque</a>
+      <ol><li><a href="#cap3-node">Instalar Node.js</a></li><li><a href="#cap3-instalar">Instalar la app</a></li><li><a href="#cap3-arrancar">Arrancar y detener</a></li><li><a href="#cap3-datos">Dónde viven tus datos</a></li><li><a href="#cap3-copias">Copias de seguridad</a></li></ol></li>
+    <li><a href="#cap4"><span class="toc-num">4</span>Conseguir el acceso a Instagram (Instagram Login)</a>
+      <ol><li><a href="#cap4-req">Requisitos</a></li><li><a href="#cap4-app">Crear la app de Meta</a></li><li><a href="#cap4-token">Generar el token</a></li><li><a href="#cap4-renovar">Duración y renovación</a></li></ol></li>
+    <li><a href="#cap5"><span class="toc-num">5</span>Conseguir el acceso con Facebook (Facebook Login)</a>
+      <ol><li><a href="#cap5-req">Requisitos</a></li><li><a href="#cap5-permisos">Permisos</a></li><li><a href="#cap5-token">Obtener el token</a></li><li><a href="#cap5-largo">Tokens de larga duración</a></li></ol></li>
+    <li><a href="#cap6"><span class="toc-num">6</span>Modo desarrollo, Live y revisión de Meta</a></li>
+    <li><a href="#cap7"><span class="toc-num">7</span>Recorrido por la app</a></li>
+    <li><a href="#cap8"><span class="toc-num">8</span>Crear la conexión</a></li>
+    <li><a href="#cap9"><span class="toc-num">9</span>Publicaciones</a></li>
+    <li><a href="#cap10"><span class="toc-num">10</span>Automatizaciones</a>
+      <ol><li><a href="#cap10-tipos">Específica o general</a></li><li><a href="#cap10-palabras">Palabras clave</a></li><li><a href="#cap10-plantilla">Plantilla y variables</a></li><li><a href="#cap10-botones">Botones</a></li><li><a href="#cap10-publica">Respuesta pública</a></li><li><a href="#cap10-gestionar">Activar, editar, pausar, archivar</a></li></ol></li>
+    <li><a href="#cap11"><span class="toc-num">11</span>Revisión pendiente</a></li>
+    <li><a href="#cap12"><span class="toc-num">12</span>Monitoreo</a></li>
+    <li><a href="#cap13"><span class="toc-num">13</span>Cola e historial</a></li>
+    <li><a href="#cap14"><span class="toc-num">14</span>De modo prueba a modo real</a></li>
+    <li><a href="#cap15"><span class="toc-num">15</span>Seguridad y privacidad</a></li>
+    <li><a href="#cap16"><span class="toc-num">16</span>Solución de problemas</a></li>
+    <li><a href="#cap17"><span class="toc-num">17</span>Preguntas frecuentes</a></li>
+    <li><a href="#cap18"><span class="toc-num">18</span>Glosario</a></li>
+    <li><a href="#anexo"><span class="toc-num">A</span>Anexo: fuentes oficiales y límites conocidos</a></li>
+  </ol>
+</nav>
+
+<!-- ===================== CAPÍTULO 1 ===================== -->
+<section class="chapter" id="cap1" aria-labelledby="cap1-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 1</span>
+    <h1 id="cap1-title">Qué es Social Desk y cómo funciona</h1>
+    <p class="lead">Una herramienta que vigila los comentarios de tus publicaciones de Instagram y, cuando alguien escribe una palabra clave, le responde por mensaje privado.</p>
+  </header>
+
+  <p>Seguramente has visto publicaciones que dicen «comenta <em>GUÍA</em> y te la envío por mensaje». Social Desk hace ese trabajo por ti. Tú decides qué publicaciones vigilar, qué palabras activan la respuesta y qué mensaje se envía. La app se encarga de revisar los comentarios, preparar el mensaje y enviarlo respetando las reglas de Meta.</p>
+  <p>Todo funciona en <strong>tu propio computador</strong>. No hay servidores en la nube ni cuentas de Social Desk. Tus tokens y tus datos se quedan en tu equipo, cifrados.</p>
+
+  <h2 id="cap1-flujo">El recorrido de un comentario</h2>
+  <p>Este es el camino que sigue cada comentario, de principio a fin:</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 250" role="img" aria-labelledby="flow-title flow-desc" xmlns="http://www.w3.org/2000/svg">
+      <title id="flow-title">Flujo de un comentario en Social Desk</title>
+      <desc id="flow-desc">Cinco pasos: comentario, detección, cola, mensaje privado y respuesta pública opcional. En modo prueba el flujo se detiene en la cola como elemento simulado.</desc>
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f4fb4"/>
+        </marker>
+      </defs>
+      <g font-family="Noto Sans, Arial, sans-serif" text-anchor="middle">
+        <rect x="5" y="20" width="150" height="120" rx="12" fill="#e8edfb" stroke="#2f4fb4" stroke-width="2"/>
+        <text x="80" y="50" font-size="15" font-weight="700" fill="#2f4fb4">1 · Comentario</text>
+        <text x="80" y="78" font-size="12" fill="#1d2433">Alguien comenta</text>
+        <text x="80" y="95" font-size="12" fill="#1d2433">tu publicación con</text>
+        <text x="80" y="112" font-size="12" fill="#1d2433">una palabra clave</text>
+
+        <rect x="190" y="20" width="150" height="120" rx="12" fill="#e8edfb" stroke="#2f4fb4" stroke-width="2"/>
+        <text x="265" y="50" font-size="15" font-weight="700" fill="#2f4fb4">2 · Detección</text>
+        <text x="265" y="78" font-size="12" fill="#1d2433">El monitoreo lo lee</text>
+        <text x="265" y="95" font-size="12" fill="#1d2433">(cada 1–2 min) y</text>
+        <text x="265" y="112" font-size="12" fill="#1d2433">revisa las reglas</text>
+
+        <rect x="375" y="20" width="150" height="120" rx="12" fill="#e8edfb" stroke="#2f4fb4" stroke-width="2"/>
+        <text x="450" y="50" font-size="15" font-weight="700" fill="#2f4fb4">3 · Cola</text>
+        <text x="450" y="78" font-size="12" fill="#1d2433">Se crea un elemento</text>
+        <text x="450" y="95" font-size="12" fill="#1d2433">«En cola» o, en modo</text>
+        <text x="450" y="112" font-size="12" fill="#1d2433">prueba, «Simulado»</text>
+
+        <rect x="560" y="20" width="150" height="120" rx="12" fill="#e9f7ef" stroke="#1f7a4d" stroke-width="2"/>
+        <text x="635" y="50" font-size="15" font-weight="700" fill="#1f7a4d">4 · Mensaje privado</text>
+        <text x="635" y="78" font-size="12" fill="#1d2433">Se envía un DM</text>
+        <text x="635" y="95" font-size="12" fill="#1d2433">al autor (una sola</text>
+        <text x="635" y="112" font-size="12" fill="#1d2433">vez por comentario)</text>
+
+        <rect x="745" y="20" width="150" height="120" rx="12" fill="#ffffff" stroke="#1f7a4d" stroke-width="2" stroke-dasharray="6 4"/>
+        <text x="820" y="50" font-size="15" font-weight="700" fill="#1f7a4d">5 · Resp. pública</text>
+        <text x="820" y="78" font-size="12" fill="#1d2433">Opcional: se responde</text>
+        <text x="820" y="95" font-size="12" fill="#1d2433">bajo el comentario,</text>
+        <text x="820" y="112" font-size="12" fill="#1d2433">solo si el DM salió</text>
+
+        <line x1="157" y1="80" x2="186" y2="80" stroke="#2f4fb4" stroke-width="2.5" marker-end="url(#arrow)"/>
+        <line x1="342" y1="80" x2="371" y2="80" stroke="#2f4fb4" stroke-width="2.5" marker-end="url(#arrow)"/>
+        <line x1="527" y1="80" x2="556" y2="80" stroke="#2f4fb4" stroke-width="2.5" marker-end="url(#arrow)"/>
+        <line x1="712" y1="80" x2="741" y2="80" stroke="#2f4fb4" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+        <rect x="375" y="170" width="335" height="60" rx="10" fill="#fff6e6" stroke="#b26a00" stroke-width="1.5"/>
+        <text x="542" y="196" font-size="12.5" font-weight="700" fill="#b26a00">Modo prueba (Dry Run): el viaje termina en el paso 3.</text>
+        <text x="542" y="215" font-size="12" fill="#1d2433">Ves qué se habría enviado, pero nada sale de tu equipo.</text>
+        <line x1="450" y1="142" x2="450" y2="168" stroke="#b26a00" stroke-width="2" stroke-dasharray="4 3"/>
+      </g>
+    </svg>
+    <figcaption>Cada comentario pasa por cinco etapas. La respuesta pública solo ocurre después de que Meta aceptó el mensaje privado, nunca antes.</figcaption>
+  </figure>
+
+  <p>Además del vigilante automático (el <strong>monitoreo</strong>), existe un camino manual: la <strong>Revisión pendiente</strong>. Sirve para revisar comentarios que ya existían antes de activar una automatización y elegir, uno por uno, cuáles responder.</p>
+
+  <h2 id="cap1-puede">Lo que puede y no puede hacer</h2>
+  <div class="two-col">
+    <div class="card can">
+      <h4>Sí puede</h4>
+      <ul>
+        <li>Conectarse a una o varias cuentas profesionales de Instagram.</li>
+        <li>Detectar palabras clave en comentarios (sin importar mayúsculas ni tildes).</li>
+        <li>Enviar un mensaje privado con hasta dos botones con enlace.</li>
+        <li>Publicar, si quieres, una respuesta pública que rota entre varias frases.</li>
+        <li>Simular todo en modo prueba antes de enviar de verdad.</li>
+        <li>Guardar un historial completo de lo que pasó con cada comentario.</li>
+      </ul>
+    </div>
+    <div class="card cannot">
+      <h4>No puede</h4>
+      <ul>
+        <li>Funcionar con el computador apagado o la app cerrada.</li>
+        <li>Responder comentarios de más de 7 días (regla de Meta).</li>
+        <li>Enviar más de un mensaje privado por comentario.</li>
+        <li>Usarse con cuentas de otras personas sin la revisión de Meta (capítulo 6).</li>
+        <li>Trabajar con TikTok, Facebook (comentarios de páginas) u otras redes.</li>
+        <li>Garantizar que Meta acepte todos los envíos: Meta tiene la última palabra.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="cap1-reglas">Las reglas de Meta que debes conocer</h2>
+  <p>Social Desk usa la función oficial de Meta llamada <strong>respuesta privada</strong> (<em>private reply</em>). Según la documentación oficial de Meta, estas son sus reglas:</p>
+  <ul>
+    <li><strong>Un solo mensaje por comentario.</strong> Solo se puede enviar un mensaje a la persona que comentó.</li>
+    <li><strong>Ventana de 7 días.</strong> El mensaje debe enviarse dentro de los 7 días posteriores al comentario. En Instagram Live, solo durante la transmisión.</li>
+    <li><strong>Seguimiento solo si te responden.</strong> Solo puedes seguir la conversación si la persona contesta, y dentro de las 24 horas posteriores a su respuesta. Social Desk no envía mensajes de seguimiento.</li>
+    <li><strong>Bandeja de destino.</strong> Si la persona sigue tu cuenta, el mensaje llega a su bandeja de entrada principal. Si no te sigue, llega a la carpeta de <strong>Solicitudes</strong> de mensajes. El mensaje incluye un enlace a la publicación comentada.</li>
+    <li><strong>Límite de volumen.</strong> Meta permite hasta <strong>750 llamadas por hora por cuenta profesional</strong> para respuestas privadas a comentarios en publicaciones y reels. Social Desk va mucho más despacio a propósito (un envío como mínimo cada 10 segundos).</li>
+  </ul>
+
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Estas reglas son de Meta, no de la app. Meta puede cambiarlas. Si algo de este manual no coincide con lo que ves, la documentación oficial de Meta manda.</p>
+  </div>
+
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Meta recomienda avisar a las personas cuando interactúan con una respuesta automática, y en algunos lugares la ley lo exige. Un texto como «Este es un mensaje automático de @tu_cuenta» basta.</p>
+  </div>
+
+  <div class="sources">
+    <h3>Fuentes oficiales</h3>
+    <ul>
+      <li>Respuestas privadas: <a href="https://developers.facebook.com/documentation/instagram-platform/private-replies">developers.facebook.com/documentation/instagram-platform/private-replies</a></li>
+      <li>Información general de la plataforma (límites de mensajería y experiencias automatizadas): <a href="https://developers.facebook.com/documentation/instagram-platform/overview">developers.facebook.com/documentation/instagram-platform/overview</a></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 2 ===================== -->
+<section class="chapter" id="cap2" aria-labelledby="cap2-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 2</span>
+    <h1 id="cap2-title">Antes de empezar</h1>
+    <p class="lead">Lo que necesitas tener listo y lo que debes saber antes de instalar.</p>
+  </header>
+
+  <h2 id="cap2-req">Requisitos</h2>
+  <table>
+    <thead><tr><th style="width:32%">Necesitas</th><th>Detalle</th></tr></thead>
+    <tbody>
+      <tr><td>Un computador propio</td><td>Linux o macOS funcionan directamente. En Windows, usa WSL o Git Bash (ver capítulo 3). Debe quedar encendido mientras quieras que la app responda.</td></tr>
+      <tr><td>Node.js 24.21 o superior</td><td>Es el programa que ejecuta la app. Se instala una sola vez (capítulo 3).</td></tr>
+      <tr><td>Una cuenta profesional de Instagram</td><td>De tipo <strong>Empresa</strong> o <strong>Creador</strong>. Las cuentas personales no funcionan con la API de Meta. La cuenta debe ser pública.</td></tr>
+      <tr><td>Una cuenta de desarrollador de Meta</td><td>Gratuita. Se crea con tu cuenta de Facebook (capítulo 4).</td></tr>
+      <tr><td>Una app de Meta</td><td>No es una app que publiques: es el «registro» que Meta usa para darte permisos. Se crea en el panel de apps (capítulo 4).</td></tr>
+      <tr><td>Un token de acceso</td><td>Una clave larga que Meta te entrega. Se pega una sola vez en Social Desk.</td></tr>
+      <tr><td>Solo para Facebook Login</td><td>Una página de Facebook vinculada a tu cuenta profesional de Instagram (capítulo 5).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>¿Instagram Login o Facebook Login?</h3>
+  <p>Hay dos caminos para conectar tu cuenta. Elige uno:</p>
+  <table>
+    <thead><tr><th></th><th>Instagram Login (recomendado)</th><th>Facebook Login</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Necesita página de Facebook</strong></td><td>No</td><td>Sí, vinculada a la cuenta de Instagram</td></tr>
+      <tr><td><strong>Inicias sesión con</strong></td><td>Tu usuario de Instagram</td><td>Tu usuario de Facebook</td></tr>
+      <tr><td><strong>Token que pegas en la app</strong></td><td>Token de usuario de Instagram</td><td>Token de usuario de Facebook (la app obtiene el de la página)</td></tr>
+      <tr><td><strong>Servidor de Meta</strong></td><td><code>graph.instagram.com</code></td><td><code>graph.facebook.com</code></td></tr>
+      <tr><td><strong>Capítulo</strong></td><td><a href="#cap4">Capítulo 4</a></td><td><a href="#cap5">Capítulo 5</a></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="cap2-quien">Quién puede usarla hoy</h2>
+  <p>Social Desk es una <strong>herramienta local de un solo usuario</strong>. Está pensada para que tú administres <strong>tus propias cuentas</strong> (o las que gestionas directamente), desde tu computador.</p>
+  <ul>
+    <li>No tiene usuarios ni contraseñas propias: quien use tu computador puede usarla.</li>
+    <li>Solo responde desde la misma máquina (<code>localhost</code>). No se puede abrir desde otro equipo ni desde el celular por internet.</li>
+    <li>Para atender cuentas de <strong>otras personas o clientes</strong>, Meta exige revisión de la app y verificación del negocio. Lee el <a href="#cap6">capítulo 6</a> antes de intentarlo.</li>
+  </ul>
+
+  <h2 id="cap2-limites">Límites honestos</h2>
+  <ul>
+    <li><strong>No es instantánea.</strong> La app consulta a Meta periódicamente (cada 60 segundos, o cada 2 minutos para las automatizaciones generales). Una respuesta puede tardar unos minutos.</li>
+    <li><strong>Solo comentarios nuevos.</strong> Al activar una automatización, solo cuentan los comentarios posteriores a ese momento. Los anteriores se revisan a mano en <a href="#cap11">Revisión pendiente</a>.</li>
+    <li><strong>Revisión gradual.</strong> En cada ronda se lee la primera página de comentarios de cada publicación; el resto se cubre poco a poco. Con muchísimos comentarios, la cobertura puede quedar parcial.</li>
+    <li><strong>El monitoreo se apaga al reiniciar.</strong> Cada vez que cierras y abres la app, debes encenderlo de nuevo. Es una medida de seguridad.</li>
+    <li><strong>Los tokens caducan.</strong> La app no los renueva sola. Tú debes renovarlos (capítulos 4 y 5).</li>
+    <li><strong>Meta decide.</strong> Los permisos, la ventana de 7 días y cómo se ven los botones dependen de Meta. Pruébalo siempre con un comentario controlado antes de usarlo en serio.</li>
+  </ul>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad</span>
+    <p>La app viene en <strong>modo prueba (Dry Run)</strong> desde la primera vez que la abres, y el monitoreo arranca apagado en cada reinicio. Ojo: el modo que elijas (prueba o real) <strong>se conserva</strong> entre reinicios. Nada se envía de verdad hasta que tú enciendas, de forma explícita y con confirmación, varios interruptores. El <a href="#cap14">capítulo 14</a> explica cuáles.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 3 ===================== -->
+<section class="chapter" id="cap3" aria-labelledby="cap3-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 3</span>
+    <h1 id="cap3-title">Instalación y arranque</h1>
+    <p class="lead">Se hace una sola vez. Necesitarás abrir una terminal (la ventana donde se escriben comandos).</p>
+  </header>
+
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>¿Cómo abrir una terminal? En macOS, busca «Terminal» en Spotlight. En Linux, presiona <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> en la mayoría de sistemas. En Windows, abre «Ubuntu (WSL)» o «Git Bash». Copia los comandos tal cual y presiona <kbd>Enter</kbd> después de cada uno.</p>
+  </div>
+
+  <h2 id="cap3-node">Paso 1: instalar Node.js</h2>
+  <ol class="steps">
+    <li>Entra a <a href="https://nodejs.org">nodejs.org</a> y descarga la versión <strong>24.21 o superior</strong>.</li>
+    <li>Instálala como cualquier otro programa.</li>
+    <li>Comprueba la versión en la terminal:
+      <pre><code>node --version</code></pre>
+      Debe mostrar <code>v24.21.0</code> o un número mayor. Si sale un número menor, la app no arrancará: usa el almacenamiento integrado de Node que solo existe desde esa versión.</li>
+  </ol>
+
+  <h2 id="cap3-instalar">Paso 2: instalar la app</h2>
+  <ol class="steps">
+    <li>Copia la carpeta de Social Desk (por ejemplo, <code>social-automation</code>) en tu computador.</li>
+    <li>En la terminal, entra a esa carpeta. Por ejemplo:
+      <pre><code>cd ~/social-automation</code></pre></li>
+    <li>Instala las dependencias (descarga lo que la app necesita; tarda unos minutos):
+      <pre><code>npm install</code></pre></li>
+    <li>Prepara la versión optimizada de la interfaz:
+      <pre><code>npm run build</code></pre></li>
+  </ol>
+
+  <h2 id="cap3-arrancar">Paso 3: arrancar, abrir y detener</h2>
+  <p>Para el uso diario, arranca la app con:</p>
+  <pre><code>npm start</code></pre>
+  <p>Cuando la terminal muestre un mensaje como <code>Local app listening on http://127.0.0.1:3000</code>, abre tu navegador en:</p>
+  <pre><code>http://localhost:3000</code></pre>
+  <p>Existe también un modo de desarrollo, más lento pero que no necesita <code>npm run build</code>:</p>
+  <pre><code>npm run dev</code></pre>
+
+  <h3>Cambiar el puerto</h3>
+  <p>Si el puerto 3000 ya está ocupado por otro programa, elige otro con la variable <code>PORT</code>:</p>
+  <pre><code>PORT=3310 npm start</code></pre>
+  <p>Y abre entonces <code>http://localhost:3310</code>.</p>
+
+  <h3>Detener la app</h3>
+  <p>Vuelve a la terminal donde se está ejecutando y presiona <kbd>Ctrl</kbd>+<kbd>C</kbd>. Al detenerla, el monitoreo se apaga. La próxima vez que arranques tendrás que encenderlo otra vez.</p>
+
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <ul>
+      <li><strong>Deja la terminal abierta.</strong> Si cierras la ventana de la terminal, la app se detiene.</li>
+      <li><strong>El computador debe quedar encendido</strong> y sin entrar en suspensión. Si el equipo duerme, la app deja de revisar comentarios y de enviar mensajes.</li>
+      <li><strong>Solo una copia a la vez.</strong> Si intentas arrancar la app dos veces con la misma carpeta de datos, la segunda se bloquea a propósito.</li>
+      <li><strong>Windows:</strong> el comando <code>npm start</code> usa una sintaxis de Linux/macOS. En Windows ejecútalo dentro de WSL o Git Bash. Si no sabes cómo, pide ayuda a alguien de confianza.</li>
+    </ul>
+  </div>
+
+  <h2 id="cap3-datos">Dónde viven tus datos</h2>
+  <p>Todo se guarda en la carpeta <code>data/</code>, dentro de la carpeta de la app:</p>
+  <table>
+    <thead><tr><th style="width:38%">Archivo</th><th>Qué contiene</th></tr></thead>
+    <tbody>
+      <tr><td><code>data/social-automation.sqlite</code></td><td>La base de datos: conexiones (con el token cifrado), cuentas, publicaciones, automatizaciones, comentarios analizados, cola e historial.</td></tr>
+      <tr><td><code>data/vault.key</code></td><td>La <strong>llave</strong> que cifra y descifra tus tokens. Sin ella, los tokens guardados no se pueden leer.</td></tr>
+      <tr><td><code>data/.application-owner.json</code></td><td>Un candado que evita que se abran dos copias de la app a la vez.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Usuarios avanzados: la variable <code>LOCAL_SOCIAL_DATA_DIR</code> permite usar otra carpeta de datos. Al arrancar, la app restringe los permisos de la carpeta y de la llave para que solo tu usuario del sistema pueda leerlas.</p>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad — nunca compartas</span>
+    <ul>
+      <li>El archivo <code>data/vault.key</code>.</li>
+      <li>La carpeta <code>data/</code> completa (ni por correo, ni en la nube, ni en un repositorio).</li>
+      <li>Tus tokens de acceso de Meta, ni siquiera por chat con soporte.</li>
+      <li>El secreto de tu app de Meta (<em>App Secret</em>). Social Desk nunca te lo pide.</li>
+    </ul>
+    <p>Quien tenga la base de datos <strong>y</strong> la llave puede leer tus tokens y actuar en tu cuenta.</p>
+  </div>
+
+  <h2 id="cap3-copias">Copias de seguridad</h2>
+  <ol class="steps">
+    <li>Detén la app (<kbd>Ctrl</kbd>+<kbd>C</kbd>).</li>
+    <li>Copia la carpeta <code>data/</code> <strong>completa</strong> (base de datos y <code>vault.key</code> juntas) a un lugar privado, por ejemplo un disco externo cifrado.</li>
+    <li>Vuelve a arrancar la app.</li>
+  </ol>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>La base de datos sin su llave no sirve, y la llave sola tampoco. Guárdalas siempre juntas. Si pierdes <code>vault.key</code>, la app se niega a arrancar (nunca crea una llave nueva a escondidas ni borra tus datos). En ese caso, restaura la llave desde tu copia; si la perdiste del todo, mueve la carpeta <code>data/</code> a otro lugar, arranca de nuevo y vuelve a crear las conexiones con tokens nuevos.</p>
+  </div>
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Antes de instalar una versión nueva de Social Desk, haz siempre una copia de <code>data/</code>. Algunas versiones actualizan la estructura de la base de datos la primera vez que arrancan.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 4 ===================== -->
+<section class="chapter" id="cap4" aria-labelledby="cap4-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 4</span>
+    <h1 id="cap4-title">Conseguir el acceso a Instagram (Instagram Login)</h1>
+    <p class="lead">El camino recomendado: no necesitas página de Facebook. Al final tendrás un token de Instagram válido por 60 días.</p>
+  </header>
+
+  <div class="callout importante">
+    <span class="callout-title">Importante — los botones de Meta cambian</span>
+    <p>Meta modifica su panel de desarrolladores con frecuencia. Los pasos están escritos según <strong>lo que debes lograr</strong>, con los nombres que usa la documentación oficial. Si un botón tiene otro nombre, busca la opción equivalente. Este manual no incluye capturas del panel de Meta para no mostrarte pantallas que pueden estar desactualizadas.</p>
+  </div>
+
+  <h2 id="cap4-req">Requisitos</h2>
+  <ul class="checklist">
+    <li>Una cuenta de Instagram <strong>profesional</strong> (Empresa o Creador) y <strong>pública</strong>. Puedes cambiar una cuenta personal a profesional desde la configuración de Instagram.</li>
+    <li>Una cuenta de Facebook para registrarte como desarrollador de Meta.</li>
+    <li>Un teléfono y un correo a los que tengas acceso (Meta envía códigos de verificación).</li>
+  </ul>
+
+  <h2 id="cap4-dev">Paso A: registrarte como desarrollador de Meta</h2>
+  <ol class="steps">
+    <li>Inicia sesión en Facebook y entra a <a href="https://developers.facebook.com/async/registration">developers.facebook.com/async/registration</a> (o a <a href="https://developers.facebook.com/">developers.facebook.com</a> y busca el botón para empezar).</li>
+    <li>Acepta las Condiciones de la Plataforma y las Políticas para desarrolladores.</li>
+    <li>Verifica tu cuenta con el código que Meta envía a tu teléfono y a tu correo.</li>
+    <li>Elige la ocupación que mejor te describa.</li>
+  </ol>
+
+  <h2 id="cap4-app">Paso B: crear la app de Meta</h2>
+  <ol class="steps">
+    <li>En el panel de apps (<a href="https://developers.facebook.com/apps">developers.facebook.com/apps</a>), busca la opción para <strong>crear una app</strong>.</li>
+    <li>Escribe un nombre (por ejemplo «Social Desk de @tu_cuenta») y tu correo de contacto.</li>
+    <li>Elige el <strong>caso de uso</strong>. Busca el relacionado con <strong>administrar mensajes y contenido en Instagram</strong>. En versiones anteriores del panel, la documentación en español indica elegir el caso de uso <strong>Otro</strong> y luego el tipo de app <strong>Empresa</strong>. Elige lo que tu panel ofrezca para Instagram.</li>
+    <li>Cuando te pregunte por un <strong>portfolio comercial</strong>, puedes elegir no conectarlo por ahora si la app es solo para tu propia cuenta.</li>
+    <li>Revisa el resumen y entra al panel de tu nueva app.</li>
+  </ol>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Según Meta, los casos de uso <strong>no se pueden quitar</strong> después de crear la app. Si te equivocas, es más sencillo crear otra app. Meta limita a 15 el número de apps en las que puedes ser administrador o desarrollador si no tienes un negocio verificado.</p>
+  </div>
+
+  <h2 id="cap4-producto">Paso C: añadir Instagram y la configuración con inicio de sesión de Instagram</h2>
+  <ol class="steps">
+    <li>En el panel de la app, busca el producto <strong>Instagram</strong> y pulsa la opción para configurarlo.</li>
+    <li>Busca la sección <strong>«API setup with Instagram login»</strong> (en español: «Configuración de la API con inicio de sesión con Instagram» o «inicio de sesión comercial de Instagram»).</li>
+    <li>Revisa que la app tenga estos permisos (en la lista de permisos del caso de uso o en la sección de revisión):
+      <ul>
+        <li><code>instagram_business_basic</code> — leer el perfil y las publicaciones.</li>
+        <li><code>instagram_business_manage_comments</code> — leer comentarios, enviar respuestas privadas y responder públicamente.</li>
+        <li><code>instagram_business_manage_messages</code> — mensajería de Instagram.</li>
+      </ul>
+    </li>
+  </ol>
+  <p class="note">La página oficial de respuestas privadas lista <code>instagram_business_basic</code> e <code>instagram_business_manage_comments</code> para Instagram Login. Añadimos <code>instagram_business_manage_messages</code> porque la API de mensajes la exige para enviar mensajes; tenerla evita sorpresas.</p>
+
+  <h2 id="cap4-cuenta">Paso D: agregar tu cuenta de Instagram</h2>
+  <ol class="steps">
+    <li>Dentro de la configuración con inicio de sesión de Instagram, busca el apartado para <strong>generar tokens de acceso</strong> y la opción para <strong>agregar una cuenta de Instagram</strong>.</li>
+    <li>Agrega tu cuenta profesional. Meta te pedirá iniciar sesión en Instagram con esa cuenta.</li>
+    <li>Si el panel registra la cuenta como <strong>evaluador de Instagram</strong> (<em>Instagram Tester</em>) y la muestra como «pendiente», acepta la invitación desde esa cuenta de Instagram. Las cuentas también se gestionan desde <strong>Roles de la app &gt; Roles</strong>.</li>
+  </ol>
+  <div class="callout verificar">
+    <span class="callout-title">Verifica en la documentación oficial</span>
+    <p>La documentación oficial actual indica agregar la cuenta e iniciar sesión, y que se gestionan en «Roles de la app». No detalla en qué pantalla de Instagram se acepta una invitación de evaluador. Si la cuenta queda «pendiente», consulta la ayuda oficial de Meta para aceptar la invitación.</p>
+  </div>
+
+  <h2 id="cap4-token">Paso E: generar el token</h2>
+  <ol class="steps">
+    <li>En <strong>Instagram &gt; API setup with Instagram login</strong>, junto a tu cuenta, pulsa <strong>Generate token</strong> (Generar token).</li>
+    <li>Inicia sesión en Instagram si te lo pide y acepta los permisos.</li>
+    <li>Copia el token que aparece. <strong>Guárdalo solo el tiempo justo</strong> para pegarlo en Social Desk (capítulo 8).</li>
+  </ol>
+  <p><strong>¿Cómo luce un token?</strong> Es una cadena larga de letras y números, sin espacios. En este manual lo representamos como <code>TU_TOKEN</code>. Nunca lo publiques ni lo pegues en un chat.</p>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad</span>
+    <p>El token da acceso a tu cuenta de Instagram con los permisos que aceptaste. Trátalo como una contraseña. En Social Desk se pega en un campo oculto y, una vez guardado, la app no vuelve a mostrarlo nunca.</p>
+  </div>
+
+  <h2 id="cap4-renovar">Duración y renovación del token</h2>
+  <ul>
+    <li>Según Meta, los tokens generados desde el panel de apps son <strong>de larga duración: 60 días</strong>.</li>
+    <li>Los tokens del flujo de inicio de sesión (si alguna vez usas uno) duran <strong>1 hora</strong> y se pueden canjear por uno de 60 días.</li>
+    <li>Un token de larga duración se puede <strong>renovar por otros 60 días</strong> si tiene al menos 24 horas, aún no ha vencido y la cuenta concedió <code>instagram_business_basic</code>. Un token que no se renueva en 60 días caduca y ya no se puede renovar.</li>
+  </ul>
+
+  <h3>La forma más sencilla de renovarlo</h3>
+  <ol class="steps">
+    <li>Antes de que se cumplan los 60 días, vuelve a <strong>Instagram &gt; API setup with Instagram login</strong> y genera un token nuevo.</li>
+    <li>En Social Desk, ve a <span class="ui">Conexiones</span>, pulsa <span class="ui">Editar</span> en tu conexión, pega el token nuevo en <span class="ui">Nuevo token · captura opcional</span> y pulsa <span class="ui">Guardar cambios</span>.</li>
+    <li>Pulsa <span class="ui">Probar y descubrir</span> para validarla de nuevo y vuelve a encender el monitoreo.</li>
+  </ol>
+  <p class="note">Usuarios avanzados: Meta también ofrece el punto de conexión <code>GET https://graph.instagram.com/refresh_access_token</code> con <code>grant_type=ig_refresh_token</code>. Ese método pone el token en la dirección web; si lo usas, no lo hagas desde el navegador (quedaría en el historial).</p>
+
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Anota en tu calendario un recordatorio a los 50 días de generar el token. Social Desk no te avisa del vencimiento: simplemente dejará de funcionar y la conexión aparecerá como <span class="ui">Token inválido</span>. La herramienta oficial <a href="https://developers.facebook.com/tools/debug/accesstoken/">Depurador de tokens de acceso</a> de Meta muestra la fecha de vencimiento de un token.</p>
+  </div>
+
+  <div class="sources">
+    <h3>Fuentes oficiales</h3>
+    <ul>
+      <li>Información general: <a href="https://developers.facebook.com/documentation/instagram-platform/overview">developers.facebook.com/documentation/instagram-platform/overview</a></li>
+      <li>API de Instagram con inicio de sesión con Instagram: <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login</a></li>
+      <li>Crear una app de Meta para la API de Instagram: <a href="https://developers.facebook.com/documentation/instagram-platform/create-an-instagram-app">developers.facebook.com/documentation/instagram-platform/create-an-instagram-app</a></li>
+      <li>Primeros pasos (token desde el panel): <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/get-started">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/get-started</a></li>
+      <li>Inicio de sesión comercial de Instagram (tokens de 1 hora y 60 días, renovación): <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login</a></li>
+      <li>Referencia <code>refresh_access_token</code>: <a href="https://developers.facebook.com/documentation/instagram-platform/reference/refresh_access_token">developers.facebook.com/documentation/instagram-platform/reference/refresh_access_token</a></li>
+      <li>Referencia <code>access_token</code>: <a href="https://developers.facebook.com/documentation/instagram-platform/reference/access_token">developers.facebook.com/documentation/instagram-platform/reference/access_token</a></li>
+      <li>API de mensajes (permisos): <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api</a></li>
+      <li>Registro como desarrollador: <a href="https://developers.facebook.com/documentation/development/register">developers.facebook.com/documentation/development/register</a></li>
+      <li>Crear una app (casos de uso): <a href="https://developers.facebook.com/documentation/development/create-an-app">developers.facebook.com/documentation/development/create-an-app</a></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 5 ===================== -->
+<section class="chapter" id="cap5" aria-labelledby="cap5-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 5</span>
+    <h1 id="cap5-title">Conseguir el acceso con Facebook (Facebook Login)</h1>
+    <p class="lead">Úsalo si tu cuenta de Instagram ya está vinculada a una página de Facebook y prefieres trabajar con tu usuario de Facebook.</p>
+  </header>
+
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Según la revisión de apps de Meta, <strong>una app usa Facebook Login o Instagram Login, pero no ambos</strong>. Si ya creaste una app para el capítulo 4, crea una app distinta para este camino.</p>
+  </div>
+
+  <h2 id="cap5-req">Requisitos</h2>
+  <ul class="checklist">
+    <li>Una cuenta de Instagram <strong>Empresa o Creador</strong>.</li>
+    <li>Una <strong>página de Facebook vinculada</strong> a esa cuenta de Instagram.</li>
+    <li>Tu usuario de Facebook debe poder realizar <strong>tareas</strong> en esa página. Según la tabla de tareas de Meta, la tarea <strong>Actividad de la comunidad</strong> permite conceder <code>instagram_manage_comments</code> y la tarea <strong>Mensajes</strong> permite conceder <code>instagram_manage_messages</code>.</li>
+    <li>Una cuenta de desarrollador de Meta (capítulo 4, paso A) y una app de Meta con la configuración básica completa.</li>
+  </ul>
+
+  <h2 id="cap5-app">Preparar la app</h2>
+  <ol class="steps">
+    <li>Crea una app como en el capítulo 4, paso B. Elige un caso de uso compatible con Facebook Login para empresas e Instagram.</li>
+    <li>Según la información general de Meta, para este camino la app necesita los productos <strong>Facebook Login para empresas</strong>, <strong>Messenger</strong> (con la configuración de Instagram para mensajes) e <strong>Instagram &gt; API setup with Facebook login</strong>. Busca y añade cada uno.</li>
+    <li>En Facebook Login puedes dejar los ajustes predeterminados.</li>
+  </ol>
+
+  <h2 id="cap5-permisos">Permisos</h2>
+  <p>Solicita estos permisos al generar el token:</p>
+  <table>
+    <thead><tr><th style="width:36%">Permiso</th><th>Para qué sirve</th></tr></thead>
+    <tbody>
+      <tr><td><code>instagram_basic</code></td><td>Leer el perfil y las publicaciones de la cuenta de Instagram.</td></tr>
+      <tr><td><code>instagram_manage_comments</code></td><td>Leer comentarios, enviar respuestas privadas y responder públicamente.</td></tr>
+      <tr><td><code>instagram_manage_messages</code></td><td>Mensajería de Instagram.</td></tr>
+      <tr><td><code>pages_show_list</code></td><td>Listar tus páginas (la app las usa para descubrir la cuenta de Instagram vinculada).</td></tr>
+      <tr><td><code>pages_read_engagement</code></td><td>Exigido por Meta para respuestas privadas y moderación de comentarios.</td></tr>
+      <tr><td><code>ads_management</code> y <code>ads_read</code></td><td>Solo si tu rol en la página se otorgó a través del administrador comercial (Business Manager).</td></tr>
+    </tbody>
+  </table>
+  <div class="callout verificar">
+    <span class="callout-title">Verifica en la documentación oficial</span>
+    <p>Las páginas de Meta no coinciden del todo. La guía de respuestas privadas de la plataforma de Instagram pide <code>instagram_basic</code>, <code>instagram_manage_comments</code> y <code>pages_read_engagement</code>. La guía equivalente de la plataforma de Messenger pide además <code>pages_messaging</code>, un token de página con la tarea de mensajes, la función <em>Human Agent</em> y acceso avanzado. Si Meta rechaza los envíos por permisos, añade <code>pages_messaging</code> y revisa ambas guías.</p>
+  </div>
+
+  <h2 id="cap5-token">Obtener el token de usuario con el Explorador de la API Graph</h2>
+  <p>Social Desk necesita un <strong>token de usuario de Facebook</strong>. Al seleccionar la cuenta, la app obtiene sola el token de la página vinculada y lo guarda cifrado.</p>
+  <ol class="steps">
+    <li>Abre el <a href="https://developers.facebook.com/tools/explorer">Explorador de la API Graph</a> con tu usuario de Facebook.</li>
+    <li>Elige tu app de Meta en el selector de apps.</li>
+    <li>Busca la opción para obtener un <strong>token de acceso de usuario</strong> (User Access Token).</li>
+    <li>Marca los permisos de la tabla anterior.</li>
+    <li>Genera el token. Meta te pedirá aceptar los permisos y puede preguntarte qué páginas y cuentas de Instagram autorizas: incluye la página vinculada a tu cuenta.</li>
+    <li>Copia el token del campo de token de acceso. Ese es tu <code>TU_TOKEN</code>.</li>
+  </ol>
+  <p class="note">Puedes comprobar que funciona con la consulta <code>me/accounts</code>: debe devolver tu página. Con el ID de la página, la consulta <code>{id-de-la-página}?fields=instagram_business_account</code> devuelve tu cuenta de Instagram. Social Desk hace estas dos consultas por ti en el paso «Probar y descubrir».</p>
+
+  <h2 id="cap5-largo">Tokens de larga duración</h2>
+  <p>Los tokens de usuario y de página predeterminados son <strong>de corta duración</strong> (expiran en horas). Para no tener que repetir el proceso a cada rato:</p>
+  <ol class="steps">
+    <li><strong>Token de usuario de larga duración (unos 60 días).</strong> Meta permite canjear un token de corta duración por uno largo con <code>GET https://graph.facebook.com/{versión}/oauth/access_token</code> usando <code>grant_type=fb_exchange_token</code>, el ID de la app, el <strong>secreto de la app</strong> y el token corto.</li>
+    <li><strong>Token de página sin vencimiento.</strong> Según Meta, si consultas tus páginas (<code>/{id-de-usuario}/accounts</code>) con un token de usuario de larga duración, los tokens de página que recibes <strong>no tienen fecha de vencimiento</strong>; solo expiran o se invalidan en ciertas condiciones que Meta describe en su guía de errores de tokens (verifica en la documentación oficial cuáles son).</li>
+  </ol>
+  <p>Social Desk hace el paso 2 por ti: si pegas un token de usuario de larga duración, el token de página que obtiene al seleccionar la cuenta será de larga duración.</p>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad</span>
+    <p>El canje del paso 1 requiere el <strong>secreto de la app</strong>. Meta advierte que esa llamada debe hacerse en un servidor y que el secreto nunca debe compartirse ni exponerse. Si no te sientes cómodo haciéndolo, pide ayuda a una persona técnica de confianza. Social Desk nunca te pedirá el secreto de la app.</p>
+  </div>
+
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Con el <a href="https://developers.facebook.com/tools/debug/accesstoken/">Depurador de tokens de acceso</a> puedes comprobar cuándo vence un token y qué permisos tiene, antes de pegarlo en la app.</p>
+  </div>
+
+  <div class="sources">
+    <h3>Fuentes oficiales</h3>
+    <ul>
+      <li>API de Instagram con inicio de sesión con Facebook: <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login">developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login</a></li>
+      <li>Primeros pasos (Explorador, <code>me/accounts</code>, <code>instagram_business_account</code>): <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/get-started">developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/get-started</a></li>
+      <li>Facebook Login para empresas con Instagram: <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/business-login-for-instagram">developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/business-login-for-instagram</a></li>
+      <li>Información general (tareas de página y productos requeridos): <a href="https://developers.facebook.com/documentation/instagram-platform/overview">developers.facebook.com/documentation/instagram-platform/overview</a></li>
+      <li>Respuestas privadas (plataforma de Instagram): <a href="https://developers.facebook.com/documentation/instagram-platform/private-replies">developers.facebook.com/documentation/instagram-platform/private-replies</a></li>
+      <li>Respuestas privadas (plataforma de Messenger): <a href="https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/private-replies">developers.facebook.com/documentation/business-messaging/instagram-messaging/features/private-replies</a></li>
+      <li>Tokens de larga duración: <a href="https://developers.facebook.com/documentation/facebook-login/guides/access-tokens/get-long-lived">developers.facebook.com/documentation/facebook-login/guides/access-tokens/get-long-lived</a></li>
+      <li>Tokens de acceso (tokens de página): <a href="https://developers.facebook.com/documentation/facebook-login/guides/access-tokens">developers.facebook.com/documentation/facebook-login/guides/access-tokens</a></li>
+      <li>Respuestas a comentarios (permisos): <a href="https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-comment/replies">developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-comment/replies</a></li>
+      <li>Explorador de la API Graph: <a href="https://developers.facebook.com/tools/explorer">developers.facebook.com/tools/explorer</a></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 6 ===================== -->
+<section class="chapter" id="cap6" aria-labelledby="cap6-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 6</span>
+    <h1 id="cap6-title">Modo desarrollo, modo Live y revisión de Meta</h1>
+    <p class="lead">Para usar Social Desk con tu propia cuenta no necesitas la revisión de Meta. Para atender cuentas de otras personas, sí.</p>
+  </header>
+
+  <h2>Los dos modos de una app de Meta</h2>
+  <table>
+    <thead><tr><th style="width:22%"></th><th>Modo desarrollo</th><th>Modo Live (en vivo)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Quién puede usarla</strong></td><td>Solo personas con un <strong>rol</strong> en la app: administradores, desarrolladores y evaluadores.</td><td>Cualquier persona, pero solo con los permisos <strong>aprobados en la revisión</strong>.</td></tr>
+      <tr><td><strong>Estado inicial</strong></td><td>Todas las apps nuevas empiezan aquí.</td><td>Solo debe activarse al terminar el desarrollo y la revisión.</td></tr>
+      <tr><td><strong>Visibilidad</strong></td><td>La app no aparece en búsquedas públicas.</td><td>Se puede encontrar públicamente.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Acceso estándar y acceso avanzado</h2>
+  <ul>
+    <li><strong>Acceso estándar.</strong> Es el nivel predeterminado. Sirve para apps usadas solo por personas con rol en la app. Según Meta, si tu app solo atiende <strong>tu propia cuenta profesional o una que administras</strong>, el acceso estándar es todo lo que necesitas.</li>
+    <li><strong>Acceso avanzado.</strong> Es necesario si la app atiende cuentas profesionales que <strong>no te pertenecen ni administras</strong>, usadas por personas sin rol en la app. Requiere <strong>revisión de la app</strong> y <strong>verificación del negocio</strong>.</li>
+  </ul>
+
+  <h2>¿Necesito la revisión de Meta?</h2>
+  <table>
+    <thead><tr><th>Tu situación</th><th>Nivel de acceso</th><th>Revisión de la app</th></tr></thead>
+    <tbody>
+      <tr><td>Solo uso mi propia cuenta o una que administro</td><td>Estándar</td><td><strong>No requerida</strong></td></tr>
+      <tr><td>Quiero atender las cuentas de mis clientes u otras empresas</td><td>Avanzado</td><td><strong>Requerida</strong> (y verificación del negocio)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad — cuentas de otras personas</span>
+    <p>Para atender cuentas de <strong>otras personas</strong>, Meta exige que la app supere la <strong>revisión de la app</strong> (App Review) y que esté conectada a un <strong>negocio verificado</strong>. Además, Meta solo permite añadir como evaluador a alguien que sea tu empleado o con quien tengas un acuerdo para probar la app. No uses roles de evaluador como atajo para atender clientes.</p>
+  </div>
+
+  <h2>Qué pide la revisión de Meta</h2>
+  <p>Si algún día necesitas acceso avanzado, la revisión pide, entre otras cosas:</p>
+  <ul>
+    <li>Que la app se pueda cargar y probar desde fuera, con instrucciones paso a paso para los revisores.</li>
+    <li>Una descripción clara de cómo usas cada permiso y una <strong>grabación de pantalla</strong> por permiso.</li>
+    <li>Al menos una llamada exitosa a la API con ciertos permisos.</li>
+    <li>Ícono de la app, URL de política de privacidad, categoría y correo de empresa.</li>
+  </ul>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Social Desk funciona solo en tu computador (<code>localhost</code>) y no tiene un botón de inicio de sesión de Meta. Meta rechaza las solicitudes que sus revisores no pueden probar. Hoy, la app <strong>no está preparada para pasar la revisión de Meta</strong>: úsala solo con cuentas propias o que administras, con tu app en modo desarrollo.</p>
+  </div>
+
+  <h2>Verificación del negocio</h2>
+  <p>Se hace en el administrador comercial de Meta, desde la configuración básica de la app (<strong>Configuración &gt; Básica &gt; Verificación</strong>). Si la app solo la usan personas con rol en ella, Meta indica que <strong>no necesitas</strong> completar la verificación.</p>
+
+  <h2>Roles en la app</h2>
+  <table>
+    <thead><tr><th>Rol</th><th>Qué puede hacer</th></tr></thead>
+    <tbody>
+      <tr><td>Administrador</td><td>Todo: cambiar ajustes, restablecer el secreto, asignar roles, eliminar la app.</td></tr>
+      <tr><td>Desarrollador</td><td>Cambiar ajustes técnicos y probar todos los permisos en desarrollo.</td></tr>
+      <tr><td>Evaluador</td><td>Conceder a la app cualquier permiso en desarrollo, sin cambiar ajustes.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Según Meta, la mayoría de apps no vinculadas a un negocio verificado pueden tener hasta 50 evaluadores.</p>
+
+  <div class="sources">
+    <h3>Fuentes oficiales</h3>
+    <ul>
+      <li>Modos de la app: <a href="https://developers.facebook.com/documentation/development/build-and-test/app-modes">developers.facebook.com/documentation/development/build-and-test/app-modes</a></li>
+      <li>Roles de la app: <a href="https://developers.facebook.com/documentation/development/build-and-test/app-roles">developers.facebook.com/documentation/development/build-and-test/app-roles</a></li>
+      <li>Revisión de apps para la API de Instagram: <a href="https://developers.facebook.com/documentation/instagram-platform/app-review">developers.facebook.com/documentation/instagram-platform/app-review</a></li>
+      <li>Revisión de apps de Meta: <a href="https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/app-review">developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/app-review</a></li>
+      <li>Verificación del negocio: <a href="https://developers.facebook.com/documentation/development/release/business-verification">developers.facebook.com/documentation/development/release/business-verification</a></li>
+      <li>Niveles de acceso: <a href="https://developers.facebook.com/docs/graph-api/overview/access-levels">developers.facebook.com/docs/graph-api/overview/access-levels</a></li>
+      <li>Información general (acceso estándar y avanzado): <a href="https://developers.facebook.com/documentation/instagram-platform/overview">developers.facebook.com/documentation/instagram-platform/overview</a></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 7 ===================== -->
+<section class="chapter" id="cap7" aria-labelledby="cap7-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 7</span>
+    <h1 id="cap7-title">Recorrido por la app</h1>
+    <p class="lead">Conoce las partes de la pantalla antes de configurar nada.</p>
+  </header>
+
+  <p>Al abrir <code>http://localhost:3000</code> verás la pantalla <strong>Resumen</strong>. Mientras no hayas terminado la configuración, aparece el panel <strong>Primeros pasos</strong> con cuatro tareas.</p>
+
+  <figure>
+    <img src="images/01-dashboard-onboarding.png" alt="Pantalla Resumen de Social Desk con la barra lateral, el selector de cuenta, el aviso de modo prueba y el panel Primeros pasos con cuatro tareas.">
+    <figcaption>La pantalla Resumen al empezar. El panel «Primeros pasos» marca la siguiente tarea y lleva directo a la sección correspondiente.</figcaption>
+  </figure>
+
+  <h2>Las partes de la pantalla</h2>
+  <h3>1. Barra lateral (izquierda)</h3>
+  <p>Arriba está el nombre <strong>Social Desk · Operación local</strong>. Debajo, las ocho secciones:</p>
+  <table>
+    <thead><tr><th style="width:26%">Sección</th><th>Para qué sirve</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ui">Resumen</span></td><td>Ver de un vistazo qué está pasando y qué falta por configurar.</td></tr>
+      <tr><td><span class="ui">Conexiones</span></td><td>Guardar tu token de Meta y elegir la cuenta de Instagram (<a href="#cap8">capítulo 8</a>).</td></tr>
+      <tr><td><span class="ui">Publicaciones</span></td><td>Ver las publicaciones de la cuenta elegida (<a href="#cap9">capítulo 9</a>).</td></tr>
+      <tr><td><span class="ui">Automatizaciones</span></td><td>Crear las reglas de palabras clave y respuestas (<a href="#cap10">capítulo 10</a>).</td></tr>
+      <tr><td><span class="ui">Monitoreo</span></td><td>Encender o apagar la vigilancia de comentarios nuevos (<a href="#cap12">capítulo 12</a>).</td></tr>
+      <tr><td><span class="ui">Revisión pendiente</span></td><td>Analizar comentarios anteriores y elegir cuáles responder (<a href="#cap11">capítulo 11</a>).</td></tr>
+      <tr><td><span class="ui">Cola e historial</span></td><td>Ver qué pasó con cada respuesta (<a href="#cap13">capítulo 13</a>).</td></tr>
+      <tr><td><span class="ui">Ajustes</span></td><td>Modo de envío, importación de configuración y protecciones (<a href="#cap15">capítulo 15</a>).</td></tr>
+    </tbody>
+  </table>
+  <p>Al pie de la barra lateral verás <strong>«Solo en este equipo»</strong>: recuerda que todo ocurre en tu computador.</p>
+
+  <h3>2. Encabezado (arriba)</h3>
+  <ul>
+    <li><strong>Título y descripción</strong> de la sección en la que estás.</li>
+    <li><strong>Selector «Cuenta».</strong> Filtra toda la app por una cuenta de Instagram, o muestra <span class="ui">Todas las cuentas</span>. Si solo tienes una cuenta, la app la elige por ti la primera vez. Si luego eliges otra opción a mano, la app respeta tu elección.</li>
+    <li><strong>Botón de modo.</strong> Muestra el modo de envío actual: <span class="ui">Dry Run · Activo</span> (modo prueba) o <span class="ui">Modo real · Activo</span>. Mientras la app consulta el modo, muestra <span class="ui">Verificando modo…</span> y no se puede pulsar.</li>
+  </ul>
+
+  <h3>3. Aviso de modo (debajo del encabezado)</h3>
+  <p>Una franja de color te recuerda siempre en qué modo estás. No la ignores.</p>
+  <figure>
+    <img src="images/17-mode-dryrun-banner.png" alt="Encabezado con el botón Dry Run · Activo y la franja Modo prueba: la app analiza y simula, no envía mensajes reales.">
+    <figcaption>Modo prueba: «la app analiza y simula, no envía mensajes reales». Es el modo inicial de la app.</figcaption>
+  </figure>
+  <figure>
+    <img src="images/18-mode-real-banner.png" alt="Encabezado con el botón Modo real · Activo y la franja Modo real: se enviarán mensajes privados reales en automatizaciones autorizadas.">
+    <figcaption>Modo real: «se enviarán mensajes privados reales en automatizaciones autorizadas». Revisa el capítulo 14 antes de llegar aquí.</figcaption>
+  </figure>
+
+  <h3>4. Avisos y pie de página</h3>
+  <ul>
+    <li>Cuando una acción sale bien, aparece un aviso verde que desaparece solo a los pocos segundos.</li>
+    <li>Cuando algo falla, aparece un aviso rojo <strong>«La acción no se completó»</strong> con una explicación corta. Se queda hasta que lo cierras con <span class="ui">×</span>.</li>
+    <li>Al pie de cada pantalla: «Datos y credenciales permanecen en el servidor local» y el botón <span class="ui">Actualizar</span> para recargar los datos.</li>
+  </ul>
+
+  <h2>La pantalla Resumen</h2>
+  <h3>Primeros pasos</h3>
+  <p>Cuatro tareas en orden: <strong>Conectar Meta</strong>, <strong>Elegir cuenta</strong>, <strong>Crear automatización</strong> e <strong>Iniciar monitoreo</strong>. El contador muestra cuántas están listas (por ejemplo «2 de 4 listos»). La tarea siguiente tiene el botón destacado. El panel desaparece cuando completas las cuatro.</p>
+
+  <h3>Indicadores</h3>
+  <table>
+    <thead><tr><th style="width:22%">Indicador</th><th>Qué cuenta</th></tr></thead>
+    <tbody>
+      <tr><td>Cuentas</td><td>Cuentas seleccionadas (según el filtro de cuenta).</td></tr>
+      <tr><td>En cola</td><td>Elementos esperando envío: «En cola» y «Falló (reintentable)».</td></tr>
+      <tr><td>Enviadas</td><td>Mensajes que Meta aceptó («Enviado»).</td></tr>
+      <tr><td>Revisión</td><td>Elementos que requieren tu atención: «Resultado desconocido» y «Falló (definitivo)».</td></tr>
+      <tr><td>Expirados</td><td>Comentarios que superaron la ventana de 7 días.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Estado por cuenta</h3>
+  <p>Una tabla con cada cuenta: estado (<span class="ui">Validada</span>, <span class="ui">No validada</span> o <span class="ui">Pausado</span>), última sincronización, cobertura de la última revisión y la última incidencia registrada. El enlace <span class="ui">Abrir monitoreo →</span> lleva a la sección de monitoreo.</p>
+
+  <h3>Accesos rápidos</h3>
+  <p>Tres tarjetas al final: <span class="ui">Administrar conexiones</span>, <span class="ui">Configurar automatizaciones</span> y <span class="ui">Revisar comentarios</span>. El botón <span class="ui">Actualizar datos</span> recarga el resumen.</p>
+
+  <h2>En pantallas pequeñas</h2>
+  <p>La interfaz se adapta a ventanas estrechas: la navegación y los paneles se reorganizan en una sola columna.</p>
+  <figure class="narrow">
+    <img src="images/21-mobile.png" alt="Social Desk en una ventana estrecha, con la navegación y los paneles en una sola columna.">
+    <figcaption>Vista en una ventana estrecha. Recuerda que la app solo se abre en el mismo computador donde se ejecuta: no está disponible desde tu teléfono por internet.</figcaption>
+  </figure>
+</section>
+
+<!-- ===================== CAPÍTULO 8 ===================== -->
+<section class="chapter" id="cap8" aria-labelledby="cap8-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 8</span>
+    <h1 id="cap8-title">Crear la conexión</h1>
+    <p class="lead">Una conexión guarda tu token de Meta, cifrado. Después la validas y eliges la cuenta de Instagram que vas a administrar.</p>
+  </header>
+
+  <p>Ve a <span class="ui">Conexiones</span>. Si aún no tienes ninguna, verás el mensaje «Aún no hay conexiones» y el botón <span class="ui">Crear la primera conexión</span>, que te lleva al formulario.</p>
+
+  <figure>
+    <img src="images/02-connections-empty.png" alt="Sección Conexiones vacía con el mensaje Aún no hay conexiones y el formulario Nueva conexión.">
+    <figcaption>Sección Conexiones sin conexiones. A la izquierda, el listado y el formulario «Nueva conexión»; a la derecha, las cuentas.</figcaption>
+  </figure>
+
+  <h2>Paso 1: guardar la conexión</h2>
+  <p>Completa el formulario <strong>Nueva conexión</strong>:</p>
+  <table>
+    <thead><tr><th style="width:30%">Campo</th><th>Qué escribir</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ui">Nombre</span></td><td>Un nombre para reconocerla, por ejemplo «Cuenta principal».</td></tr>
+      <tr><td><span class="ui">Tipo de acceso</span></td><td><strong>Instagram Login · token de Instagram</strong> si seguiste el capítulo 4, o <strong>Facebook Login · token de usuario y página vinculada</strong> si seguiste el capítulo 5.</td></tr>
+      <tr><td><span class="ui">App ID (opcional)</span></td><td>El identificador de tu app de Meta. Puedes dejarlo vacío. Nunca pegues aquí el secreto de la app.</td></tr>
+      <tr><td><span class="ui">Versión Graph</span></td><td>La versión de la API de Meta, con el formato <code>v26.0</code>. La app propone <code>v26.0</code>. Si Meta la rechaza, usa la versión vigente que indique la documentación oficial.</td></tr>
+      <tr><td><span class="ui">Token de acceso · solo captura</span></td><td>Pega aquí <code>TU_TOKEN</code>. El campo oculta el texto mientras escribes.</td></tr>
+    </tbody>
+  </table>
+  <ol class="steps">
+    <li>Completa los campos y pulsa <span class="ui">Guardar conexión cifrada</span>.</li>
+    <li>Verás el aviso «Conexión guardada; valide para descubrir cuentas.» El campo del token se vacía al instante.</li>
+    <li>La conexión aparece en el listado con la etiqueta <span class="ui">Sin validar</span>.</li>
+  </ol>
+
+  <figure>
+    <img src="images/03-connection-saved.png" alt="Conexión guardada en el listado Conexiones Meta, con la etiqueta de estado y los botones Probar y descubrir, Editar, Desconectar y Eliminar.">
+    <figcaption>Una conexión guardada. Sus botones: «Probar y descubrir», «Editar», «Desconectar» y «Eliminar».</figcaption>
+  </figure>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad</span>
+    <p>Después de guardarlo, el token <strong>nunca se vuelve a mostrar</strong>: ni en pantalla, ni en el navegador, ni en las respuestas de la app. Se guarda cifrado en tu computador. Si lo necesitas de nuevo, genera uno nuevo en Meta.</p>
+  </div>
+
+  <h2>Paso 2: probar y descubrir</h2>
+  <ol class="steps">
+    <li>Pulsa <span class="ui">Probar y descubrir</span> en tu conexión. La app comprueba el token con Meta y busca las cuentas a las que da acceso.
+      <ul>
+        <li>Con <strong>Instagram Login</strong>, encuentra la cuenta dueña del token.</li>
+        <li>Con <strong>Facebook Login</strong>, lista tus páginas y las cuentas de Instagram vinculadas a ellas.</li>
+      </ul></li>
+    <li>Si todo va bien, verás «Validación y descubrimiento completados.», la conexión pasa a <span class="ui">Validada</span> y en el panel <strong>Cuentas descubiertas</strong> aparecen tus cuentas (<code>@tu_cuenta</code>) con su ID de proveedor.</li>
+    <li>Pulsa <span class="ui">Seleccionar</span> en la cuenta que quieres administrar. Verás «Cuenta vinculada con su historial.» y la cuenta pasa al panel <strong>Cuentas seleccionadas</strong>.</li>
+  </ol>
+
+  <figure>
+    <img src="images/04-discover-accounts.png" alt="Panel Cuentas descubiertas con una cuenta y su botón Seleccionar, y panel Cuentas seleccionadas.">
+    <figcaption>Tras «Probar y descubrir», las cuentas encontradas aparecen en «Cuentas descubiertas». Con «Seleccionar» la cuenta queda lista para usarse.</figcaption>
+  </figure>
+
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <ul>
+      <li>Una misma cuenta de Instagram solo puede pertenecer a <strong>una</strong> conexión. Si intentas seleccionarla desde otra conexión, la app lo rechaza.</li>
+      <li>Si la validación falla, la conexión aparece como <span class="ui">Token inválido</span>. Revisa que el token esté completo, que no haya vencido y que tenga los permisos del capítulo 4 o 5.</li>
+    </ul>
+  </div>
+
+  <h2>Editar la conexión o cambiar el token</h2>
+  <ol class="steps">
+    <li>Pulsa <span class="ui">Editar</span>. Aparece el formulario <strong>Editar conexión</strong> con Nombre, App ID, Versión Graph y <span class="ui">Nuevo token · captura opcional</span>.</li>
+    <li>Para conservar el token actual, deja ese campo vacío. Para cambiarlo (por ejemplo al renovarlo), pega el nuevo.</li>
+    <li>Pulsa <span class="ui">Guardar cambios</span>. Verás «Conexión actualizada. Vuelva a validar antes de monitorear.»</li>
+    <li>Pulsa <span class="ui">Probar y descubrir</span> de nuevo. Si usas Facebook Login, pulsa también <span class="ui">Seleccionar</span> otra vez en tu cuenta para que la app obtenga el token de página actualizado. Tu historial se conserva.</li>
+    <li>Vuelve a encender el monitoreo si lo usabas.</li>
+  </ol>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Cambiar el token, el App ID o la versión Graph <strong>anula la validación anterior</strong> y pausa el monitoreo de esa conexión hasta que la valides de nuevo. Además, antes de cada envío real, la app comprueba que el token actual siga teniendo acceso a la cuenta seleccionada.</p>
+  </div>
+
+  <h2>Desconectar o eliminar</h2>
+  <table>
+    <thead><tr><th style="width:20%">Botón</th><th>Qué pasa</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ui">Desconectar</span></td><td>La conexión deja de leer comentarios y de enviar respuestas. El historial se conserva. Pide confirmación.</td></tr>
+      <tr><td><span class="ui">Eliminar</span></td><td>La desconecta y conserva el historial, pero para usarla otra vez tendrás que crear una conexión nueva. Pide confirmación.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad</span>
+    <p>Desconectar o eliminar en Social Desk <strong>no revoca el token en Meta</strong>. Si crees que tu token se filtró, quita también el acceso de la app desde la configuración de tu cuenta de Meta o genera uno nuevo (verifica en la documentación oficial de Meta cómo revocar el acceso).</p>
+  </div>
+
+  <h2>Retención heredada</h2>
+  <p>En la columna derecha hay un panel llamado <strong>Retención heredada</strong>. Solo aplica si tu cuenta viene de una herramienta anterior que dejó un bloqueo o un historial de rechazos. En ese caso, la cuenta queda <strong>retenida</strong> y no puede enviar mensajes reales hasta que pulses <span class="ui">Revisar estado y reconocer</span> y confirmes con <span class="ui">Reconocer historial</span>. Si el bloqueo de la herramienta anterior sigue presente, la app no te deja reconocerlo. La app nunca borra ni modifica esos archivos externos. Si no usaste otra herramienta antes, no necesitas este panel.</p>
+</section>
+
+<!-- ===================== CAPÍTULO 9 ===================== -->
+<section class="chapter" id="cap9" aria-labelledby="cap9-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 9</span>
+    <h1 id="cap9-title">Publicaciones</h1>
+    <p class="lead">Para crear una automatización específica, la app necesita conocer tus publicaciones.</p>
+  </header>
+
+  <ol class="steps">
+    <li>Ve a <span class="ui">Publicaciones</span>.</li>
+    <li>Si tienes varias cuentas y el filtro está en «Todas las cuentas», la app te pide elegir una: pulsa el botón <code>@tu_cuenta</code>. Las publicaciones se cargan de una cuenta a la vez.</li>
+    <li>La primera vez verás «Sin publicaciones guardadas». Pulsa <span class="ui">Actualizar publicaciones</span>.</li>
+    <li>La app descarga de Meta la primera página de publicaciones de la cuenta (hasta 100) y verás «Publicaciones actualizadas.»</li>
+  </ol>
+
+  <figure>
+    <img src="images/05-publications.png" alt="Cuadrícula de publicaciones con tipo, texto corto, fecha y el enlace Ver comentarios.">
+    <figcaption>Cada tarjeta muestra el tipo (Foto, Reel/Video o Carrusel), el inicio del texto de la publicación, la fecha y el enlace «Ver comentarios ↗».</figcaption>
+  </figure>
+
+  <h2>Qué muestra cada tarjeta</h2>
+  <ul>
+    <li><strong>Tipo:</strong> <span class="ui">Foto</span>, <span class="ui">Reel/Video</span> o <span class="ui">Carrusel</span>.</li>
+    <li><strong>Texto:</strong> los primeros 80 caracteres de la descripción. Si la publicación no tiene texto (o se guardó con una versión antigua de la app), verás «Sin texto · …» seguido del final de su identificador.</li>
+    <li><strong>Fecha</strong> de publicación, o «Fecha no disponible».</li>
+    <li><span class="ui">Ver comentarios ↗</span> abre la publicación en Instagram, en otra pestaña.</li>
+  </ul>
+
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Pulsa <span class="ui">Actualizar publicaciones</span> cada vez que publiques algo nuevo y quieras crearle una automatización específica. Las automatizaciones generales no lo necesitan: el monitoreo actualiza la lista de publicaciones por sí mismo cada 5 minutos como máximo.</p>
+  </div>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Para actualizar publicaciones, la cuenta y la conexión deben estar <span class="ui">Validada</span>. Si cambiaste el token, valida primero en Conexiones.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 10 ===================== -->
+<section class="chapter" id="cap10" aria-labelledby="cap10-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 10</span>
+    <h1 id="cap10-title">Automatizaciones</h1>
+    <p class="lead">Una automatización es una regla: «si alguien comenta esta palabra en esta publicación, envíale este mensaje».</p>
+  </header>
+
+  <figure>
+    <img src="images/06-automation-new-general.png" alt="Formulario Nueva automatización con la opción Todas las publicaciones (general) elegida y su texto de ayuda.">
+    <figcaption>Formulario «Nueva automatización». Aquí se eligió «Todas las publicaciones (general)»; debajo aparece la explicación de su alcance.</figcaption>
+  </figure>
+
+  <h2>Crear una automatización</h2>
+  <ol class="steps">
+    <li>Ve a <span class="ui">Automatizaciones</span>.</li>
+    <li>En <span class="ui">Cuenta</span>, elige tu cuenta. Las publicaciones de la lista pertenecen a esa cuenta.</li>
+    <li>En <span class="ui">Publicación</span>, elige una publicación concreta o <span class="ui">Todas las publicaciones (general)</span>.</li>
+    <li>Escribe un <span class="ui">Nombre</span> fácil de reconocer, por ejemplo «Guía gratis — reel de octubre».</li>
+    <li>En <span class="ui">Palabras clave · separadas por coma</span>, escribe las palabras que activan la respuesta: <code>guía, ebook</code>.</li>
+    <li>En <span class="ui">Coincidencia</span>, elige <span class="ui">Frase dentro del comentario</span> o <span class="ui">Comentario exacto</span>.</li>
+    <li>Escribe el mensaje en <span class="ui">Respuesta</span>. Puedes usar variables (ver más abajo).</li>
+    <li>Si quieres, añade hasta dos botones con enlace.</li>
+    <li>Si quieres, marca <span class="ui">Responder también públicamente al comentario</span>.</li>
+    <li>Pulsa <span class="ui">Guardar automatización</span>. Verás «Automatización guardada en modo de prueba.»</li>
+    <li><strong>Pulsa <span class="ui">Activar</span></strong> en la tarjeta de la nueva automatización. Toda automatización nueva se guarda <strong>pausada</strong>.</li>
+  </ol>
+
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Una automatización recién creada aparece como <span class="ui">Pausada</span> y <span class="ui">Solo prueba</span>. No hará nada hasta que pulses <span class="ui">Activar</span>, y solo responderá comentarios escritos <strong>después</strong> de activarla.</p>
+  </div>
+
+  <h2 id="cap10-tipos">Específica o general: quién responde</h2>
+  <table>
+    <thead><tr><th style="width:22%">Tipo</th><th>Alcance</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Específica</strong></td><td>Una sola publicación.</td></tr>
+      <tr><td><strong>General</strong> (etiqueta <span class="ui">General</span>)</td><td>Todas las publicaciones de la cuenta, antiguas y nuevas, que <strong>no tengan</strong> su propia automatización activa.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Regla de prioridad:</strong> si una publicación tiene su propia automatización <strong>activa</strong>, solo esa responde; la general «le cede el paso». Si la específica está pausada o archivada, la general vuelve a aplicar en esa publicación.</p>
+  <ul>
+    <li>Si un comentario en cola de una automatización general pertenece a una publicación que luego recibió su propia automatización activa, ese elemento pasa a <span class="state">Omitido</span> antes de enviarse.</li>
+    <li>Si <strong>dos automatizaciones activas</strong> reclaman el mismo comentario (dos específicas en la misma publicación, o dos generales), el comentario se considera ambiguo y no se responde automáticamente.</li>
+    <li>El alcance <strong>no se puede cambiar</strong> después. Para pasar de general a específica (o al revés), crea una automatización nueva.</li>
+  </ul>
+
+  <h2 id="cap10-palabras">Palabras clave y coincidencia</h2>
+  <ul>
+    <li>Sepáralas con comas. Máximo 20 por automatización.</li>
+    <li>Son <strong>sinónimos</strong>: si un comentario contiene varias, se procesa una sola coincidencia (un solo mensaje).</li>
+    <li>La comparación <strong>ignora mayúsculas, tildes y espacios extra</strong>: «GUÍA», «guia» y «Guía» son lo mismo.</li>
+    <li><strong>No se aceptan repetidas.</strong> Como se ignoran mayúsculas y tildes, <code>guía, Guia</code> cuenta como repetida y el formulario mostrará «Revise los campos e inténtelo de nuevo.»</li>
+  </ul>
+  <table>
+    <thead><tr><th style="width:26%">Modo</th><th>Cómo funciona</th><th style="width:34%">Ejemplo con la palabra «guía»</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ui">Frase dentro del comentario</span></td><td>La palabra o frase debe aparecer <strong>completa</strong>, como palabra separada, en cualquier parte del comentario.</td><td>«¡Quiero la guía!» sí coincide. «guiado» no coincide.</td></tr>
+      <tr><td><span class="ui">Comentario exacto</span></td><td>El comentario completo debe ser igual a la palabra clave (sin contar mayúsculas, tildes ni espacios extra).</td><td>«Guía» sí coincide. «guía por favor» o «guía!» no coinciden.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Usa <span class="ui">Frase dentro del comentario</span> en casi todos los casos. La gente suele añadir signos, emojis u otras palabras, y el modo exacto no los admite.</p>
+  </div>
+
+  <h2 id="cap10-plantilla">La plantilla del mensaje y sus variables</h2>
+  <p>El texto predeterminado es: <code>Hola {{username}}, aquí tienes la información sobre {{keyword}}.</code> Puedes cambiarlo por completo. Estas variables se reemplazan al enviar:</p>
+  <table>
+    <thead><tr><th style="width:24%">Variable</th><th>Se reemplaza por</th></tr></thead>
+    <tbody>
+      <tr><td><code>{{username}}</code></td><td>El usuario de quien comentó.</td></tr>
+      <tr><td><code>{{comment}}</code></td><td>El texto del comentario.</td></tr>
+      <tr><td><code>{{keyword}}</code></td><td>La palabra clave que coincidió.</td></tr>
+      <tr><td><code>{{account}}</code></td><td>El usuario de tu cuenta (<code>tu_cuenta</code>).</td></tr>
+      <tr><td><code>{{media}}</code></td><td>El enlace de la publicación (o su identificador si no hay enlace guardado).</td></tr>
+    </tbody>
+  </table>
+  <ul>
+    <li>El formulario muestra solo las tres primeras en su etiqueta, pero las cinco funcionan.</li>
+    <li>Cualquier otra variable (por ejemplo <code>{{nombre}}</code>) se rechaza al guardar.</li>
+    <li>El mensaje final no puede superar los 1000 caracteres.</li>
+  </ul>
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Ejemplo de plantilla clara: <code>¡Hola {{username}}! Gracias por comentar. Aquí tienes la {{keyword}} que pediste. (Mensaje automático de @tu_cuenta)</code></p>
+  </div>
+
+  <h2 id="cap10-botones">Botones con enlace</h2>
+  <ul>
+    <li>Puedes añadir <strong>cero, uno o dos</strong> botones.</li>
+    <li>El título de cada botón tiene <strong>máximo 20 caracteres</strong> (por ejemplo «Ver recurso»).</li>
+    <li>La dirección debe empezar por <code>https://</code>. No se aceptan direcciones <code>http://</code> ni con usuario y contraseña.</li>
+    <li>Los botones <strong>no se pueden cambiar al editar</strong>: la ventana de edición conserva los existentes. Para cambiarlos, crea una automatización nueva y archiva la anterior.</li>
+  </ul>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Cómo se ven los botones en Instagram depende de Meta y puede variar según la versión de la app del destinatario. Pruébalo con un comentario controlado (capítulo 14).</p>
+  </div>
+
+  <h2 id="cap10-publica">Respuesta pública opcional (con variantes que rotan)</h2>
+  <p>Además del mensaje privado, la app puede responder <strong>públicamente</strong> bajo el comentario, por ejemplo «¡Listo @usuario! Te escribí por mensaje privado». Repetir el mismo texto cientos de veces parece spam, por eso escribes varias <strong>variantes</strong> y la app va rotándolas.</p>
+  <ol class="steps">
+    <li>Marca <span class="ui">Responder también públicamente al comentario</span>.</li>
+    <li>En <span class="ui">Variantes de la respuesta pública (una por línea)</span>, escribe una frase por línea.</li>
+    <li>La app muestra cuántas variantes hay y dos ejemplos al azar con un usuario de muestra (<code>@cliente_ejemplo</code>). Pulsa <span class="ui">Otros ejemplos</span> para ver otros.</li>
+  </ol>
+  <h3>Reglas de las variantes</h3>
+  <ul>
+    <li>Máximo <strong>50 variantes</strong>, cada una de 1 a 300 caracteres, y en total como máximo 10 000 caracteres.</li>
+    <li>No puede haber dos iguales (sin contar mayúsculas, tildes ni espacios).</li>
+    <li>Solo admiten las variables <code>{{username}}</code> y <code>{{keyword}}</code>. Se permite mencionar a la persona con <code>@{{username}}</code>.</li>
+    <li><strong>Sin enlaces</strong> (<code>http://</code>, <code>https://</code>, <code>www.</code>) y <strong>sin mencionar a otras cuentas</strong> con @.</li>
+  </ul>
+  <h3>Cómo se comporta</h3>
+  <ul>
+    <li><strong>Primero el privado, después el público, nunca al revés.</strong> La respuesta pública solo se programa cuando Meta <strong>aceptó</strong> el mensaje privado y el modo real está activo.</li>
+    <li><strong>El mensaje privado nunca se repite</strong>, aunque la respuesta pública falle.</li>
+    <li><strong>Rotación:</strong> con más de 3 variantes, se evitan las 3 últimas usadas en esa cuenta; con 3 o menos, solo se evita la anterior. Con una sola variante, se repite.</li>
+    <li>Se publica como máximo una respuesta pública por ronda y con al menos <strong>20 segundos</strong> entre una y otra.</li>
+    <li>Si pasan más de <strong>24 horas</strong> desde el mensaje privado sin poder publicarla, queda <span class="state">Expirada</span>.</li>
+    <li>Si después del envío privado pausas o archivas la automatización, le quitas el permiso real o desactivas la respuesta pública, la respuesta pública queda <span class="state">Omitida</span>.</li>
+    <li>Meta solo permite responder comentarios principales (no respuestas dentro de un hilo), ni comentarios ocultos, ni comentarios de videos en vivo.</li>
+  </ul>
+  <div class="callout importante">
+    <span class="callout-title">Importante — permiso para comentar</span>
+    <p>No sabrás si tu token tiene permiso para responder comentarios hasta el primer intento real. Si no lo tiene, verás en la cola «Falta el permiso para responder comentarios en esta conexión». El mensaje privado no se ve afectado. Revisa los permisos de los capítulos 4 o 5.</p>
+  </div>
+
+  <h2 id="cap10-gestionar">Activar, editar, pausar, autorizar y archivar</h2>
+  <figure>
+    <img src="images/07-automation-list.png" alt="Listado de automatizaciones con etiquetas de estado y los botones Activar o Pausar, Editar, Autorizar real y Archivar.">
+    <figcaption>Cada tarjeta muestra la cuenta, la publicación (o «General»), las palabras clave y sus etiquetas de estado, con los botones de acción.</figcaption>
+  </figure>
+  <h3>Las etiquetas de cada tarjeta</h3>
+  <ul>
+    <li><span class="ui">Activa</span> o <span class="ui">Pausada</span>: si está vigilando comentarios.</li>
+    <li><span class="ui">Solo prueba</span> o <span class="ui">Real autorizado</span>: si tiene permiso para enviar de verdad.</li>
+    <li><span class="ui">General</span>: si aplica a todas las publicaciones.</li>
+    <li><span class="ui">Respuesta pública · N variantes</span>: si responde también en público.</li>
+  </ul>
+
+  <table>
+    <thead><tr><th style="width:22%">Botón</th><th>Qué hace</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ui">Activar</span></td><td>Empieza a vigilar. Fija el <strong>corte desde ahora</strong>: solo cuentan comentarios posteriores. Aviso: «Automatización activada con corte desde ahora.»</td></tr>
+      <tr><td><span class="ui">Pausar</span></td><td>Deja de vigilar. Al volver a activarla, el corte se mueve otra vez al momento de activación.</td></tr>
+      <tr><td><span class="ui">Editar</span></td><td>Abre la ventana de edición (ver abajo).</td></tr>
+      <tr><td><span class="ui">Autorizar real</span></td><td>Permite que esta automatización envíe de verdad cuando el modo real global esté activo. Pide confirmación. Solo funciona si la automatización está <strong>activa</strong> y la cuenta y la conexión están validadas.</td></tr>
+      <tr><td><span class="ui">Quitar permiso real</span></td><td>La vuelve a <span class="ui">Solo prueba</span>.</td></tr>
+      <tr><td><span class="ui">Archivar</span></td><td>La detiene para siempre y la quita del listado. El historial se conserva.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad — archivar es irreversible</span>
+    <p>Una automatización archivada <strong>no se puede reactivar</strong> desde la app. Si solo quieres detenerla un tiempo, usa <span class="ui">Pausar</span>.</p>
+  </div>
+
+  <h3>La ventana «Editar automatización»</h3>
+  <figure>
+    <img src="images/08-automation-edit.png" alt="Ventana Editar automatización con nombre, palabras clave, coincidencia, plantilla y respuesta pública.">
+    <figcaption>Al editar puedes cambiar el nombre, la publicación (solo en las específicas), las palabras clave, la coincidencia, la plantilla y la respuesta pública.</figcaption>
+  </figure>
+  <ul>
+    <li>En una automatización específica, el campo <span class="ui">ID de publicación de esta cuenta</span> sugiere las publicaciones de la cuenta.</li>
+    <li>En una general, el alcance no se puede cambiar.</li>
+    <li>Los botones con enlace existentes se conservan tal cual.</li>
+    <li>Al pulsar <span class="ui">Guardar cambios</span> verás «Automatización actualizada; se invalidaron elementos con plantilla anterior.»</li>
+  </ul>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Al guardar cambios, los mensajes que estaban <strong>en cola con la plantilla anterior ya no se enviarán</strong>. Así nunca sale un mensaje con un texto que ya corregiste.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 11 ===================== -->
+<section class="chapter" id="cap11" aria-labelledby="cap11-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 11</span>
+    <h1 id="cap11-title">Revisión pendiente</h1>
+    <p class="lead">Para los comentarios que llegaron antes de activar una automatización. Analizar solo lee: nunca envía nada.</p>
+  </header>
+
+  <p>El monitoreo solo atiende comentarios nuevos. Si tu publicación ya tenía comentarios con la palabra clave, puedes revisarlos aquí y decidir, uno por uno, cuáles responder. Es un proceso en dos tiempos: <strong>analizar</strong> (solo lectura) y <strong>procesar</strong> (con confirmación).</p>
+
+  <h2>Paso 1: analizar comentarios</h2>
+  <ol class="steps">
+    <li>Ve a <span class="ui">Revisión pendiente</span>.</li>
+    <li>En <span class="ui">Ventana</span>, elige cuánto tiempo hacia atrás revisar: <span class="ui">Últimas 2 horas</span>, <span class="ui">Últimas 24 horas</span>, <span class="ui">Últimos 3 días</span>, <span class="ui">Últimos 7 días</span> o <span class="ui">Desde una fecha…</span> (aparece el campo <span class="ui">Desde</span>).</li>
+    <li>Pulsa <span class="ui">Iniciar análisis</span>. Verás «Análisis iniciado; puede continuar usando otras secciones.»</li>
+  </ol>
+  <p>Si el selector de cuenta está en «Todas las cuentas», el análisis revisa todas las cuentas validadas; si eliges una, solo esa.</p>
+
+  <figure>
+    <img src="images/09-review-progress.png" alt="Análisis en curso con barra de progreso, texto Publicación X de Y, comentarios leídos, tiempo transcurrido y botón Cancelar.">
+    <figcaption>Análisis en curso: la barra avanza por publicaciones y muestra los comentarios leídos y el tiempo transcurrido. Puedes cancelarlo.</figcaption>
+  </figure>
+  <ul>
+    <li>El progreso dice, por ejemplo, «Publicación 3 de 12 · 1.240 comentarios leídos · 1 min 05 s transcurridos».</li>
+    <li>Puede tardar varios minutos. Puedes ir a otras secciones; si recargas la página, el seguimiento continúa.</li>
+    <li><span class="ui">Cancelar</span> detiene el análisis (muestra <span class="ui">Cancelando…</span> mientras termina).</li>
+  </ul>
+
+  <h2>Paso 2: entender el resumen</h2>
+  <p>Al terminar aparece una tarjeta con el resultado. Su título puede ser «Análisis finalizado», «Análisis terminado con cobertura incompleta» o «Análisis cancelado».</p>
+  <figure>
+    <img src="images/10-review-summary.png" alt="Tarjeta de resumen del análisis con comentarios leídos, coincidencias elegibles, expirados, en revisión, respuestas, ya respondidos y errores.">
+    <figcaption>El resumen del análisis. Ninguno de estos números significa que se haya enviado algo.</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th style="width:34%">Dato</th><th>Qué significa</th></tr></thead>
+    <tbody>
+      <tr><td>Comentarios leídos</td><td>Total de comentarios que la app leyó de Meta.</td></tr>
+      <tr><td>Coincidencias elegibles</td><td>Comentarios con palabra clave que <strong>sí</strong> se pueden responder.</td></tr>
+      <tr><td>Expirados (más de 7 días)</td><td>Comentarios con más de 7 días: Meta ya no permite responderlos en privado.</td></tr>
+      <tr><td>En revisión</td><td>Comentarios con palabra clave que la app <strong>no</strong> responde por seguridad: sin autor o sin fecha, escritos por tu propia cuenta, reclamados por dos automatizaciones a la vez o ya respondidos por tu cuenta.</td></tr>
+      <tr><td>Respuestas (hilos)</td><td>Respuestas dentro de un hilo de comentarios. No se responden: solo los comentarios principales.</td></tr>
+      <tr><td>Ya respondido por la cuenta (incluidos en revisión)</td><td>Comentarios que tu cuenta ya contestó públicamente. Se excluyen para no responder dos veces. Ya están sumados en «En revisión».</td></tr>
+      <tr><td>Con errores o cobertura incompleta</td><td>Publicaciones o cuentas que no se pudieron leer completas. Si es mayor que cero, repite el análisis.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Un análisis <strong>incompleto o cancelado no sirve para procesar</strong>. Solo los comentarios de un análisis <strong>completo</strong> aparecen en la lista para añadirlos a la cola. Si ves «cobertura incompleta», repite el análisis.</p>
+  </div>
+
+  <h2>Paso 3: revisar la lista de pendientes</h2>
+  <p>Debajo está <strong>Comentarios pendientes de revisión</strong>. Para verla debes tener <strong>una cuenta</strong> elegida (si el filtro está en «Todas las cuentas», la app te pide elegir una).</p>
+  <figure>
+    <img src="images/11-review-list-preview.png" alt="Tabla de comentarios pendientes con casilla, usuario, comentario, fecha, automatización y publicación, palabra clave y vista previa del mensaje desplegada.">
+    <figcaption>La lista de pendientes. Con «Ver mensaje» se despliega exactamente el texto y los botones que se enviarían.</figcaption>
+  </figure>
+  <ul>
+    <li>La lista <strong>se conserva al recargar</strong>: muestra «Última revisión: fecha · N comentarios pendientes».</li>
+    <li>Columnas: Seleccionar, Usuario, Comentario, Fecha, Automatización · publicación, Palabra clave y Vista previa del mensaje.</li>
+    <li><span class="ui">Ver mensaje</span> despliega la vista previa. Nada se envía hasta procesar.</li>
+    <li>No aparecen: comentarios que ya están en la cola, comentarios con más de 7 días y comentarios de automatizaciones archivadas.</li>
+    <li>Se muestran 50 por página, con <span class="ui">Anterior</span> y <span class="ui">Siguiente</span>.</li>
+  </ul>
+
+  <h2>Paso 4: seleccionar y procesar</h2>
+  <ol class="steps">
+    <li>En <span class="ui">Procesar con automatización</span>, elige la automatización. Solo aparecen las <strong>activas</strong> de esa cuenta. Si hay solo una, la app la elige sola.</li>
+    <li>Marca las casillas de los comentarios que quieres responder. Las casillas de comentarios de otra automatización aparecen desactivadas. También puedes usar <span class="ui">Seleccionar todos los visibles</span>.</li>
+    <li>Pulsa <span class="ui">Procesar selección revisada</span>.</li>
+    <li>Lee la confirmación y pulsa <span class="ui">Añadir N a la cola</span>.</li>
+  </ol>
+  <figure>
+    <img src="images/12-review-confirm.png" alt="Ventana de confirmación Añadir comentarios a la cola, con los botones Cancelar y Añadir a la cola.">
+    <figcaption>La confirmación advierte que, con el modo real activo y la automatización autorizada, podrían enviarse respuestas privadas reales.</figcaption>
+  </figure>
+  <p>Verás «Selección explícita añadida a la cola.» y los comentarios desaparecen de la lista de pendientes.</p>
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad</span>
+    <ul>
+      <li>En <strong>modo prueba</strong>, los elementos se crean como <span class="state">Simulado</span>: nada se envía.</li>
+      <li>En <strong>modo real</strong> y con la automatización <strong>autorizada</strong>, quedan <span class="state">En cola</span> y se envían de verdad (siempre que el monitoreo de la cuenta esté encendido).</li>
+      <li>Si alguno de los comentarios elegidos ya no cumple las condiciones, la app <strong>rechaza toda la solicitud</strong> y no añade ninguno. Repite el análisis e inténtalo de nuevo.</li>
+    </ul>
+  </div>
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>La detección de «ya respondido por la cuenta» usa los comentarios guardados en el último análisis. Si respondiste a mano hace poco, haz un análisis nuevo <strong>justo antes</strong> de procesar.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 12 ===================== -->
+<section class="chapter" id="cap12" aria-labelledby="cap12-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 12</span>
+    <h1 id="cap12-title">Monitoreo</h1>
+    <p class="lead">El monitoreo es el vigilante: sin él, ninguna automatización detecta comentarios nuevos ni se envía nada.</p>
+  </header>
+
+  <figure>
+    <img src="images/16-monitor.png" alt="Sección Monitoreo con el estado general, los botones Iniciar todas y Detener todas, y una tabla de cuentas con su estado y el botón Detener o Reanudar.">
+    <figcaption>La sección Monitoreo. Arriba a la derecha, el estado general (Activo o Detenido); abajo, el estado de cada cuenta.</figcaption>
+  </figure>
+
+  <h2>Encender y apagar</h2>
+  <table>
+    <thead><tr><th style="width:26%">Botón</th><th>Qué hace</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ui">Iniciar todas</span></td><td>Enciende el monitoreo de todas las cuentas validadas. Aviso: «Monitoreo iniciado para cuentas validadas.»</td></tr>
+      <tr><td><span class="ui">Detener todas</span></td><td>Lo apaga en todas las cuentas. Aviso: «Todo el monitoreo se detuvo.»</td></tr>
+      <tr><td><span class="ui">Detener</span> (por cuenta)</td><td>Pausa solo esa cuenta. Su estado pasa a <span class="ui">Pausado</span>.</td></tr>
+      <tr><td><span class="ui">Reanudar</span> (por cuenta)</td><td>La vuelve a <span class="ui">En monitoreo</span>. Solo funciona con cuentas y conexiones validadas.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout importante">
+    <span class="callout-title">Importante — el monitoreo se apaga al reiniciar</span>
+    <p>Cada vez que la app arranca, el monitoreo empieza <strong>apagado</strong> en todas las cuentas. Es una protección para que nada se envíe sin que tú lo decidas. Después de reiniciar el computador o la app, vuelve a <span class="ui">Monitoreo</span> y pulsa <span class="ui">Iniciar todas</span>.</p>
+  </div>
+
+  <h2>Cada cuánto revisa</h2>
+  <ul>
+    <li><strong>Automatizaciones específicas:</strong> una ronda cada <strong>60 segundos</strong>. En cada ronda lee la primera página de comentarios de la publicación y continúa con las siguientes páginas en rondas posteriores.</li>
+    <li><strong>Automatizaciones generales:</strong> la lista de publicaciones se actualiza desde Meta como máximo cada <strong>5 minutos</strong> (así detecta publicaciones nuevas), y cada publicación se revisa como máximo cada <strong>2 minutos</strong>. Primero se revisan las publicaciones que nunca se habían revisado. En cada ronda se revisan como máximo 25 publicaciones en total.</li>
+    <li><strong>Envíos:</strong> uno a la vez, con al menos <strong>10 segundos</strong> entre un envío y el siguiente.</li>
+  </ul>
+  <p>Mientras la cobertura no llega al final de los comentarios, el resumen la muestra como parcial.</p>
+
+  <h2>Qué detecta y qué no</h2>
+  <ul>
+    <li>Solo comentarios escritos <strong>después de activar</strong> la automatización.</li>
+    <li>Los comentarios anteriores nunca se procesan solos: usa <a href="#cap11">Revisión pendiente</a>.</li>
+    <li>No responde a comentarios de tu propia cuenta, respuestas dentro de hilos, comentarios sin autor ni comentarios ya respondidos por tu cuenta.</li>
+  </ul>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad — computador encendido</span>
+    <p>El monitoreo solo funciona mientras <strong>la app está abierta y el computador encendido y despierto</strong>. Configura tu equipo para que no entre en suspensión si quieres respuestas continuas. Si el equipo se apaga, los comentarios que lleguen mientras tanto podrán revisarse luego en Revisión pendiente, siempre dentro de los 7 días.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 13 ===================== -->
+<section class="chapter" id="cap13" aria-labelledby="cap13-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 13</span>
+    <h1 id="cap13-title">Cola e historial</h1>
+    <p class="lead">Aquí ves qué pasó con cada comentario: si se simuló, se envió, falló o necesita tu revisión.</p>
+  </header>
+
+  <figure>
+    <img src="images/13-queue-list.png" alt="Tabla Cola e historial con columnas Cuenta, Autor, Comentario, Estado, Intentos, ID de mensaje, Código seguro, Fecha e Historial.">
+    <figcaption>La cola. Puedes filtrar por estado con «Filtrar por estado» y abrir el detalle de cada elemento con «Ver».</figcaption>
+  </figure>
+
+  <h2>Las columnas</h2>
+  <ul>
+    <li><strong>Cuenta</strong> y <strong>Autor</strong>: tu cuenta y quien comentó.</li>
+    <li><strong>Comentario</strong>: el texto (recortado).</li>
+    <li><strong>Estado</strong>: ver la tabla siguiente.</li>
+    <li><strong>Intentos</strong>: cuántas veces se intentó enviar.</li>
+    <li><strong>ID de mensaje</strong>: el identificador que Meta devolvió al aceptar el envío.</li>
+    <li><strong>Código seguro</strong>: un código corto que explica un error, sin datos sensibles.</li>
+    <li><strong>Historial</strong>: <span class="ui">Ver</span> abre el detalle; <span class="ui">Ocultar</span> lo cierra.</li>
+  </ul>
+  <p>Se muestran 50 registros por página, con <span class="ui">Anterior</span> y <span class="ui">Siguiente</span>.</p>
+
+  <h2>Los estados</h2>
+  <table class="compact">
+    <thead><tr><th style="width:24%">Estado en pantalla</th><th style="width:20%">Código</th><th>Qué significa y qué hacer</th></tr></thead>
+    <tbody>
+      <tr><td>Simulado</td><td class="state">SIMULATED</td><td>Creado en modo prueba o por una automatización «Solo prueba». <strong>Nunca se envía</strong>, ni siquiera si luego activas el modo real.</td></tr>
+      <tr><td>En cola</td><td class="state">QUEUED</td><td>Esperando su turno para enviarse en modo real.</td></tr>
+      <tr><td>Intención registrada / Enviando</td><td class="state">SEND_INTENT_RECORDED / SENDING</td><td>La app anotó que iba a enviar y el envío está en curso (o se interrumpió). Normalmente dura segundos.</td></tr>
+      <tr><td>Enviado</td><td class="state">SENT</td><td>Meta aceptó el mensaje y devolvió un ID. Puedes usar <span class="ui">Verificar lectura</span>.</td></tr>
+      <tr><td>Falló (reintentable)</td><td class="state">FAILED_RETRYABLE</td><td>Meta pidió esperar (límite de velocidad) o no se pudo releer el comentario. Se reintenta solo, con esperas crecientes (máximo 15 minutos entre intentos y nunca antes de lo que Meta indique). Tras 5 intentos pasa a «Falló (definitivo)».</td></tr>
+      <tr><td>Falló (definitivo)</td><td class="state">FAILED_PERMANENT</td><td>Meta rechazó el envío o se agotaron los reintentos. Revisa el código seguro (permisos, token, comentario borrado…).</td></tr>
+      <tr><td>Resultado desconocido</td><td class="state">UNKNOWN_OUTCOME</td><td>No se sabe si el mensaje llegó (tiempo de espera agotado, error del servidor después de enviar, reinicio durante el envío). <strong>Nunca se reintenta</strong>, para no enviar dos veces. Revísalo a mano en Instagram.</td></tr>
+      <tr><td>Expirado</td><td class="state">EXPIRED</td><td>El comentario superó la ventana de 7 días antes de poder enviarse. No se envía nada.</td></tr>
+      <tr><td>Omitido</td><td class="state">SKIPPED</td><td>Justo antes de enviar, la app comprobó que ya no correspondía (por ejemplo, tu cuenta ya había respondido, o la publicación ahora tiene su propia automatización).</td></tr>
+    </tbody>
+  </table>
+  <p class="note">El filtro de estado incluye todos menos «Intención registrada» y «Enviando», que son pasajeros.</p>
+
+  <h2>El detalle de un elemento («Ver»)</h2>
+  <figure>
+    <img src="images/14-queue-detail-sent.png" alt="Detalle de un elemento enviado con el texto del mensaje, los botones, la respuesta pública, el botón Verificar lectura y la lista de eventos.">
+    <figcaption>Detalle de un mensaje enviado: el texto y los botones que se enviaron, la respuesta pública (si la hay), el botón «Verificar lectura» y el historial de eventos.</figcaption>
+  </figure>
+  <p>El detalle muestra:</p>
+  <ul>
+    <li><strong>El mensaje</strong>, con una etiqueta: «Mensaje enviado», «Mensaje pendiente de envío», «Mensaje intentado» o, en modo prueba, <span class="state">WOULD_SEND · No se envió (modo prueba)</span>.</li>
+    <li><strong>Los botones</strong> con su enlace.</li>
+    <li><strong>La respuesta pública</strong>, si la automatización la tiene (ver abajo).</li>
+    <li><strong>La lista de eventos</strong>: cada intento, con fecha y resultado. En un simulado verás «Sin intentos: simulado, nada se envió.»</li>
+  </ul>
+
+  <figure>
+    <img src="images/15-queue-simulated.png" alt="Detalle de un elemento simulado con la etiqueta WOULD_SEND · No se envió (modo prueba) y la respuesta pública WOULD_REPLY_PUBLIC · No se publicó (modo prueba).">
+    <figcaption>Un elemento simulado: puedes ver exactamente lo que se habría enviado y publicado, sin que haya salido nada.</figcaption>
+  </figure>
+
+  <h2>Verificar lectura (solo en «Enviado»)</h2>
+  <p>El botón <span class="ui">Verificar lectura</span> le pide a Meta el mensaje aceptado y lo compara con lo que se envió. No envía nada ni cambia el estado. Resultados posibles:</p>
+  <ul>
+    <li>«Lectura confirmada: el mensaje y los botones coinciden».</li>
+    <li>«Lectura confirmada, pero el contenido leído no coincide con lo enviado». No se reenvía nada: revisa en Instagram cómo se ve.</li>
+    <li>«No se pudo leer: <em>código</em>», a veces con una pista, como «El remitente no coincide con la cuenta», «El mensaje leído tiene otro ID» o «No se encontró destinatario».</li>
+    <li>«Espere 30 segundos antes de volver a verificar»: solo se permite una verificación por elemento cada 30 segundos.</li>
+  </ul>
+  <p>Cada envío aceptado ya incluye una lectura automática registrada como evento <code>readback</code>.</p>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Una lectura confirmada demuestra que Meta tiene el mensaje, <strong>no</strong> cómo se ve en el teléfono de la persona ni si pulsó los botones.</p>
+  </div>
+
+  <h2>La respuesta pública en el detalle</h2>
+  <p>Si la automatización responde también en público, el detalle muestra «Respuesta pública · <em>estado</em>» con el texto exacto publicado. Los estados son: <strong>Pendiente</strong>, <strong>Enviando</strong>, <strong>Publicada</strong>, <strong>Falló</strong>, <strong>Resultado desconocido</strong>, <strong>Omitida</strong> y <strong>Expirada</strong>. En modo prueba verás <span class="state">WOULD_REPLY_PUBLIC · No se publicó (modo prueba)</span>.</p>
+  <ul>
+    <li>Si Meta limita la velocidad, se reintenta solo hasta 3 intentos en total.</li>
+    <li><strong>Falló</strong>: el detalle muestra el botón <span class="ui">Reintentar respuesta pública</span>. Solo vuelve a programar la respuesta pública, dentro de las 24 horas posteriores al mensaje privado. Aviso: «Respuesta pública reprogramada; el mensaje privado no se repite.»</li>
+    <li><strong>Resultado desconocido</strong>: nunca se reintenta. Revisa a mano en Instagram.</li>
+  </ul>
+
+  <h2>Cómo resolver un «Resultado desconocido»</h2>
+  <ol class="steps">
+    <li>Abre <span class="ui">Ver</span> y revisa la lista de eventos.</li>
+    <li>Busca en Instagram si el mensaje llegó (por ejemplo, en la conversación con esa persona).</li>
+    <li>Si no llegó, atiende el comentario a mano. La app no lo reenviará y no tiene un botón para cambiar ese estado.</li>
+  </ol>
+</section>
+
+<!-- ===================== CAPÍTULO 14 ===================== -->
+<section class="chapter" id="cap14" aria-labelledby="cap14-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 14</span>
+    <h1 id="cap14-title">De modo prueba a modo real</h1>
+    <p class="lead">Una lista de verificación paso a paso. Hazla con calma la primera vez.</p>
+  </header>
+
+  <h2>Los cuatro interruptores</h2>
+  <p>Un mensaje real solo sale cuando <strong>todos</strong> estos interruptores están encendidos a la vez:</p>
+  <div class="switches" role="list">
+    <div class="switch" role="listitem"><strong>1. Modo real global</strong>Dry Run desactivado, con confirmación.</div>
+    <div class="switch" role="listitem"><strong>2. Automatización activa</strong>Botón «Activar».</div>
+    <div class="switch" role="listitem"><strong>3. Autorizada para real</strong>Botón «Autorizar real», con confirmación.</div>
+    <div class="switch" role="listitem"><strong>4. Monitoreo encendido</strong>Cuenta y conexión validadas.</div>
+  </div>
+  <p class="switch-result">Solo con los cuatro encendidos se envían mensajes privados reales.</p>
+  <p>Además, la cuenta no debe tener una retención de seguridad (capítulo 8) y el token debe seguir siendo válido.</p>
+
+  <h2>Antes de empezar</h2>
+  <ul class="checklist">
+    <li>Probaste todo en modo prueba y en la cola viste elementos <span class="state">Simulado</span> con el texto y los botones correctos.</li>
+    <li>Tienes una <strong>segunda cuenta de Instagram</strong> tuya para comentar. Los comentarios de la cuenta conectada se ignoran a propósito, así que no sirve comentar desde tu propia cuenta.</li>
+    <li>Tienes una publicación de prueba (o una real poco activa) con una automatización específica.</li>
+    <li>Tu cuenta no usa otra herramienta ni las respuestas automáticas de Instagram en esa publicación (ver capítulo 16).</li>
+  </ul>
+
+  <h2>Paso a paso</h2>
+  <ol class="steps">
+    <li><strong>Revisa la conexión.</strong> En <span class="ui">Conexiones</span>, la conexión y la cuenta deben estar <span class="ui">Validada</span>. Si dudas, pulsa <span class="ui">Probar y descubrir</span>.</li>
+    <li><strong>Activa la automatización de prueba.</strong> En <span class="ui">Automatizaciones</span>, pulsa <span class="ui">Activar</span>. El corte empieza ahora.</li>
+    <li><strong>Autoriza el envío real.</strong> Pulsa <span class="ui">Autorizar real</span>. En la ventana «Autorizar respuestas reales en «nombre»», lee el texto y pulsa <span class="ui">Autorizar modo real</span>. La etiqueta cambia a <span class="ui">Real autorizado</span>.</li>
+    <li><strong>Si la cuenta tiene retención heredada,</strong> pulsa <span class="ui">Revisar estado y reconocer</span> en Conexiones.</li>
+    <li><strong>Desactiva el modo prueba global.</strong> Pulsa el botón <span class="ui">Dry Run · Activo</span> del encabezado. Lee la ventana «Desactivar Dry Run» y pulsa <span class="ui">Desactivar Dry Run</span>. Verás «Modo real habilitado; no se procesó la cola simulada.»</li>
+    <li><strong>Enciende el monitoreo.</strong> En <span class="ui">Monitoreo</span>, pulsa <span class="ui">Iniciar todas</span> o <span class="ui">Reanudar</span> en tu cuenta.</li>
+    <li><strong>Comenta desde tu segunda cuenta</strong> la palabra clave en la publicación de prueba.</li>
+    <li><strong>Observa la cola.</strong> En uno o dos minutos debería aparecer un elemento <span class="state">En cola</span> y luego <span class="state">Enviado</span>.</li>
+    <li><strong>Comprueba.</strong> Pulsa <span class="ui">Ver</span> y luego <span class="ui">Verificar lectura</span>. Después, abre Instagram en la segunda cuenta y revisa la bandeja de entrada o la carpeta de <strong>Solicitudes</strong> (si esa cuenta no sigue a la tuya). Comprueba el texto y los botones.</li>
+    <li><strong>Si activaste la respuesta pública,</strong> espera unos segundos y verifica que apareció bajo el comentario.</li>
+  </ol>
+
+  <figure>
+    <img src="images/19-mode-confirm-dialog.png" alt="Ventana de confirmación Desactivar Dry Run con los botones Cancelar y Desactivar Dry Run.">
+    <figcaption>La confirmación para pasar a modo real. El botón «Cancelar» está seleccionado por defecto para que <kbd>Enter</kbd> nunca confirme por accidente.</figcaption>
+  </figure>
+
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad — qué NO hace el modo real</span>
+    <ul>
+      <li><strong>No envía la cola simulada anterior.</strong> Los elementos <span class="state">Simulado</span> se quedan como historial.</li>
+      <li><strong>No procesa comentarios antiguos.</strong> Solo los nuevos posteriores a la activación, o los que tú elijas en Revisión pendiente.</li>
+      <li><strong>No envía en automatizaciones «Solo prueba»</strong>: cada automatización necesita su propia autorización.</li>
+    </ul>
+  </div>
+
+  <div class="callout consejo">
+    <span class="callout-title">Consejo — empieza en pequeño</span>
+    <p>Usa el modo real primero con una sola automatización y una publicación con poco movimiento. Revisa la cola varias veces durante el primer día. Amplía solo cuando todo funcione como esperas.</p>
+  </div>
+
+  <h2>Cómo volver a modo prueba</h2>
+  <ol class="steps">
+    <li>Pulsa el botón <span class="ui">Modo real · Activo</span> del encabezado. Vuelve a modo prueba <strong>al instante</strong>, sin confirmación. Verás «Dry Run quedó activo.»</li>
+    <li>Si quieres detener todo, pulsa también <span class="ui">Detener todas</span> en Monitoreo.</li>
+    <li>Para quitar el permiso a una automatización concreta, pulsa <span class="ui">Quitar permiso real</span>.</li>
+  </ol>
+  <div class="callout importante">
+    <span class="callout-title">Importante</span>
+    <p>Un envío que ya empezó no se puede deshacer. Volver a modo prueba evita los envíos siguientes, pero un mensaje que Meta ya aceptó queda enviado.</p>
+    <p>El modo real <strong>se conserva al reiniciar</strong> la app. Lo único que se apaga solo es el monitoreo: en cuanto lo enciendas de nuevo, los envíos reales se reanudan.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 15 ===================== -->
+<section class="chapter" id="cap15" aria-labelledby="cap15-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 15</span>
+    <h1 id="cap15-title">Seguridad y privacidad</h1>
+    <p class="lead">Cómo protege la app tus datos y qué te toca cuidar a ti.</p>
+  </header>
+
+  <h2>La pantalla Ajustes</h2>
+  <figure>
+    <img src="images/20-settings.png" alt="Sección Ajustes con Modo de envío, Importar configuración existente y Protección de cuenta heredada.">
+    <figcaption>Ajustes: el modo de envío actual, la importación opcional de configuración y la protección de cuentas heredadas.</figcaption>
+  </figure>
+  <ul>
+    <li><strong>Modo de envío:</strong> muestra si está activo Dry Run o el modo real. El cambio se hace con el botón de modo del encabezado.</li>
+    <li><strong>Importar configuración existente:</strong> opción avanzada. El botón <span class="ui">Importar .env del proyecto</span> lee una vez un archivo de configuración fijo de la instalación y crea una conexión nueva con el token cifrado. No modifica el archivo ni muestra el secreto. Si no tienes ese archivo, no la necesitas: crea la conexión desde Conexiones.</li>
+    <li><strong>Protección de cuenta heredada:</strong> confirma que las retenciones de herramientas anteriores se revisan antes de cualquier envío real. La app nunca elimina bloqueos ni contadores externos.</li>
+  </ul>
+
+  <h2>Lo que hace la app por ti</h2>
+  <ul>
+    <li><strong>Solo local.</strong> La app solo escucha en tu propio computador (<code>127.0.0.1</code>) y rechaza peticiones de otros orígenes.</li>
+    <li><strong>Tokens cifrados.</strong> Se guardan cifrados (AES-256-GCM) con la llave <code>vault.key</code>, que vive fuera de la base de datos.</li>
+    <li><strong>Tokens invisibles.</strong> Nunca se envían al navegador ni se muestran después de guardarlos.</li>
+    <li><strong>Permisos de archivos.</strong> Al arrancar, la carpeta de datos queda accesible solo para tu usuario del sistema.</li>
+    <li><strong>Confirmaciones.</strong> Todas las acciones delicadas (modo real, autorizar, archivar, desconectar, procesar) piden confirmación.</li>
+    <li><strong>Registro antes de enviar.</strong> Antes de cada envío, la app anota la intención en la base de datos y vuelve a comprobar el comentario. Así nunca envía dos veces el mismo mensaje.</li>
+  </ul>
+
+  <h2>Lo que te toca cuidar</h2>
+  <ul class="checklist">
+    <li>Protege tu sesión del computador con contraseña. Quien entre con tu usuario puede abrir la app y leer la carpeta de datos: la app no protege contra eso.</li>
+    <li>No compartas <code>data/</code>, <code>vault.key</code> ni tus tokens.</li>
+    <li>Haz copias de <code>data/</code> en un lugar privado y cifrado.</li>
+    <li>No escribas tokens en documentos, correos ni chats. Pégalos directamente en el campo de la app.</li>
+    <li>Si sospechas que un token se filtró, genera uno nuevo en Meta, revoca el anterior (consulta la documentación oficial de Meta) y actualízalo en <span class="ui">Editar</span>.</li>
+    <li>Nunca pongas el secreto de tu app de Meta en ningún campo de Social Desk.</li>
+  </ul>
+
+  <h2>Privacidad de quienes comentan</h2>
+  <p>La app guarda en tu computador los nombres de usuario y el texto de los comentarios que analiza, y los mensajes enviados. Son datos personales de otras personas:</p>
+  <ul>
+    <li>Úsalos solo para responder lo que pidieron.</li>
+    <li>No los copies a otros sistemas sin una razón legítima.</li>
+    <li>Informa en tus mensajes que se trata de una respuesta automática, como recomienda Meta.</li>
+    <li>Cumple las políticas de Meta y las leyes de protección de datos de tu país.</li>
+  </ul>
+  <div class="callout seguridad">
+    <span class="callout-title">Seguridad</span>
+    <p>Envía mensajes solo a personas que los pidieron comentando tu palabra clave. Usar respuestas privadas para mensajes no solicitados va contra las políticas de Meta y puede llevar a restricciones de tu cuenta o de tu app.</p>
+  </div>
+</section>
+
+<!-- ===================== CAPÍTULO 16 ===================== -->
+<section class="chapter" id="cap16" aria-labelledby="cap16-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 16</span>
+    <h1 id="cap16-title">Solución de problemas</h1>
+    <p class="lead">Busca el síntoma en la tabla. La mayoría de problemas tiene una causa sencilla.</p>
+  </header>
+
+  <h2>Mensajes de error de la app</h2>
+  <table class="compact">
+    <thead><tr><th style="width:38%">Mensaje</th><th>Qué suele significar</th></tr></thead>
+    <tbody>
+      <tr><td>«Revise los campos e inténtelo de nuevo.»</td><td>Algún dato del formulario no es válido: palabras clave repetidas o vacías, variable no permitida, botón sin <code>https://</code>, título de botón de más de 20 caracteres, variante pública con enlace, etc.</td></tr>
+      <tr><td>«La operación fue rechazada por una condición de seguridad o estado.»</td><td>La acción no está permitida en el estado actual: por ejemplo, autorizar una automatización pausada, monitorear una cuenta no validada o seleccionar una cuenta que ya pertenece a otra conexión.</td></tr>
+      <tr><td>«La solicitud local no superó la protección de origen.»</td><td>Abriste la app desde una dirección distinta. Usa <code>http://localhost:PUERTO</code> y recarga la página.</td></tr>
+      <tr><td>«La cuenta indicada no existe.» / «La conexión indicada no existe.»</td><td>La cuenta o conexión ya no está disponible. Pulsa <span class="ui">Actualizar</span>.</td></tr>
+      <tr><td>«No se pudo completar el análisis para una cuenta.»</td><td>Meta devolvió un error durante el análisis. Revisa el token y repite.</td></tr>
+      <tr><td>«Revise el estado de la cuenta y vuelva a intentarlo.»</td><td>Error genérico: casi siempre la cuenta o la conexión no está validada.</td></tr>
+      <tr><td>«Cargando datos locales…» no desaparece</td><td>La app se detuvo. Revisa la terminal y vuelve a ejecutar <code>npm start</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Síntomas frecuentes</h2>
+  <table class="compact">
+    <thead><tr><th style="width:24%">Síntoma</th><th style="width:30%">Causa probable</th><th>Solución</th></tr></thead>
+    <tbody>
+      <tr><td>La automatización está «Activa» pero no envía nada</td><td>El monitoreo está apagado (se apaga en cada reinicio), o el modo prueba está activo, o la automatización es «Solo prueba».</td><td>Revisa los cuatro interruptores del capítulo 14. Enciende el monitoreo con <span class="ui">Iniciar todas</span>.</td></tr>
+      <tr><td>En la cola todo sale «Simulado»</td><td>Modo prueba global activo o automatización sin autorización real.</td><td>Es lo esperado en modo prueba. Para enviar de verdad, sigue el capítulo 14. Los simulados antiguos no se envían nunca.</td></tr>
+      <tr><td>Comenté desde mi cuenta y no pasó nada</td><td>La app ignora los comentarios de la cuenta conectada.</td><td>Comenta desde otra cuenta de Instagram.</td></tr>
+      <tr><td>Un comentario antiguo no se respondió</td><td>Solo se responden comentarios posteriores a «Activar».</td><td>Usa <a href="#cap11">Revisión pendiente</a> (dentro de los 7 días).</td></tr>
+      <tr><td>«Revise los campos…» al guardar una automatización</td><td>Palabras clave repetidas (por ejemplo <code>guía, Guia</code>), variable desconocida o botón inválido.</td><td>Deja cada palabra una sola vez y revisa las reglas del capítulo 10.</td></tr>
+      <tr><td>No puedo pulsar «Autorizar real»</td><td>La automatización está pausada, la cuenta no está validada o tiene retención de seguridad.</td><td>Actívala primero, valida la conexión y, si aplica, reconoce la retención heredada.</td></tr>
+      <tr><td>La conexión dice «Token inválido»</td><td>Token vencido (60 días), incompleto, revocado o sin permisos.</td><td>Genera un token nuevo y pégalo con <span class="ui">Editar</span>. Luego <span class="ui">Probar y descubrir</span> y vuelve a encender el monitoreo.</td></tr>
+      <tr><td>Antes funcionaba y de repente nada se envía</td><td>Token vencido o cambiado; el monitoreo queda pausado hasta revalidar.</td><td>Valida de nuevo en Conexiones y enciende el monitoreo.</td></tr>
+      <tr><td>Respuesta pública «Falló» con «Falta el permiso para responder comentarios en esta conexión»</td><td>El token no tiene el permiso de comentarios.</td><td>Genera un token con <code>instagram_business_manage_comments</code> (o <code>instagram_manage_comments</code>). Luego usa <span class="ui">Reintentar respuesta pública</span> dentro de las 24 horas.</td></tr>
+      <tr><td>Estado «Resultado desconocido»</td><td>Se perdió la respuesta de Meta (red, tiempo agotado, reinicio durante el envío).</td><td>No se reintenta nunca. Revisa en Instagram si llegó (capítulo 13).</td></tr>
+      <tr><td>«Lectura confirmada, pero el contenido leído no coincide»</td><td>Meta devolvió el mensaje con otro formato o los botones no se leyeron igual.</td><td>No se reenvía nada. Revisa en Instagram cómo se ve. Si el texto se ve bien, puedes ignorarlo.</td></tr>
+      <tr><td>«No se pudo leer: … (El remitente no coincide con la cuenta)»</td><td>La lectura de Meta no coincide con tu cuenta.</td><td>Verifica que la conexión apunte a la cuenta correcta y revisa en Instagram.</td></tr>
+      <tr><td>«Falló (definitivo)» en muchos elementos</td><td>Meta rechaza el envío: permisos, comentario borrado, ya respondido por otra herramienta, o la persona no puede recibir mensajes.</td><td>Revisa el código seguro. Comprueba permisos y que ninguna otra herramienta responda esos comentarios.</td></tr>
+      <tr><td>Otra herramienta o las respuestas automáticas de Instagram respondieron primero</td><td>Meta permite <strong>un solo mensaje privado por comentario</strong>: el primero en enviarlo gana.</td><td>No uses dos herramientas sobre la misma publicación. Desactiva la otra automatización o no crees la de Social Desk ahí.</td></tr>
+      <tr><td>Muchos «Falló (reintentable)»</td><td>Límite de velocidad de Meta.</td><td>Espera: la app reintenta sola con pausas. Reduce el volumen si se repite.</td></tr>
+      <tr><td>Elementos «Expirado»</td><td>Pasaron 7 días desde el comentario antes de poder enviar.</td><td>No hay solución en la app. Mantén el monitoreo encendido o revisa pendientes con más frecuencia.</td></tr>
+      <tr><td>La app no responde en el navegador</td><td>La app está cerrada, el computador se suspendió o cambiaste de puerto.</td><td>Abre la terminal, ejecuta <code>npm start</code> y abre la dirección correcta. Después enciende el monitoreo.</td></tr>
+      <tr><td>Al arrancar dice que ya hay otra copia</td><td>Hay otra ventana de terminal con la app abierta.</td><td>Ciérrala con <kbd>Ctrl</kbd>+<kbd>C</kbd> o usa esa misma.</td></tr>
+      <tr><td>La app no arranca tras restaurar una copia</td><td>Falta <code>vault.key</code> o no corresponde a esa base de datos.</td><td>Restaura la llave correcta junto con la base de datos (capítulo 3).</td></tr>
+      <tr><td>«Probar y descubrir» no encuentra cuentas (Facebook Login)</td><td>La cuenta de Instagram no está vinculada a la página, o tu usuario no tiene tareas en la página, o faltan <code>pages_show_list</code> / <code>instagram_basic</code>.</td><td>Revisa el capítulo 5 y genera el token otra vez incluyendo la página.</td></tr>
+      <tr><td>El análisis dice «cobertura incompleta»</td><td>Meta no devolvió todas las páginas o una cuenta falló.</td><td>Repite el análisis. Solo los análisis completos se pueden procesar.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===================== CAPÍTULO 17 ===================== -->
+<section class="chapter faq" id="cap17" aria-labelledby="cap17-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 17</span>
+    <h1 id="cap17-title">Preguntas frecuentes</h1>
+  </header>
+
+  <h3>¿La app cuesta algo o usa la nube?</h3>
+  <p>No usa servicios en la nube: todo corre en tu computador. Meta no cobra por usar su API dentro de sus límites, pero revisa siempre sus condiciones.</p>
+
+  <h3>¿Puedo cerrar el navegador?</h3>
+  <p>Sí. Lo que importa es que la app siga ejecutándose en la terminal y el computador esté encendido. El navegador solo es la pantalla de control.</p>
+
+  <h3>¿Puedo usarla desde el celular?</h3>
+  <p>No por internet. La app solo acepta conexiones desde el mismo computador donde se ejecuta.</p>
+
+  <h3>¿Por qué no respondió al instante?</h3>
+  <p>La app consulta a Meta cada 60 segundos (o cada 2 minutos en automatizaciones generales) y deja al menos 10 segundos entre envíos. Unos minutos de demora son normales.</p>
+
+  <h3>¿Puedo responder a alguien dos veces?</h3>
+  <p>No. Meta permite un solo mensaje privado por comentario, y la app nunca reenvía un mensaje ya intentado.</p>
+
+  <h3>¿Puedo responder comentarios de hace dos semanas?</h3>
+  <p>No. Meta solo permite respuestas privadas dentro de los 7 días posteriores al comentario.</p>
+
+  <h3>¿Dónde llega el mensaje?</h3>
+  <p>A la bandeja de entrada si la persona sigue tu cuenta; si no, a la carpeta de Solicitudes de mensajes.</p>
+
+  <h3>¿Qué pasa con los simulados si activo el modo real?</h3>
+  <p>Nada. Se quedan como historial y nunca se envían.</p>
+
+  <h3>Edité el texto de una automatización. ¿Se envía el texto viejo?</h3>
+  <p>No. Los elementos en cola con la plantilla anterior se invalidan y no se envían.</p>
+
+  <h3>¿Puedo administrar varias cuentas?</h3>
+  <p>Sí: crea una conexión por token y selecciona cada cuenta. Usa el selector «Cuenta» para trabajar con una a la vez. Recuerda que, sin la revisión de Meta, solo puedes usar cuentas propias o que administras.</p>
+
+  <h3>¿Puedo ofrecer esto a mis clientes?</h3>
+  <p>No tal como está. Atender cuentas de otras personas exige revisión de la app y verificación del negocio por parte de Meta (capítulo 6), y Social Desk es una herramienta local de un solo usuario.</p>
+
+  <h3>¿Qué hago cada 60 días?</h3>
+  <p>Renueva el token (capítulos 4 y 5), pégalo con <span class="ui">Editar</span>, valida con <span class="ui">Probar y descubrir</span> y enciende el monitoreo.</p>
+
+  <h3>¿Puedo recuperar una automatización archivada?</h3>
+  <p>No desde la app. Crea una nueva con la misma configuración.</p>
+
+  <h3>Reinicié el computador. ¿Qué hago?</h3>
+  <p>Abre la terminal, entra a la carpeta de la app, ejecuta <code>npm start</code>, abre <code>http://localhost:3000</code> y pulsa <span class="ui">Iniciar todas</span> en Monitoreo. El modo de envío (prueba o real) se conserva; el monitoreo no.</p>
+</section>
+
+<!-- ===================== CAPÍTULO 18 ===================== -->
+<section class="chapter" id="cap18" aria-labelledby="cap18-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Capítulo 18</span>
+    <h1 id="cap18-title">Glosario</h1>
+  </header>
+  <dl class="glossary">
+    <div><dt>Acceso estándar / avanzado</dt><dd>Niveles de acceso de Meta. El estándar basta para tus propias cuentas; el avanzado, necesario para cuentas de terceros, requiere revisión de la app y verificación del negocio.</dd></div>
+    <div><dt>App de Meta</dt><dd>El registro que creas en el panel de desarrolladores de Meta para obtener permisos y tokens. No es Social Desk.</dd></div>
+    <div><dt>App Review (revisión de la app)</dt><dd>Proceso en el que Meta comprueba cómo usa tu app cada permiso antes de concederle acceso avanzado.</dd></div>
+    <div><dt>Automatización</dt><dd>Regla de Social Desk: palabras clave + mensaje + publicación (o todas).</dd></div>
+    <div><dt>Automatización general</dt><dd>La que aplica a todas las publicaciones de la cuenta que no tengan su propia automatización activa.</dd></div>
+    <div><dt>Cola</dt><dd>Lista de respuestas creadas por la app, con su estado e historial.</dd></div>
+    <div><dt>Corte (cutoff)</dt><dd>Momento en que activaste una automatización. Solo cuentan comentarios posteriores.</dd></div>
+    <div><dt>Cuenta profesional</dt><dd>Cuenta de Instagram de tipo Empresa o Creador. Es la única que funciona con la API.</dd></div>
+    <div><dt>Dry Run (modo prueba)</dt><dd>Modo en el que la app analiza y simula, sin enviar nada real. Es el modo inicial.</dd></div>
+    <div><dt>Evaluador (tester)</dt><dd>Rol en una app de Meta que permite usarla en modo desarrollo sin revisión.</dd></div>
+    <div><dt>Graph API</dt><dd>La API de Meta que usa la app para leer comentarios y enviar mensajes. Tiene versiones como <code>v26.0</code>.</dd></div>
+    <div><dt>Lectura (readback)</dt><dd>Consulta a Meta del mensaje ya aceptado, para comprobar que coincide con lo enviado.</dd></div>
+    <div><dt>Modo desarrollo / Live</dt><dd>Estados de una app de Meta. En desarrollo, solo la usan personas con rol.</dd></div>
+    <div><dt>Monitoreo</dt><dd>La revisión periódica de comentarios nuevos. Se apaga en cada reinicio.</dd></div>
+    <div><dt>Respuesta privada (private reply)</dt><dd>Función de Meta para enviar un único mensaje privado a quien comentó, dentro de 7 días.</dd></div>
+    <div><dt>Respuesta pública</dt><dd>Respuesta opcional visible bajo el comentario, publicada solo después de un mensaje privado aceptado.</dd></div>
+    <div><dt>Revisión pendiente</dt><dd>Análisis manual de comentarios anteriores, con selección y confirmación explícitas.</dd></div>
+    <div><dt>Simulado</dt><dd>Elemento de la cola creado en modo prueba. Nunca se envía.</dd></div>
+    <div><dt>Token de acceso</dt><dd>Clave larga que Meta te da para que una app actúe sobre tu cuenta con ciertos permisos.</dd></div>
+    <div><dt>Token de página</dt><dd>Token de Facebook asociado a una página. En Facebook Login, la app lo obtiene a partir de tu token de usuario.</dd></div>
+    <div><dt>Variable</dt><dd>Marcador como <code>{{username}}</code> que la app reemplaza por un dato real al enviar.</dd></div>
+    <div><dt>Variante</dt><dd>Cada frase posible de la respuesta pública. La app las rota.</dd></div>
+    <div><dt>vault.key</dt><dd>Archivo con la llave que cifra tus tokens. Nunca lo compartas.</dd></div>
+    <div><dt>Ventana de 7 días</dt><dd>Plazo de Meta para enviar una respuesta privada después de un comentario.</dd></div>
+  </dl>
+</section>
+
+<!-- ===================== ANEXO ===================== -->
+<section class="chapter" id="anexo" aria-labelledby="anexo-title">
+  <header class="chapter-head">
+    <span class="chapter-num">Anexo</span>
+    <h1 id="anexo-title">Fuentes oficiales y límites conocidos</h1>
+    <p class="lead">Documentación de Meta consultada para este manual (octubre de 2026) y límites conocidos de la app.</p>
+  </header>
+
+  <h2>Fuentes oficiales de Meta</h2>
+  <div class="sources" style="border-top:0;margin-top:0;padding-top:0">
+    <h3>Plataforma de Instagram</h3>
+    <ul>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/overview">developers.facebook.com/documentation/instagram-platform/overview</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/private-replies">developers.facebook.com/documentation/instagram-platform/private-replies</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/create-an-instagram-app">developers.facebook.com/documentation/instagram-platform/create-an-instagram-app</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/get-started">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/get-started</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api">developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/reference/access_token">developers.facebook.com/documentation/instagram-platform/reference/access_token</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/reference/refresh_access_token">developers.facebook.com/documentation/instagram-platform/reference/refresh_access_token</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login">developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/get-started">developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/get-started</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/business-login-for-instagram">developers.facebook.com/documentation/instagram-platform/instagram-api-with-facebook-login/business-login-for-instagram</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/comment-moderation">developers.facebook.com/documentation/instagram-platform/comment-moderation</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-comment/replies">developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-comment/replies</a></li>
+      <li><a href="https://developers.facebook.com/documentation/instagram-platform/app-review">developers.facebook.com/documentation/instagram-platform/app-review</a></li>
+    </ul>
+    <h3>Mensajería, tokens y desarrollo de apps</h3>
+    <ul>
+      <li><a href="https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/private-replies">developers.facebook.com/documentation/business-messaging/instagram-messaging/features/private-replies</a></li>
+      <li><a href="https://developers.facebook.com/documentation/facebook-login/guides/access-tokens">developers.facebook.com/documentation/facebook-login/guides/access-tokens</a></li>
+      <li><a href="https://developers.facebook.com/documentation/facebook-login/guides/access-tokens/get-long-lived">developers.facebook.com/documentation/facebook-login/guides/access-tokens/get-long-lived</a></li>
+      <li><a href="https://developers.facebook.com/documentation/development/register">developers.facebook.com/documentation/development/register</a></li>
+      <li><a href="https://developers.facebook.com/documentation/development/create-an-app">developers.facebook.com/documentation/development/create-an-app</a></li>
+      <li><a href="https://developers.facebook.com/documentation/development/build-and-test/app-modes">developers.facebook.com/documentation/development/build-and-test/app-modes</a></li>
+      <li><a href="https://developers.facebook.com/documentation/development/build-and-test/app-roles">developers.facebook.com/documentation/development/build-and-test/app-roles</a></li>
+      <li><a href="https://developers.facebook.com/documentation/development/release/business-verification">developers.facebook.com/documentation/development/release/business-verification</a></li>
+      <li><a href="https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/app-review">developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/app-review</a></li>
+      <li><a href="https://developers.facebook.com/docs/graph-api/overview/access-levels">developers.facebook.com/docs/graph-api/overview/access-levels</a></li>
+    </ul>
+    <h3>Herramientas oficiales</h3>
+    <ul>
+      <li>Panel de apps: <a href="https://developers.facebook.com/apps">developers.facebook.com/apps</a></li>
+      <li>Explorador de la API Graph: <a href="https://developers.facebook.com/tools/explorer">developers.facebook.com/tools/explorer</a></li>
+      <li>Depurador de tokens de acceso: <a href="https://developers.facebook.com/tools/debug/accesstoken/">developers.facebook.com/tools/debug/accesstoken/</a></li>
+    </ul>
+  </div>
+
+  <h2>Puntos que debes verificar en la documentación oficial</h2>
+  <ul>
+    <li>El nombre exacto del caso de uso al crear la app: la versión en inglés de la guía habla de un caso de uso para «administrar mensajes y contenido en Instagram»; la versión en español (mayo de 2025) indica «Otro» y tipo «Empresa».</li>
+    <li>Cómo aceptar una invitación de evaluador de Instagram si la cuenta queda «pendiente».</li>
+    <li>La lista completa de permisos para respuestas privadas con Facebook Login: la guía de Instagram y la de Messenger no coinciden (<code>pages_messaging</code>, función Human Agent, acceso avanzado).</li>
+    <li>Las condiciones exactas en que un token de página sin vencimiento deja de funcionar.</li>
+    <li>La versión vigente de la API Graph (la app propone <code>v26.0</code>).</li>
+    <li>Cómo revocar el acceso de una app o un token filtrado.</li>
+  </ul>
+
+  <h2>Límites conocidos de Social Desk</h2>
+  <table class="compact">
+    <thead><tr><th style="width:34%">Límite</th><th>Detalle</th></tr></thead>
+    <tbody>
+      <tr><td>Un solo usuario, un solo equipo</td><td>Sin cuentas ni contraseñas propias; solo accesible desde <code>localhost</code>.</td></tr>
+      <tr><td>Sin renovación automática de tokens</td><td>Debes renovar el token antes de que venza.</td></tr>
+      <tr><td>Revisión periódica, no instantánea</td><td>60 s (específicas) o 2 min por publicación (generales); un envío como mínimo cada 10 s.</td></tr>
+      <tr><td>Primera página por ronda</td><td>En cada ronda se lee la primera página de comentarios; el resto se cubre gradualmente y puede quedar parcial.</td></tr>
+      <tr><td>Publicaciones</td><td>«Actualizar publicaciones» descarga la primera página que entrega Meta (hasta 100).</td></tr>
+      <tr><td>Monitoreo apagado tras reiniciar</td><td>Debes encenderlo a mano cada vez.</td></tr>
+      <tr><td>«Resultado desconocido» sin resolución en la app</td><td>Se revisa a mano en Instagram.</td></tr>
+      <tr><td>Botones no editables</td><td>Para cambiarlos, crea una automatización nueva.</td></tr>
+      <tr><td>Archivar es irreversible</td><td>No se puede reactivar desde la app.</td></tr>
+      <tr><td>«Ya respondido» según el último análisis</td><td>Una respuesta tuya posterior al último análisis no se conoce hasta el siguiente.</td></tr>
+      <tr><td>Windows</td><td>El arranque usa sintaxis de Linux/macOS; en Windows usa WSL o Git Bash.</td></tr>
+      <tr><td>Solo Instagram</td><td>Sin TikTok, sin comentarios de páginas de Facebook, sin funciones de nube ni de inteligencia artificial.</td></tr>
+      <tr><td>Revisión de Meta</td><td>Hoy no está preparada para la revisión de Meta; úsala solo con cuentas propias o que administras.</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Social Desk no está afiliada a Meta Platforms, Inc. Instagram y Facebook son marcas de sus respectivos titulares.</p>
+</section>
+
+</div>
+</body>
+</html>

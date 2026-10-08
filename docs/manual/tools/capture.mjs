@@ -225,7 +225,7 @@ class Browser {
     const started = Date.now();
     for (;;) {
       let value = false;
-      try { value = await this.eval(expression); } catch { value = false; }
+      try { value = await this.eval(`!!(${expression})`); } catch { value = false; }
       if (value) return value;
       if (Date.now() - started > timeout) throw new Error(`Timed out waiting for: ${label}`);
       await sleep(120);
@@ -394,6 +394,8 @@ async function phaseB(browser) {
   await sleep(300);
 
   // 09/10 Pending review: analysis with progress, then the finished summary
+  // The pending table is wide: use a wider viewport for this section so no column is cut off.
+  await browser.metrics(1700, VIEW_H);
   await browser.nav('Revisión pendiente');
   await browser.waitFor('window.__h.find("span.count-badge", "6 pendientes")', 30000, '6 pending');
   await browser.settle();
@@ -408,7 +410,7 @@ async function phaseB(browser) {
   await browser.shot('10-review-summary');
 
   // 11 Pending list with one message preview expanded
-  await browser.eval(`(() => { const d = document.querySelector('.pending-review details.message-preview'); d.open = true; d.scrollIntoView({ block: 'center' }); return true; })()`);
+  await browser.eval(`(() => { const d = document.querySelector('.pending-review details.message-preview'); d.open = true; document.querySelectorAll('.table-wrap').forEach((w) => { w.scrollLeft = 0; }); return true; })()`);
   await sleep(300);
   await browser.shot('11-review-list-preview');
 
@@ -429,6 +431,7 @@ async function phaseB(browser) {
   await browser.waitFor('document.querySelectorAll("tbody tr").length >= 10', 30000, 'queue rows');
   await browser.settle();
   await browser.shot('13-queue-list');
+  await browser.metrics(VIEW_W, VIEW_H);
 
   await setQueueFilter(browser, 'Enviado');
   await browser.eval(`document.querySelector('tbody tr .text-button').click()`);
