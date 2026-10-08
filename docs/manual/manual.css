@@ -1,0 +1,552 @@
+/* Social Desk — Manual de usuario
+ * Hoja de estilos pensada primero para impresión (A4) con Chrome headless.
+ * En pantalla se muestra como una columna de papel centrada.
+ */
+
+:root {
+  --ink: #1d2433;
+  --ink-soft: #4a5468;
+  --muted: #6b7486;
+  --line: #d9dee8;
+  --paper: #ffffff;
+  --bg: #eef1f6;
+  --accent: #2f4fb4;
+  --accent-soft: #e8edfb;
+  --important: #b26a00;
+  --important-bg: #fff6e6;
+  --tip: #1f7a4d;
+  --tip-bg: #e9f7ef;
+  --security: #b3261e;
+  --security-bg: #fdecea;
+  --code-bg: #f3f5f9;
+  --font-body: "Noto Sans", "Segoe UI", "Helvetica Neue", Arial, "DejaVu Sans", sans-serif;
+  --font-head: "Noto Sans", "Segoe UI", "Helvetica Neue", Arial, "DejaVu Sans", sans-serif;
+  --font-mono: "Noto Sans Mono", "DejaVu Sans Mono", Consolas, "Courier New", monospace;
+}
+
+/* ---------- Página impresa ---------- */
+
+@page {
+  size: A4;
+  margin: 18mm 18mm 20mm 18mm;
+
+  @bottom-left {
+    content: "Social Desk — Manual de usuario";
+    font-family: var(--font-body);
+    font-size: 8pt;
+    color: #7a8294;
+  }
+
+  @bottom-right {
+    content: "Página " counter(page);
+    font-family: var(--font-body);
+    font-size: 8pt;
+    color: #7a8294;
+  }
+}
+
+/* La portada no lleva pie de página. */
+@page :first {
+  @bottom-left { content: none; }
+  @bottom-right { content: none; }
+}
+
+/* ---------- Base ---------- */
+
+* { box-sizing: border-box; }
+
+html {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 10.5pt;
+  line-height: 1.55;
+  hyphens: auto;
+  counter-reset: figure;
+}
+
+p { margin: 0 0 3mm; orphans: 3; widows: 3; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+strong { font-weight: 700; }
+
+code, kbd, .mono {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+code {
+  background: var(--code-bg);
+  border: 1px solid #e3e7ef;
+  border-radius: 3px;
+  padding: 0 1.2mm;
+  word-break: break-word;
+}
+
+kbd {
+  border: 1px solid #b9c0ce;
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 0 1.2mm;
+  background: #fafbfd;
+}
+
+pre {
+  font-family: var(--font-mono);
+  font-size: 9pt;
+  background: var(--code-bg);
+  border: 1px solid #e3e7ef;
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 3mm 4mm;
+  margin: 0 0 4mm;
+  white-space: pre-wrap;
+  word-break: break-word;
+  break-inside: avoid;
+}
+
+pre code { background: none; border: 0; padding: 0; font-size: 1em; }
+
+/* Etiquetas de la interfaz (botones, menús) */
+.ui {
+  font-weight: 600;
+  color: #22305f;
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 0 1.2mm;
+  white-space: nowrap;
+}
+
+.state {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- Encabezados ---------- */
+
+h1, h2, h3, h4 {
+  font-family: var(--font-head);
+  color: var(--ink);
+  line-height: 1.25;
+  break-after: avoid;
+  page-break-after: avoid;
+  break-inside: avoid;
+}
+
+h1 { font-size: 22pt; margin: 0 0 6mm; letter-spacing: -0.01em; }
+h2 { font-size: 14pt; margin: 8mm 0 3mm; color: var(--accent); }
+h3 { font-size: 11.5pt; margin: 6mm 0 2mm; }
+h4 { font-size: 10.5pt; margin: 4mm 0 1.5mm; color: var(--ink-soft); }
+
+/* Evita que un encabezado quede solo al final de una página. */
+h2 + *, h3 + *, h4 + * { break-before: avoid; page-break-before: avoid; }
+
+/* ---------- Capítulos ---------- */
+
+.chapter {
+  break-before: page;
+  page-break-before: always;
+}
+
+.chapter-head {
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 4mm;
+  margin-bottom: 6mm;
+  break-after: avoid;
+}
+
+.chapter-num {
+  display: block;
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1.5mm;
+}
+
+.chapter-head h1 { margin: 0; }
+
+.lead {
+  font-size: 11.5pt;
+  color: var(--ink-soft);
+  margin: 3mm 0 0;
+}
+
+/* ---------- Portada ---------- */
+
+.cover {
+  height: 255mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  break-after: page;
+  page-break-after: always;
+}
+
+.cover-top { padding-top: 30mm; }
+
+.cover-mark {
+  width: 22mm;
+  height: 22mm;
+  border-radius: 6mm;
+  background: var(--accent);
+  color: #fff;
+  font-size: 26pt;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12mm;
+}
+
+.cover h1 {
+  font-size: 34pt;
+  margin: 0 0 4mm;
+  letter-spacing: -0.02em;
+}
+
+.cover .subtitle {
+  font-size: 15pt;
+  color: var(--ink-soft);
+  max-width: 140mm;
+  margin: 0 0 10mm;
+}
+
+.cover-band {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 5mm 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6mm;
+  font-size: 9.5pt;
+}
+
+.cover-band strong { display: block; color: var(--accent); font-size: 8pt; letter-spacing: 0.1em; text-transform: uppercase; }
+
+.cover-foot {
+  font-size: 9pt;
+  color: var(--muted);
+}
+
+/* ---------- Índice ---------- */
+
+.toc { break-after: page; page-break-after: always; }
+
+.toc ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: none;
+}
+
+.toc > ol > li {
+  border-bottom: 1px dotted var(--line);
+  padding: 1.6mm 0;
+  break-inside: avoid;
+}
+
+.toc > ol > li > a {
+  display: flex;
+  gap: 3mm;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.toc .toc-num {
+  display: inline-block;
+  min-width: 9mm;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.toc ol ol {
+  margin: 0.8mm 0 0 12mm;
+  font-size: 9pt;
+  color: var(--ink-soft);
+  columns: 2;
+  column-gap: 8mm;
+}
+
+.toc ol ol a { color: var(--ink-soft); }
+
+/* ---------- Listas ---------- */
+
+ul, ol { margin: 0 0 4mm; padding-left: 6mm; }
+li { margin: 0 0 1.2mm; }
+li > ul, li > ol { margin-top: 1.2mm; }
+
+/* Lista de pasos numerados */
+ol.steps {
+  list-style: none;
+  counter-reset: step;
+  padding-left: 0;
+}
+
+ol.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 10mm;
+  margin-bottom: 2.6mm;
+  break-inside: avoid;
+}
+
+ol.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.2mm;
+  width: 6.5mm;
+  height: 6.5mm;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 9pt;
+  line-height: 6.5mm;
+  text-align: center;
+}
+
+/* Lista de verificación */
+ul.checklist { list-style: none; padding-left: 0; }
+ul.checklist > li {
+  position: relative;
+  padding-left: 8mm;
+  break-inside: avoid;
+}
+ul.checklist > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1mm;
+  width: 4mm;
+  height: 4mm;
+  border: 1.5px solid var(--accent);
+  border-radius: 1mm;
+}
+
+/* ---------- Recuadros (callouts) ---------- */
+
+.callout {
+  border: 1px solid;
+  border-left-width: 4px;
+  border-radius: 4px;
+  padding: 3mm 4mm 2mm;
+  margin: 0 0 4.5mm;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.callout > .callout-title {
+  display: block;
+  font-weight: 800;
+  font-size: 8.5pt;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 1.2mm;
+}
+
+.callout p:last-child, .callout ul:last-child, .callout ol:last-child { margin-bottom: 1mm; }
+
+.callout.importante { border-color: #f0c070; border-left-color: var(--important); background: var(--important-bg); }
+.callout.importante > .callout-title { color: var(--important); }
+.callout.importante > .callout-title::before { content: "! "; }
+
+.callout.consejo { border-color: #9fd8b7; border-left-color: var(--tip); background: var(--tip-bg); }
+.callout.consejo > .callout-title { color: var(--tip); }
+.callout.consejo > .callout-title::before { content: "✓ "; }
+
+.callout.seguridad { border-color: #f0a9a3; border-left-color: var(--security); background: var(--security-bg); }
+.callout.seguridad > .callout-title { color: var(--security); }
+.callout.seguridad > .callout-title::before { content: "⚠ "; }
+
+.callout.verificar { border-color: var(--line); border-left-color: var(--muted); background: #f6f7fa; }
+.callout.verificar > .callout-title { color: var(--ink-soft); }
+
+/* ---------- Figuras ---------- */
+
+figure {
+  margin: 2mm 0 6mm;
+  padding: 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  counter-increment: figure;
+  text-align: center;
+}
+
+figure img {
+  display: block;
+  max-width: 100%;
+  max-height: 150mm;
+  height: auto;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  break-inside: avoid;
+  object-fit: contain;
+}
+
+figure.narrow img { max-width: 75mm; max-height: 160mm; }
+
+figcaption {
+  font-size: 8.8pt;
+  color: var(--ink-soft);
+  margin-top: 2mm;
+  text-align: left;
+  line-height: 1.45;
+}
+
+figcaption::before {
+  content: "Figura " counter(figure) ". ";
+  font-weight: 700;
+  color: var(--ink);
+}
+
+figure.diagram { counter-increment: none; }
+figure.diagram figcaption::before { content: "Diagrama. "; }
+figure.diagram svg { width: 100%; height: auto; }
+
+/* ---------- Tablas ---------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 5mm;
+  font-size: 9pt;
+  line-height: 1.4;
+}
+
+thead { display: table-header-group; }
+
+th, td {
+  border: 1px solid var(--line);
+  padding: 1.6mm 2.2mm;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--accent-soft);
+  color: #22305f;
+  font-weight: 700;
+}
+
+tr { break-inside: avoid; page-break-inside: avoid; }
+
+tbody tr:nth-child(even) td { background: #fafbfd; }
+
+table.compact { font-size: 8.6pt; }
+
+/* ---------- Bloques varios ---------- */
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5mm;
+  margin-bottom: 4mm;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3mm 4mm;
+  break-inside: avoid;
+}
+
+.card h4 { margin-top: 0; }
+
+.can { border-top: 3px solid var(--tip); }
+.cannot { border-top: 3px solid var(--security); }
+
+.switches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3mm;
+  margin: 2mm 0 2mm;
+}
+
+.switch {
+  border: 1.5px solid var(--accent);
+  border-radius: 4px;
+  padding: 2.5mm;
+  font-size: 8.8pt;
+  text-align: center;
+  background: var(--accent-soft);
+  break-inside: avoid;
+}
+
+.switch strong { display: block; font-size: 9.5pt; margin-bottom: 1mm; }
+
+.switch-result {
+  text-align: center;
+  font-weight: 700;
+  border: 1.5px solid var(--security);
+  background: var(--security-bg);
+  color: var(--security);
+  border-radius: 4px;
+  padding: 2mm;
+  margin-bottom: 5mm;
+}
+
+.sources {
+  border-top: 1px solid var(--line);
+  margin-top: 6mm;
+  padding-top: 3mm;
+  font-size: 8.8pt;
+  break-inside: avoid;
+}
+
+.sources h3 { margin-top: 0; font-size: 10pt; }
+.sources ul { padding-left: 5mm; }
+.sources a { word-break: break-all; }
+
+.note {
+  font-size: 9pt;
+  color: var(--muted);
+}
+
+dl.glossary { margin: 0; }
+dl.glossary dt { font-weight: 700; margin-top: 2.5mm; break-after: avoid; }
+dl.glossary dd { margin: 0.5mm 0 0 6mm; }
+dl.glossary div { break-inside: avoid; }
+
+.faq h3 { color: var(--ink); }
+
+/* ---------- Pantalla (no impresión) ---------- */
+
+@media screen {
+  body { background: var(--bg); padding: 10mm 0; }
+  .sheet {
+    background: var(--paper);
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 18mm;
+    box-shadow: 0 2px 12px rgba(20, 30, 60, 0.12);
+  }
+  .chapter { margin-top: 14mm; padding-top: 10mm; border-top: 1px dashed var(--line); }
+  .cover { height: auto; min-height: 240mm; }
+}
+
+@media screen and (max-width: 700px) {
+  body { padding: 0; font-size: 11pt; }
+  .sheet { padding: 16px; }
+  .two-col, .switches, .cover-band { grid-template-columns: 1fr; }
+  .toc ol ol { columns: 1; }
+  table { display: block; overflow-x: auto; }
+}
+
+@media print {
+  .sheet { padding: 0; margin: 0; box-shadow: none; }
+  a { color: var(--accent); }
+}
