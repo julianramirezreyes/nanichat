@@ -43,6 +43,8 @@ Modos de ejecución:
 
 - `npm start` → `node scripts/start.mjs`: pone `NODE_ENV=production` antes de cargar nada y luego carga `server.ts` en el mismo proceso con la API programática de `tsx` (ganchos CommonJS y ESM, igual que `node --import tsx`). Usa la compilación de `.next` (requiere `npm run build`). Funciona igual en PowerShell, `cmd`, macOS y Linux; el PID del bloqueo es el de ese proceso y `SIGINT`/`SIGTERM` llegan directo a sus manejadores de cierre.
 - `npm run dev` → `tsx server.ts`: Next.js en modo desarrollo (cualquier `NODE_ENV` distinto de `production`).
+- `tsx` es una dependencia de producción (no de desarrollo) porque `scripts/start.mjs` la carga, y la configuración de Next.js es `next.config.mjs` (JavaScript) para que el arranque no necesite el compilador nativo SWC; ambas cosas las exige el instalador de Windows y las comprueba `tests/start-script.test.ts`.
+- Instalador de Windows (`packaging/windows/`, ver su [README](../packaging/windows/README.md)): Node.js portátil + `.next` compilado + `node_modules` de producción; el lanzador `launch.ps1` ejecuta `node\node.exe app\scripts\start.mjs` oculto con `LOCAL_SOCIAL_DATA_DIR=%LOCALAPPDATA%\SocialDesk\data` y `PORT` 3000 (o 3001-3020); `stop.ps1` lo termina con `taskkill /T /F`.
 - Ningún script de `package.json` usa sintaxis propia de una terminal (`VAR=valor`, `$(...)`, `&&`); lo comprueba `tests/start-script.test.ts`.
 
 La API expone `GET /api/health` → `{"status":"ok","ready":true}` (otros métodos: 405) y `GET /api/session` → token CSRF del proceso.
@@ -84,7 +86,7 @@ Las rutas relativas se resuelven desde el directorio de trabajo; en las rutas `S
 | Vivo y no hay hora de inicio comparable | Se rechaza (falla cerrado). | Se rechaza (falla cerrado): no se puede descartar la reutilización del PID. |
 | Cualquier otro error de `kill`, o archivo de bloqueo dañado | Se rechaza. | Se rechaza. |
 
-Consecuencia en macOS/Windows: tras un cierre forzado, si el PID anotado ya lo usa otro proceso, el humano debe confirmar que no hay otra instancia y borrar el archivo a mano.
+Consecuencia en macOS/Windows: tras un cierre forzado, si el PID anotado ya lo usa otro proceso, el humano debe confirmar que no hay otra instancia y borrar el archivo a mano. Con el instalador de Windows, el lanzador (`launch.ps1`) lo resuelve: si el PID anotado pertenece ahora a un programa que no es Social Desk (ni el `node.exe` de la instalación ni una línea de comandos con `start.mjs`/`server.ts`), borra ese bloqueo antes de arrancar; `stop.ps1` lo borra tras detener el proceso que lo tenía.
 Estado global en la tabla `app_state`:
 
 - `dry_run`: `true` en una base nueva; se conserva entre reinicios.

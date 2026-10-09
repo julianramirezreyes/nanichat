@@ -23,9 +23,12 @@ Este archivo es para asistentes de programación (Claude Code, Codex, Cursor, et
 | `npm start` | Servidor en modo producción (`node scripts/start.mjs`: pone `NODE_ENV=production` y carga `server.ts` con la API de `tsx`; funciona en PowerShell, `cmd`, macOS y Linux). Requiere `npm run build` previo. |
 | `npm test` | Todas las pruebas (`node --import tsx --test tests/*.test.ts`). |
 | `npm run typecheck` | `tsc --noEmit`. |
+| `node packaging/windows/fetch-node.mjs` y `node packaging/windows/build-payload.mjs` | Arman el instalador de Windows (los ejecuta el flujo `.github/workflows/windows-installer.yml` en Windows; ver [packaging/windows/README.md](packaging/windows/README.md)). |
 | `curl http://127.0.0.1:3000/api/health` | Verificación de salud: `{"status":"ok","ready":true}`. |
 
 Variables de entorno: `PORT` (por defecto `3000`), `LOCAL_SOCIAL_DATA_DIR` (por defecto `./data`) y tres opcionales que activan funciones desactivadas por defecto: `SOCIAL_DESK_IMPORT_ENV_PATH` (importación de `.env`), `SOCIAL_DESK_LEGACY_ACCOUNTS_DIR` y `SOCIAL_DESK_LEGACY_HOLD_USERNAMES` (retención heredada). Tabla completa en [README.md](README.md#variables-de-entorno). Nunca escribas en el código nombres de cuentas ni rutas personales: todo lo específico de una instalación va en esas variables.
+
+`tsx` debe seguir en `dependencies` y la configuración de Next.js debe seguir siendo `next.config.mjs`: el instalador de Windows instala solo dependencias de producción y no incluye el compilador SWC.
 
 Los scripts de `package.json` no deben usar sintaxis de una terminal concreta (`VAR=valor`, `$(...)`, `&&`): deben funcionar en Windows, macOS y Linux. `tests/start-script.test.ts` lo comprueba.
 

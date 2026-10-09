@@ -7,6 +7,7 @@ Esta guía está escrita para que un asistente de programación con acceso a la 
 ## Contenido
 
 1. [Sistemas operativos](#sistemas-operativos)
+   - [Instalador para Windows](#instalador-para-windows)
 2. [Paso 1: verificar requisitos](#paso-1-verificar-requisitos)
 3. [Paso 2: clonar](#paso-2-clonar)
 4. [Paso 3: instalar dependencias](#paso-3-instalar-dependencias)
@@ -26,9 +27,28 @@ Esta guía está escrita para que un asistente de programación con acceso a la 
 | Linux (x64) | **Soportado y verificado** en una ejecución real (instalación, compilación, `npm start`, segunda instancia rechazada, cierre con `Ctrl+C`). |
 | Windows con WSL2 | Soportado: dentro de WSL2 se comporta como Linux. Clona el repositorio **dentro** del sistema de archivos de WSL (por ejemplo `~/proyectos`), no en `/mnt/c/...`. |
 | macOS | Soportado por el código, **verificado solo por pruebas automáticas con una sonda de plataforma simulada; no probado en un equipo real.** |
+| Windows con el [instalador](#instalador-para-windows) | Compilado y **probado automáticamente en un Windows de GitHub** (instalación silenciosa, arranque, segundo arranque, cierre, reinicio tras un cierre brusco y desinstalación). PENDIENTE DE CONFIRMAR tras la primera ejecución correcta del flujo `Windows installer`. No probado a mano en un equipo real. |
 | Windows nativo (PowerShell o `cmd`) | Soportado por el código, **verificado solo por pruebas automáticas con una sonda de plataforma simulada; no probado en un equipo real.** Ver [Windows nativo](#windows-nativo-powershell-o-cmd). |
 
 Cómo cambia el bloqueo de instancia única según el sistema: en todos se comprueba si el proceso dueño sigue vivo (`process.kill(pid, 0)`). En Linux además se compara la hora de inicio del proceso (`/proc/<pid>/stat`), así que se detecta cuando el número de proceso fue reutilizado por otro programa. En macOS y Windows esa comprobación no existe: si el número de proceso anotado pertenece a cualquier proceso vivo, la aplicación **se niega a arrancar** (falla de forma segura) en vez de arriesgarse a que dos instancias usen la misma base. Ver [Problemas frecuentes](#problemas-frecuentes).
+
+### Instalador para Windows
+
+Si la persona usa Windows y no necesita modificar el código, **no hace falta seguir esta guía**: recomiéndale el instalador.
+
+1. Descarga `SocialDesk-Setup-<versión>.exe` desde la página de *Releases* del repositorio.
+2. Doble clic. Es una instalación por usuario: no pide administrador.
+3. SmartScreen («Windows protegió su PC») aparece porque el instalador no está firmado: **Más información → Ejecutar de todas formas**.
+4. Se abre con el icono **Social Desk** del escritorio; se cierra con **Detener Social Desk** (menú Inicio).
+
+| Qué | Dónde |
+| --- | --- |
+| Programa | `%LOCALAPPDATA%\Programs\SocialDesk` (con su propio Node.js) |
+| Datos (base de datos, `vault.key`) | `%LOCALAPPDATA%\SocialDesk\data` |
+| Registros | `%LOCALAPPDATA%\SocialDesk\logs` (`launcher.log`, `server-<fecha>.log`) |
+| Puerto | `3000`, o el primero libre entre `3001` y `3020` (se guarda en `%LOCALAPPDATA%\SocialDesk\run\port.txt`) |
+
+Desinstalar (Configuración → Aplicaciones) **conserva los datos**. Para actualizar, respalda `data` y ejecuta el instalador nuevo encima. Una IA no debe borrar `data` ni `vault.key`. Detalles: [packaging/windows/README.md](../packaging/windows/README.md).
 
 ## Paso 1: verificar requisitos
 

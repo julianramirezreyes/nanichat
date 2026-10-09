@@ -11,6 +11,7 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - [Qué hace y qué no hace](#qué-hace-y-qué-no-hace)
 - [Estado y límites](#estado-y-límites)
 - [Funciones probadas y retiradas](#funciones-probadas-y-retiradas)
+- [Instalador para Windows](#instalador-para-windows)
 - [Requisitos](#requisitos)
 - [Inicio rápido](#inicio-rápido)
 - [Instalar con una IA](#instalar-con-una-ia)
@@ -68,6 +69,28 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - **Qué queda:** el código está inactivo detrás de un único interruptor (`FOLLOW_GATE_AVAILABLE = false` en `src/services/follow-gate-rules.ts`). Una automatización antigua con estas opciones envía su mensaje normal; los elementos en cola con el botón quedan `SKIPPED` (`follow_gate_retired`); los seguimientos que esperaban un toque quedan `CANCELLED` sin llamar a Meta; el historial de las pruebas sigue visible en «Cola e historial».
 - **Qué haría falta para una versión futura:** recibir el toque por **webhooks** (evento `messaging_postbacks`) en un servidor accesible desde internet, comprobar en vivo que así Meta sí abre la ventana de mensajería y, solo entonces, cambiar el interruptor. Que los webhooks lo resuelvan es una **hipótesis no verificada**.
 
+## Instalador para Windows
+
+Si usas Windows y no quieres instalar Node.js ni usar la terminal, usa el instalador:
+
+1. Abre la página de [Releases](https://github.com/julianramirezreyes/social-automation/releases) y descarga `SocialDesk-Setup-<versión>.exe`.
+2. Haz doble clic. No pide permisos de administrador.
+3. Windows puede mostrar «Windows protegió su PC» (SmartScreen) porque el instalador **no está firmado**: pulsa **Más información → Ejecutar de todas formas**.
+4. Abre **Social Desk** con el icono del escritorio (o menú Inicio → Social Desk). Se abre en tu navegador en `http://localhost:3000`; si ese puerto está ocupado, usa el primero libre entre 3001 y 3020.
+
+| Qué | Dónde / cómo |
+| --- | --- |
+| Programa | `%LOCALAPPDATA%\Programs\SocialDesk` (incluye su propio Node.js). |
+| Tus datos | `%LOCALAPPDATA%\SocialDesk\data` (base de datos y `vault.key`); registros en `%LOCALAPPDATA%\SocialDesk\logs`. |
+| Cerrar la aplicación | Menú Inicio → Social Desk → **Detener Social Desk**. |
+| Manual | Menú Inicio → Social Desk → **Manual de usuario**. |
+| Actualizar | Respalda la carpeta `data` y ejecuta el instalador nuevo encima; tus datos se conservan. |
+| Desinstalar | Configuración → Aplicaciones → Social Desk → Desinstalar. **Tus datos no se borran**; si quieres eliminarlos, borra la carpeta `data` a mano. |
+
+Necesitas **tus propias credenciales de Meta**; el instalador no incluye ninguna. Igual que siempre, la aplicación arranca en Dry Run y con el Monitoreo apagado.
+
+El instalador se compila y se **prueba automáticamente en un Windows de GitHub** (instalación silenciosa, arranque, cierre, reinicio y desinstalación). PENDIENTE DE CONFIRMAR tras la primera ejecución correcta del flujo `Windows installer`: esa prueba automática ya pasó; todavía no se probó a mano en un equipo Windows de una persona usuaria. Detalles técnicos: [packaging/windows/README.md](packaging/windows/README.md).
+
 ## Requisitos
 
 | Requisito | Detalle |
@@ -75,7 +98,7 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 | Node.js | **24.21.0 o superior** (la app usa el módulo integrado `node:sqlite`). Revisa con `node -v`. |
 | npm | El que viene con Node (probado con npm 11). |
 | git | Para clonar y actualizar el repositorio. |
-| Sistema | Linux (verificado), macOS o Windows nativo/WSL2 (sin probar en un equipo real; ver arriba). |
+| Sistema | Linux (verificado), macOS o Windows nativo/WSL2 (sin probar en un equipo real; ver arriba). En Windows existe además un [instalador](#instalador-para-windows) que no requiere nada de esta tabla. |
 | Puerto | `3000` libre (o el que indiques con la variable `PORT`). |
 | Red | Solo para `npm install` (registro de npm) y, al usar la app, para hablar con la API de Meta. |
 
@@ -150,6 +173,8 @@ Todas son opcionales. Sin ninguna, la aplicación usa el puerto `3000`, la carpe
 | `SOCIAL_DESK_IMPORT_ENV_PATH` | sin definir: **importación desactivada** | Ruta del único archivo `.env` que puede leer el botón «Importar .env del proyecto» (Ajustes). Solo se leen variables permitidas de Meta (`INSTAGRAM_ACCESS_TOKEN`, `META_APP_ID`, `GRAPH_API_VERSION`, …); el token se guarda cifrado. Sin la variable, el botón no aparece y Ajustes muestra cómo activarlo. |
 | `SOCIAL_DESK_LEGACY_ACCOUNTS_DIR` | sin definir: **no se lee ninguna carpeta** | Solo si usaste antes otra herramienta que guarda una carpeta por cuenta con `run.lock` y contadores de rechazos (`rejection-counter.json` y similares). Con ella, una cuenta con bloqueo o historial de rechazos empieza retenida y no envía hasta que reconozcas su historial; mientras envía, la aplicación crea y respeta `run.lock` en esa carpeta. |
 | `SOCIAL_DESK_LEGACY_HOLD_USERNAMES` | vacía | Lista separada por comas de cuentas (`cuenta_uno,cuenta_dos`) que empiezan **retenidas** al seleccionarlas, aunque no haya contador; se liberan con «Revisar estado y reconocer» en Conexiones. |
+| `SOCIAL_DESK_HOME` | `%LOCALAPPDATA%\SocialDesk` | **Solo el lanzador del instalador de Windows** (no la aplicación): carpeta base de `data`, `logs` y `run`. Pensada para pruebas; el lanzador fija `LOCAL_SOCIAL_DATA_DIR` y `PORT` a partir de ella. |
+| `SOCIAL_DESK_NONINTERACTIVE` | sin definir | **Solo el lanzador de Windows**: con `1`, `launch.ps1`/`stop.ps1` no muestran cuadros de diálogo (pruebas automáticas). |
 
 Las rutas relativas se resuelven desde la carpeta donde inicias el servidor; en las dos rutas `SOCIAL_DESK_*`, `~/` se expande a tu carpeta personal. Un nombre inválido en `SOCIAL_DESK_LEGACY_HOLD_USERNAMES` impide arrancar (falla de forma segura). Ejemplo en PowerShell: `$env:SOCIAL_DESK_IMPORT_ENV_PATH = "C:\ruta\a\.env"; npm start`.
 
@@ -174,6 +199,7 @@ El [manual de usuario](#manual-de-usuario-pdf) explica cada pantalla con captura
 | Base de datos | `<carpeta de datos>/social-automation.sqlite` (más sus archivos `-wal` y `-shm`). |
 | Llave de la bóveda | `<carpeta de datos>/vault.key`: llave maestra aleatoria AES-256-GCM de 32 bytes, guardada fuera de la base de datos. |
 | Bloqueo de instancia | `<carpeta de datos>/.application-owner.json` (se borra al cerrar normalmente). |
+| Con el instalador de Windows | Carpeta de datos `%LOCALAPPDATA%\SocialDesk\data`; registros en `%LOCALAPPDATA%\SocialDesk\logs` (se borran a los 14 días). |
 
 La carpeta de datos se crea con permisos `0700` y los archivos con `0600`. Los tokens se guardan cifrados con `vault.key` y nunca se devuelven al navegador.
 
