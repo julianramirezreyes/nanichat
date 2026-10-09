@@ -218,7 +218,7 @@ class Browser {
     const loaded = this.cdp.once('Page.loadEventFired');
     await this.cdp.send('Page.navigate', { url });
     await loaded;
-    await this.waitFor('!!document.querySelector("main.shell")');
+    await this.waitFor('!!document.querySelector("main.page")');
   }
 
   async waitFor(expression, timeout = 30000, label = expression) {
@@ -456,7 +456,7 @@ async function phaseB(browser) {
   // 17-19 Mode: Dry Run, confirmation dialog, real mode, and back
   await browser.nav('Resumen');
   await browser.settle();
-  const header = await browser.eval(`(() => { const b = document.querySelector('.mode-banner').getBoundingClientRect(); const s = document.querySelector('.sidebar').getBoundingClientRect(); return { x: Math.round(s.right), bottom: Math.ceil(b.bottom) + 14 }; })()`);
+  const header = await browser.eval(`(() => { const b = document.querySelector('.mode-banner').getBoundingClientRect(); const s = { right: 0 }; return { x: Math.round(s.right), bottom: Math.ceil(b.bottom) + 14 }; })()`);
   const headerClip = { x: header.x, y: 0, width: VIEW_W - header.x, height: header.bottom };
   await browser.shot('17-mode-dryrun-banner', { fit: false, clip: headerClip });
 
