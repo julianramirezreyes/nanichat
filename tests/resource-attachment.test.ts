@@ -185,7 +185,7 @@ test('migration v13 -> v14 is additive: attachment columns default to empty, gat
         resource_payload_json, created_at, updated_at) VALUES ('s1','acc','a1','q1','c1','i1','COMPLETED','2026','Ya te sigo','{"text":"r","buttons":[]}','2026','2026');
       INSERT INTO gate_events(gate_event_id, account_id, gate_session_id, event_type, event_at) VALUES ('e1','acc','s1','resource_accepted','2026');`);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 14);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 15);
     assert.equal(one(db, 'PRAGMA foreign_keys').foreign_keys, 1);
     const automation = one(db, `SELECT * FROM automations WHERE automation_id='a1'`);
     assert.deepEqual([automation.resource_attachment_kind, automation.resource_attachment_url, automation.version, automation.follow_gate_message], ['', '', 7, 'Sígueme']);
@@ -208,7 +208,7 @@ test('migration v13 -> v14 is additive: attachment columns default to empty, gat
     assert.throws(() => db.exec(`UPDATE gate_part_events SET event_type='rejected'`), /append-only/);
     assert.throws(() => db.exec(`DELETE FROM gate_part_events`), /append-only/);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 14);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 15);
   }, 13);
 });
 

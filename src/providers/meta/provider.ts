@@ -162,7 +162,7 @@ export class MetaProvider implements SocialProvider {
 
   async listMedia(account: AccountRef, cursor?: string): Promise<ProviderPage<MediaItem>> {
     const { connection, token } = this.accountContext(account);
-    const path = `/${encodeURIComponent(account.providerAccountId)}/media?fields=id,permalink,timestamp,caption,media_type&limit=100`;
+    const path = `/${encodeURIComponent(account.providerAccountId)}/media?fields=id,permalink,timestamp,caption,media_type,media_url,thumbnail_url&limit=100`;
     return this.collectItems(
       connection.loginKind,
       connection.graphVersion,
@@ -175,6 +175,7 @@ export class MetaProvider implements SocialProvider {
         publishedAt: string(item.timestamp),
         caption: mediaCaption(item.caption),
         mediaType: mediaType(item.media_type),
+        thumbnailUrl: parseThumbnailUrl(item.thumbnail_url, item.media_url),
       }),
     );
   }
@@ -1079,4 +1080,16 @@ function object(value: unknown): MetaObject | undefined {
 
 function safeCode(error: unknown): string {
   return error instanceof MetaSafeError ? error.code : 'meta_error';
+}
+
+function parseThumbnailUrl(thumbnailUrl: unknown, mediaUrl: unknown): string | undefined {
+  for (const candidate of [string(thumbnailUrl), string(mediaUrl)]) {
+    if (!candidate || candidate.length > 2048) continue;
+    try {
+      if (new URL(candidate).protocol === 'https:') return candidate;
+    } catch {
+      // Not a URL: try the next candidate.
+    }
+  }
+  return undefined;
 }

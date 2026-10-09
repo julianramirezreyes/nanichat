@@ -37,6 +37,7 @@ export type MediaItem = {
   /** Display-only, already truncated by the provider. */
   caption?: string;
   mediaType?: MediaType;
+  thumbnailUrl?: string;
 };
 
 export type ProviderComment = {

@@ -305,6 +305,7 @@ Los valores por defecto son prudentes y locales, no una garantía de que Meta ac
 - Sin TikTok, sin despliegue en la nube, sin infraestructura de colas, sin IA.
 - Los textos de publicaciones se guardan solo para mostrar (200 caracteres); `{{media}}` sigue siendo el permalink o el ID.
 - No hay forma de resolver `UNKNOWN_OUTCOME` dentro de la aplicación.
+- El listado de publicaciones (endpoint `/api/media`) extrae los campos `media_url` y `thumbnail_url` de Graph API y se exponen como `thumbnailUrl`. Las miniaturas en la base de datos se reescriben en cada recarga porque las URL del CDN de Meta expiran.
 - El Monitoreo revisa la primera página de comentarios (más una continuación) en cada ciclo; el historial profundo se cubre poco a poco o con un escaneo de Revisión pendiente, y puede quedar parcial.
 - La detección de «ya respondido» depende de las respuestas guardadas por escaneos anteriores; no hay comprobación en vivo al enviar.
 - El comportamiento de las respuestas privadas (permisos, reglas de 24 h/7 días, cómo se ven los botones) depende de Meta y debe comprobarse con un comentario real controlado antes de un uso amplio.

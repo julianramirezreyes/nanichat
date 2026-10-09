@@ -113,7 +113,7 @@ test('migration v9 adds nullable caption/media_type, preserves rows, from the v8
       assert.ok(col, name); assert.equal(col!.notnull, 0);
     }
     // Migration continues to the latest version (v10 automation scope) after adding the v9 columns.
-    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 14);
+    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 15);
     const rows = db.prepare('SELECT media_id, permalink, published_at, caption, media_type FROM media ORDER BY media_id').all();
     assert.deepEqual(rows.map((r) => ({ ...r })), [
       { media_id: 'old-1', permalink: 'https://p/1', published_at: '2026-01-01T00:00:00Z', caption: null, media_type: null },
@@ -170,7 +170,7 @@ test('GET /api/media DTO exposes caption and mediaType (null for legacy rows)', 
       const byId = Object.fromEntries(json.media.map((m: any) => [m.mediaId, m]));
       assert.equal(byId.rich.caption, 'Hola'); assert.equal(byId.rich.mediaType, 'CAROUSEL_ALBUM');
       assert.equal(byId.legacy.caption, null); assert.equal(byId.legacy.mediaType, null);
-      assert.deepEqual(Object.keys(byId.rich).sort(), ['accountId', 'caption', 'lastSeenAt', 'mediaId', 'mediaType', 'permalink', 'publishedAt']);
+      assert.deepEqual(Object.keys(byId.rich).sort(), ['accountId', 'caption', 'lastSeenAt', 'mediaId', 'mediaType', 'permalink', 'publishedAt', 'thumbnailUrl']);
     } finally { server.close(); }
   });
 });

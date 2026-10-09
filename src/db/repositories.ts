@@ -246,24 +246,24 @@ export function createMedia(
 
 export function createMediaIfMissing(
   database: DatabaseSync,
-  input: { accountId: string; mediaId: string; permalink: string | null; publishedAt: string | null; caption?: string | null; mediaType?: string | null },
+  input: { accountId: string; mediaId: string; permalink: string | null; publishedAt: string | null; caption?: string | null; mediaType?: string | null; thumbnailUrl?: string | null },
 ): void {
-  database.prepare(`INSERT INTO media (account_id, media_id, permalink, published_at, last_seen_at, caption, media_type)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+  database.prepare(`INSERT INTO media (account_id, media_id, permalink, published_at, last_seen_at, caption, media_type, thumbnail_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(account_id, media_id) DO UPDATE SET permalink = excluded.permalink,
       published_at = excluded.published_at, last_seen_at = excluded.last_seen_at,
-      caption = excluded.caption, media_type = excluded.media_type`)
+      caption = excluded.caption, media_type = excluded.media_type, thumbnail_url = excluded.thumbnail_url`)
     .run(input.accountId, input.mediaId, input.permalink, input.publishedAt, new Date().toISOString(),
-      input.caption ?? null, input.mediaType ?? null);
+      input.caption ?? null, input.mediaType ?? null, input.thumbnailUrl ?? null);
 }
 
 export function listMedia(
   database: DatabaseSync,
   accountId: string,
-): Array<{ mediaId: string; permalink: string | null; publishedAt: string | null; caption: string | null; mediaType: string | null }> {
-  return database.prepare(`SELECT media_id AS mediaId, permalink, published_at AS publishedAt, caption, media_type AS mediaType
+): Array<{ mediaId: string; permalink: string | null; publishedAt: string | null; caption: string | null; mediaType: string | null; thumbnailUrl: string | null }> {
+  return database.prepare(`SELECT media_id AS mediaId, permalink, published_at AS publishedAt, caption, media_type AS mediaType, thumbnail_url AS thumbnailUrl
     FROM media WHERE account_id = ? ORDER BY published_at DESC, media_id`)
-    .all(accountId) as Array<{ mediaId: string; permalink: string | null; publishedAt: string | null; caption: string | null; mediaType: string | null }>;
+    .all(accountId) as Array<{ mediaId: string; permalink: string | null; publishedAt: string | null; caption: string | null; mediaType: string | null; thumbnailUrl: string | null }>;
 }
 
 export function createComment(

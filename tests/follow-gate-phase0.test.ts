@@ -80,7 +80,7 @@ test('migration v11 -> v12 adds comments.author_igsid and automation interactive
       INSERT INTO queue_items(queue_item_id,account_id,comment_id,automation_id,state,dry_run,payload_json,created_at,updated_at)
         VALUES ('q1','acc','c1','a1','SENT',0,'{"text":"x"}','2026','2026');`);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 14);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 15);
     assert.equal(one(db, 'PRAGMA foreign_keys').foreign_keys, 1);
     const comment = one(db, `SELECT * FROM comments WHERE comment_id='c1'`);
     assert.equal(comment.text, 'hola');
@@ -93,7 +93,7 @@ test('migration v11 -> v12 adds comments.author_igsid and automation interactive
     assert.equal(one(db, `SELECT state FROM queue_items WHERE queue_item_id='q1'`).state, 'SENT');
     assert.throws(() => db.exec(`UPDATE automations SET interactive_mode='bogus' WHERE automation_id='a1'`), /CHECK/);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 14);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 15);
   }, 11);
 });
 

@@ -399,7 +399,7 @@ function listAccounts(db: DatabaseSync, selected?: string): Array<Record<string,
 function listMedia(db: DatabaseSync, selected?: string) {
   if (selected) accountId(selected, db);
   return db.prepare(`SELECT account_id AS accountId, media_id AS mediaId, permalink, published_at AS publishedAt, last_seen_at AS lastSeenAt,
-    caption, media_type AS mediaType
+    caption, media_type AS mediaType, thumbnail_url AS thumbnailUrl
     FROM media ${selected ? 'WHERE account_id=?' : ''} ORDER BY published_at DESC, media_id LIMIT 500`).all(...(selected ? [selected] : []));
 }
 

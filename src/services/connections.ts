@@ -193,7 +193,7 @@ export class ConnectionService {
     for (const media of page.items) {
       createMediaIfMissing(this.database, {
         accountId, mediaId: media.mediaId, permalink: media.permalink ?? null, publishedAt: media.publishedAt ?? null,
-        caption: media.caption ?? null, mediaType: media.mediaType ?? null,
+        caption: media.caption ?? null, mediaType: media.mediaType ?? null, thumbnailUrl: media.thumbnailUrl ?? null,
       });
     }
     return listMedia(this.database, accountId);

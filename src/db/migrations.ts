@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-const VERSION = 14;
+const VERSION = 15;
 
 const INITIAL_SCHEMA = `
 CREATE TABLE connections (
@@ -176,6 +176,7 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
     if (current < 12 && target >= 12) migrateFollowGatePhase0(database);
     if (current < 13 && target >= 13) migrateFollowGate(database);
     if (current < 14 && target >= 14) migrateResourceAttachment(database);
+    if (current < 15 && target >= 15) migrateMediaThumbnail(database);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -483,4 +484,9 @@ function migrateQueueUniqueness(database: DatabaseSync): void {
   database.exec(`CREATE UNIQUE INDEX queue_one_initial_reply_per_comment
     ON queue_items(account_id, comment_id);
     PRAGMA user_version = 2;`);
+}
+
+function migrateMediaThumbnail(database: DatabaseSync): void {
+  database.exec(`ALTER TABLE media ADD COLUMN thumbnail_url TEXT;
+    PRAGMA user_version = 15;`);
 }
