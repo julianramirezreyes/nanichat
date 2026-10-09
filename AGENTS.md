@@ -38,7 +38,7 @@ scripts/start.mjs            Arranque de producción portable (NODE_ENV=producti
 src/core/                    config.ts (variables de entorno), application-lock.ts (una instancia por carpeta,
                              sonda de plataforma inyectable: kill(pid, 0) en todos los sistemas, /proc en Linux),
                              domain.ts (tipos compartidos), errors.ts.
-src/db/                      database.ts (SQLite, WAL, foreign keys), migrations.ts (esquema v1..v11),
+src/db/                      database.ts (SQLite, WAL, foreign keys), migrations.ts (esquema v1..v12),
                              repositories.ts (consultas compartidas).
 src/security/                vault.ts (AES-256-GCM, vault.key), redact.ts (borra secretos de textos),
                              env-import.ts (importación explícita del .env de SOCIAL_DESK_IMPORT_ENV_PATH).

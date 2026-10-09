@@ -1,4 +1,4 @@
-import type { ProviderComment, PrivateReplyPayload } from '../core/domain.ts';
+import type { InteractiveMode, ProviderComment, PrivateReplyPayload } from '../core/domain.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { storedPublicReplyVariants, validatePublicReplyVariants } from './public-reply.ts';
@@ -58,10 +58,57 @@ export function matchAutomation(text: string, keywords: string[], mode: 'exact' 
   return keywords.filter((keyword) => matchesKeyword(text, keyword, mode));
 }
 
+export const INTERACTIVE_MAX_BUTTONS = 3;
+export const INTERACTIVE_TITLE_MAX = 20;
+/** Server-generated payload of an experimental interactive button: `gate:<automation_id>:<index>`. */
+export const INTERACTIVE_PAYLOAD_PATTERN = /^gate:[A-Za-z0-9_-]{1,64}:[0-2]$/u;
+const URL_LIKE = /(https?:|\/\/|www\.|\.[a-z]{2,}(\/|$|\s))/iu;
+
+/** True when a title looks like (or contains) a link; links never go in interactive titles. */
+export function looksLikeUrl(value: string): boolean {
+  return URL_LIKE.test(value);
+}
+
+/**
+ * Strict validation of the EXPERIMENTAL interactive configuration (follow gate phase 0). Mode 'none' takes no titles.
+ * Other modes take 1-3 distinct titles of 1-20 characters without links. Quick replies are only allowed without URL
+ * buttons (Meta does not document mixing them with a template; fail closed); postback buttons share the 3-button
+ * template limit with the URL buttons.
+ */
+export function validateInteractiveConfig(mode: unknown, titles: unknown, urlButtonCount: number): { mode: InteractiveMode; titles: string[] } {
+  if (mode !== 'none' && mode !== 'quick_reply' && mode !== 'postback') throw new TypeError('Invalid interactive mode');
+  if (!Array.isArray(titles) || titles.some((title) => typeof title !== 'string')) throw new TypeError('Interactive titles must be a list of texts');
+  const trimmed = (titles as string[]).map((title) => title.trim());
+  if (mode === 'none') {
+    if (trimmed.length) throw new TypeError('Interactive titles require an interactive mode');
+    return { mode, titles: [] };
+  }
+  if (!trimmed.length || trimmed.length > INTERACTIVE_MAX_BUTTONS) throw new TypeError('Interactive mode requires one to three titles');
+  if (trimmed.some((title) => !title || Array.from(title).length > INTERACTIVE_TITLE_MAX || looksLikeUrl(title) || /[\r\n]/u.test(title))) {
+    throw new TypeError('Interactive titles must have 1-20 characters and no links');
+  }
+  if (new Set(trimmed.map(normalizeMatchText)).size !== trimmed.length) throw new TypeError('Interactive titles must be distinct');
+  if (mode === 'quick_reply' && urlButtonCount > 0) throw new TypeError('Quick replies cannot be combined with URL buttons');
+  if (mode === 'postback' && urlButtonCount + trimmed.length > INTERACTIVE_MAX_BUTTONS) throw new TypeError('At most three buttons in total');
+  return { mode, titles: trimmed };
+}
+
+/** Stored interactive configuration; anything unreadable falls back to 'none' (the historic behaviour). */
+export function storedInteractiveConfig(mode: unknown, titlesJson: unknown): { mode: InteractiveMode; titles: string[] } {
+  try {
+    const titles = JSON.parse(typeof titlesJson === 'string' ? titlesJson : '[]') as unknown;
+    if ((mode === 'quick_reply' || mode === 'postback') && Array.isArray(titles) && titles.every((title) => typeof title === 'string')) {
+      return { mode, titles: titles as string[] };
+    }
+  } catch { /* fall through */ }
+  return { mode: 'none', titles: [] };
+}
+
 export function renderReply(
   template: string,
   variables: ReplyVariables,
   buttons: Array<{ title: string; url: string }>,
+  interactive?: { mode: InteractiveMode; titles: string[]; automationId: string },
 ): PrivateReplyPayload {
   if (!template.trim()) throw new TypeError('Reply text is required');
   if (buttons.length > 2) throw new TypeError('At most two buttons are allowed');
@@ -89,7 +136,16 @@ export function renderReply(
     return { title, url: parsed.toString() };
   });
 
-  return { text, buttons: safeButtons };
+  const config = interactive ? validateInteractiveConfig(interactive.mode, interactive.titles, safeButtons.length)
+    : { mode: 'none' as const, titles: [] };
+  // Mode 'none' returns exactly the historic shape (no extra keys), so stored and sent payloads stay byte-identical.
+  if (config.mode === 'none') return { text, buttons: safeButtons };
+  if (!/^[A-Za-z0-9_-]{1,64}$/u.test(interactive!.automationId)) throw new TypeError('Invalid automation id for interactive payloads');
+  // Payloads are generated here, never provided by users: gate:<automation_id>:<index>.
+  const generated = config.titles.map((title, index) => ({ title, payload: `gate:${interactive!.automationId}:${index}` }));
+  return config.mode === 'quick_reply'
+    ? { text, buttons: safeButtons, quickReplies: generated }
+    : { text, buttons: safeButtons, postbackButtons: generated };
 }
 
 export function classifyComment(
@@ -197,12 +253,18 @@ export class AutomationService {
     /** Optional public reply after an accepted private reply; enabled requires at least one valid variant. */
     publicReplyEnabled?: boolean;
     publicReplyVariants?: string[];
+    /** EXPERIMENTAL (follow gate phase 0). Omitted: 'none' with no titles. */
+    interactiveMode?: InteractiveMode;
+    interactiveTitles?: string[];
   }): string {
     if (!input.name.trim()) throw new TypeError('Automation name is required');
     const publicReply = publicReplyConfig(input.publicReplyEnabled, input.publicReplyVariants, { enabled: false, variants: [] });
     const scope = input.scope ?? 'media';
     if (scope !== 'media' && scope !== 'account') throw new TypeError('Invalid automation scope');
-    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons ?? []);
+    const interactive = validateInteractiveConfig(input.interactiveMode ?? 'none', input.interactiveTitles ?? [], (input.buttons ?? []).length);
+    const automationId = randomUUID();
+    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons ?? [],
+      { ...interactive, automationId });
     let mediaId: string | null = null;
     if (scope === 'account') {
       if (input.mediaId !== undefined && input.mediaId !== null) throw new TypeError('A general automation cannot target one media');
@@ -215,14 +277,15 @@ export class AutomationService {
       if (!media) throw new Error('Media does not belong to this account');
       mediaId = input.mediaId;
     }
-    const automationId = randomUUID();
     const now = new Date().toISOString();
     this.database.prepare(`INSERT INTO automations
       (automation_id, account_id, media_id, scope, name, status, match_mode, reply_text, buttons_json,
-       created_at, updated_at, real_enabled, monitoring_started_at, public_reply_enabled, public_reply_variants_json)
-      VALUES (?, ?, ?, ?, ?, 'disabled', ?, ?, ?, ?, ?, 0, NULL, ?, ?)`)
+       created_at, updated_at, real_enabled, monitoring_started_at, public_reply_enabled, public_reply_variants_json,
+       interactive_mode, interactive_titles_json)
+      VALUES (?, ?, ?, ?, ?, 'disabled', ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)`)
       .run(automationId, input.accountId, mediaId, scope, input.name.trim(), input.matchMode ?? 'contains',
-        input.replyText, JSON.stringify(input.buttons ?? []), now, now, publicReply.enabled ? 1 : 0, JSON.stringify(publicReply.variants));
+        input.replyText, JSON.stringify(input.buttons ?? []), now, now, publicReply.enabled ? 1 : 0, JSON.stringify(publicReply.variants),
+        interactive.mode, JSON.stringify(interactive.titles));
     return automationId;
   }
 
@@ -239,12 +302,19 @@ export class AutomationService {
     /** Omitted: keep the stored public reply configuration. */
     publicReplyEnabled?: boolean;
     publicReplyVariants?: string[];
+    /** EXPERIMENTAL. Both omitted: keep the stored interactive configuration. */
+    interactiveMode?: InteractiveMode;
+    interactiveTitles?: string[];
   }): void {
     if (!input.name.trim()) throw new TypeError('Automation name is required');
-    const stored = this.database.prepare(`SELECT scope, public_reply_enabled, public_reply_variants_json FROM automations
-      WHERE account_id=? AND automation_id=?`)
-      .get(accountId, automationId) as { scope: AutomationScope; public_reply_enabled: number; public_reply_variants_json: string } | undefined;
+    const stored = this.database.prepare(`SELECT scope, public_reply_enabled, public_reply_variants_json, interactive_mode, interactive_titles_json
+      FROM automations WHERE account_id=? AND automation_id=?`)
+      .get(accountId, automationId) as { scope: AutomationScope; public_reply_enabled: number; public_reply_variants_json: string;
+        interactive_mode: string; interactive_titles_json: string } | undefined;
     if (!stored) throw new Error('Automation does not belong to this account');
+    const storedInteractive = storedInteractiveConfig(stored.interactive_mode, stored.interactive_titles_json);
+    const interactive = validateInteractiveConfig(input.interactiveMode ?? storedInteractive.mode,
+      input.interactiveTitles ?? (input.interactiveMode === undefined ? storedInteractive.titles : []), input.buttons.length);
     const storedVariants = storedPublicReplyVariants(stored.public_reply_variants_json);
     const publicReply = publicReplyConfig(input.publicReplyEnabled, input.publicReplyVariants,
       { enabled: stored.public_reply_enabled === 1, variants: storedVariants });
@@ -256,7 +326,8 @@ export class AutomationService {
     const normalizedKeywords = input.keywords.map(normalizeMatchText);
     if (!normalizedKeywords.length || normalizedKeywords.some((phrase) => !phrase)
       || new Set(normalizedKeywords).size !== normalizedKeywords.length) throw new TypeError('Automation keywords must be distinct non-empty phrases');
-    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons);
+    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons,
+      { ...interactive, automationId });
     if (mediaId !== null) {
       const media = this.database.prepare(`SELECT 1 FROM media WHERE account_id=? AND media_id=?`).get(accountId, mediaId);
       if (!media) throw new Error('Media does not belong to this account');
@@ -265,10 +336,11 @@ export class AutomationService {
     this.database.exec('BEGIN IMMEDIATE');
     try {
       const updated = this.database.prepare(`UPDATE automations SET media_id=?, name=?, match_mode=?, reply_text=?, buttons_json=?,
-        public_reply_enabled=?, public_reply_variants_json=?,
+        public_reply_enabled=?, public_reply_variants_json=?, interactive_mode=?, interactive_titles_json=?,
         version=version+1, updated_at=? WHERE account_id=? AND automation_id=? AND scope=? AND name NOT LIKE '% (archived)'`)
         .run(mediaId, input.name.trim(), input.matchMode, input.replyText, JSON.stringify(input.buttons),
-          publicReply.enabled ? 1 : 0, JSON.stringify(publicReply.variants), now, accountId, automationId, stored.scope);
+          publicReply.enabled ? 1 : 0, JSON.stringify(publicReply.variants), interactive.mode, JSON.stringify(interactive.titles),
+          now, accountId, automationId, stored.scope);
       if (Number(updated.changes) !== 1) throw new Error('Automation does not belong to this account');
       this.database.prepare(`DELETE FROM automation_keywords WHERE account_id=? AND automation_id=?`).run(accountId, automationId);
       for (const phrase of input.keywords) this.addKeyword(accountId, automationId, phrase);

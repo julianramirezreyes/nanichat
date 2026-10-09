@@ -112,7 +112,7 @@ test('migration v9 adds nullable caption/media_type, preserves rows, from the v8
       assert.ok(col, name); assert.equal(col!.notnull, 0);
     }
     // Migration continues to the latest version (v10 automation scope) after adding the v9 columns.
-    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 11);
+    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 12);
     const rows = db.prepare('SELECT media_id, permalink, published_at, caption, media_type FROM media ORDER BY media_id').all();
     assert.deepEqual(rows.map((r) => ({ ...r })), [
       { media_id: 'old-1', permalink: 'https://p/1', published_at: '2026-01-01T00:00:00Z', caption: null, media_type: null },

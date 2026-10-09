@@ -19,6 +19,7 @@ Documento de referencia para quien mantiene o audita Social Desk. Describe la ar
 13. [Modelo de seguridad](#13-modelo-de-seguridad)
 14. [Límites de volumen](#14-límites-de-volumen)
 15. [Limitaciones conocidas](#15-limitaciones-conocidas)
+16. [Fase 0 del follow gate (experimental)](#16-fase-0-del-follow-gate-experimental)
 
 ## 1. Arquitectura
 
@@ -95,7 +96,7 @@ Respalda siempre la carpeta completa (base **y** llave) con la aplicación deten
 
 ## 3. Esquema y migraciones
 
-`src/db/migrations.ts` aplica en **una sola transacción** todas las migraciones pendientes al arrancar y deja la versión en `PRAGMA user_version`. La versión actual es **11**. Una base con versión mayor que la soportada se rechaza (`Database schema version N is newer than supported version 11`), así que no hay vuelta atrás sin una copia de seguridad.
+`src/db/migrations.ts` aplica en **una sola transacción** todas las migraciones pendientes al arrancar y deja la versión en `PRAGMA user_version`. La versión actual es **12**. Una base con versión mayor que la soportada se rechaza (`Database schema version N is newer than supported version 12`), así que no hay vuelta atrás sin una copia de seguridad.
 
 | Versión | Cambio |
 | --- | --- |
@@ -110,6 +111,7 @@ Respalda siempre la carpeta completa (base **y** llave) con la aplicación deten
 | v9 | `media.caption` y `media.media_type` (solo para mostrar; anulables). |
 | v10 | Reconstrucción de `automations` para añadir `scope` y permitir `media_id` nulo, con `CHECK ((scope='media' AND media_id IS NOT NULL) OR (scope='account' AND media_id IS NULL))`. Se hace con las foreign keys desactivadas temporalmente (para que el `ON DELETE CASCADE` de las palabras clave no se dispare), se verifica `PRAGMA foreign_key_check` antes de confirmar y se restauran. Las filas existentes pasan a `scope='media'` sin cambiar IDs. |
 | v11 | Respuesta pública (solo aditiva): `automations.public_reply_enabled`, `public_reply_variants_json`; en `queue_items`: `public_reply_state`, `public_reply_text`, `public_reply_attempts`, `public_reply_next_at`, `public_reply_variant`, `public_reply_selected_at`; tabla de solo inserción `public_reply_attempts` con índice único que permite como máximo un evento `accepted` por elemento. |
+| v12 | Fase 0 del follow gate (experimental, solo aditiva): `comments.author_igsid` (anulable; ID opaco del autor tomado de `from.id`), `automations.interactive_mode` (`'none'` por defecto, `CHECK` en `none`/`quick_reply`/`postback`) e `automations.interactive_titles_json` (`'[]'` por defecto). No reconstruye tablas. Ver [sección 16](#16-fase-0-del-follow-gate-experimental). |
 
 > **Importante:** respalda la carpeta de datos antes del primer arranque de cada versión que traiga migraciones.
 
@@ -301,3 +303,35 @@ Los valores por defecto son prudentes y locales, no una garantía de que Meta ac
 - La detección de «ya respondido» depende de las respuestas guardadas por escaneos anteriores; no hay comprobación en vivo al enviar.
 - El comportamiento de las respuestas privadas (permisos, reglas de 24 h/7 días, cómo se ven los botones) depende de Meta y debe comprobarse con un comentario real controlado antes de un uso amplio.
 - La retención heredada solo conoce el formato de carpetas descrito en la sección 12 (`run.lock` y los nombres de contador listados).
+
+## 16. Fase 0 del follow gate (experimental)
+
+Objetivo: permitir **un experimento controlado** para saber qué acepta Meta antes de construir un «follow gate» (comentario → respuesta privada con botón → comprobar si la persona sigue la cuenta → enviar el recurso). **No** es el follow gate: el toque de un botón **no se procesa** y no se envía nada adicional.
+
+### Qué hace
+
+1. **Identificador del autor.** El escáner guarda `from.id` del comentario en `comments.author_igsid` (solo si tiene forma de ID opaco: letras, números, `_` o `-`, máximo 64). Un escaneo posterior sin `from.id` nunca borra un valor conocido. La respuesta del envío privado (`recipient_id`) se guarda, validada, en el evento `accepted` de `send_attempts` (`details.recipientId`) y aparece en el historial del elemento.
+2. **Botones interactivos experimentales.** Cada automatización tiene `interactive_mode` (`none` por defecto, `quick_reply` o `postback`) y de 1 a 3 títulos (1-20 caracteres, distintos, sin enlaces). El servidor genera los `payload` (`gate:<automation_id>:<índice>`); la persona nunca los escribe. Con `none` el mensaje enviado es **idéntico byte a byte** al de antes. Las respuestas rápidas no se combinan con botones URL (no está documentado: se rechaza); los botones postback comparten el límite de 3 botones de la plantilla con los botones URL. La configuración se congela en el elemento de la cola al encolar, igual que el texto.
+3. **Diagnóstico de solo lectura.** `GET /api/diagnostics/conversation?accountId=&commentId=` (exige además el token CSRF de la sesión, aunque sea GET) busca la conversación con el autor, lee como máximo los 20 mensajes más recientes y consulta el perfil. Responde con un resumen saneado: ID del autor recortado (`…1234`), por mensaje `id`, fecha, dirección (`account`/`user`), texto recortado a 80 caracteres, `keys` (nombres de los campos presentes en el mensaje, nunca sus valores) y forma de los adjuntos; del perfil solo `isUserFollowBusiness` e `isBusinessFollowUser`. Errores: `404 comment_not_found` (el comentario no es de esa cuenta), `409 igsid_unknown` (aún no hay `author_igsid`), `429 diagnostics_rate_limited` (1 llamada por comentario cada 20 s, en memoria), `503 diagnostics_unavailable`. Entre llamadas a Meta espera 0,5 s (Meta documenta 2 llamadas por segundo), así que tarda unos 10 s.
+
+### Formas JSON enviadas (POST `/{ig-id}/messages`, con `recipient: { comment_id }`)
+
+- Respuestas rápidas: `message: { text, quick_replies: [{ content_type: "text", title, payload }] }` — [Quick Replies](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/quick-replies).
+- Postback: `message: { attachment: { type: "template", payload: { template_type: "button", text, buttons: [{ type: "web_url", title, url }…, { type: "postback", title, payload }…] } } }` — [Button Template](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/button-template).
+- Respuesta privada: [Private Replies](https://developers.facebook.com/docs/instagram-platform/private-replies) (respuesta `{ recipient_id, message_id }`); conversación: [Conversations API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/conversations-api); perfil: [User Profile](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/user-profile).
+
+Si Meta rechaza explícitamente el mensaje con botones (HTTP 400 que no sea de token, permisos ni límite de uso), el resultado es un rechazo definitivo con código `interactive_payload_rejected` (`FAILED_PERMANENT`, sin reintento). Timeouts, 5xx o respuestas sin ID siguen siendo `UNKNOWN_OUTCOME` y nunca se reintentan.
+
+### Verificado y NO VERIFICADO
+
+- Verificado con pruebas automáticas (proveedor simulado): las formas JSON exactas, los límites, la clasificación de errores, el saneamiento del diagnóstico y que el modo `none` no cambia.
+- **NO VERIFICADO** contra Meta: que una respuesta privada (`recipient.comment_id`) acepte respuestas rápidas o botones postback (la guía de respuestas privadas solo muestra texto); cómo aparece un toque al leer la conversación (se documenta que una respuesta rápida se publica como mensaje del usuario con el título; un postback puede no aparecer); si un toque cuenta como consentimiento para leer el perfil (la documentación solo menciona mensajes, icebreakers y menú persistente); si `from.id` del comentario es el mismo IGSID que `recipient_id`; el código numérico del error de consentimiento (se reconoce por su texto). Las `keys` solo pueden mostrar los campos pedidos (`id, created_time, from, to, message, attachments`).
+
+### Cómo hacer el experimento (una sola vez, con una cuenta de prueba propia)
+
+1. Reinicie la aplicación para aplicar la migración v12 (respalde antes la carpeta de datos).
+2. Cree una automatización **nueva** para una publicación propia, con una palabra clave poco común; en «Botones interactivos (experimental)» elija «Respuestas rápidas» (o «Botones postback») y escriba 1-2 títulos. Actívela y use «Autorizar real»; el Dry Run global debe estar desactivado.
+3. Desde una cuenta de prueba propia (en el teléfono, no en escritorio), comente la palabra clave. Espere el envío en «Cola e historial». Si queda `FAILED_PERMANENT` con `interactive_payload_rejected`, Meta no acepta esa forma: ese es el resultado del experimento.
+4. Si llegó, toque un botón en el teléfono. Luego, en «Cola e historial», pulse «Ver» en ese elemento `SENT` y después «Inspeccionar conversación (experimental)». Anote si aparece un mensaje del usuario con el título, qué `keys` tiene y qué devuelve el perfil (`user_consent_required` o los dos valores de seguimiento).
+5. Al terminar, archive la automatización experimental o vuelva su modo a «Ninguno».
+

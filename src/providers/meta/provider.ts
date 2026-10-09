@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import type {
   AccountRef,
   ConnectionValidation,
+  ConversationDiagnostics,
+  DiagnosticMessage,
   DiscoveredAccount,
   MediaItem,
   MediaType,
@@ -12,6 +14,7 @@ import type {
   PublicReplyResult,
   SendResult,
   SocialProvider,
+  UserProfileProbe,
 } from '../../core/domain.ts';
 import {
   getAccountCredential,
@@ -20,7 +23,9 @@ import {
   getConnectionSummary,
 } from '../../db/repositories.ts';
 import type { CredentialVault } from '../../security/vault.ts';
-import { normalizeMatchText } from '../../services/automations.ts';
+import {
+  INTERACTIVE_MAX_BUTTONS, INTERACTIVE_PAYLOAD_PATTERN, INTERACTIVE_TITLE_MAX, looksLikeUrl, normalizeMatchText,
+} from '../../services/automations.ts';
 
 type MetaObject = Record<string, unknown>;
 const READBACK_MAX_RECIPIENTS = 50;
@@ -44,6 +49,7 @@ export class MetaProvider implements SocialProvider {
     private readonly database: DatabaseSync,
     private readonly vault: CredentialVault,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly options: { diagnosticSpacingMs?: number } = {},
   ) {}
 
   async validateConnection(connectionId: string): Promise<ConnectionValidation> {
@@ -181,6 +187,7 @@ export class MetaProvider implements SocialProvider {
         username: commentAuthor(item),
         createdAt: string(item.timestamp),
         parentId: string(item.parent_id),
+        authorId: commentAuthorId(item),
       }),
       1,
     );
@@ -201,6 +208,7 @@ export class MetaProvider implements SocialProvider {
       username: commentAuthor(row),
       createdAt: string(row.timestamp),
       parentId: string(row.parent_id),
+      authorId: commentAuthorId(row),
     };
   }
 
@@ -219,14 +227,20 @@ export class MetaProvider implements SocialProvider {
       return { outcome: 'definitive_rejection', safeErrorCode: 'comment_not_owned' };
     }
 
-    const buttons = payload.buttons.map((button) => ({
+    const buttons: Array<Record<string, string>> = payload.buttons.map((button) => ({
       type: 'web_url',
       title: button.title,
       url: button.url,
     }));
-    const message = buttons.length
-      ? { attachment: { type: 'template', payload: { template_type: 'button', text: payload.text, buttons } } }
-      : { text: payload.text };
+    // EXPERIMENTAL (follow gate phase 0). Shapes from Meta's Instagram messaging docs (button template and quick
+    // replies); whether a private reply (recipient.comment_id) accepts them is NOT documented.
+    const interactive = Boolean(payload.quickReplies?.length || payload.postbackButtons?.length);
+    for (const button of payload.postbackButtons ?? []) buttons.push({ type: 'postback', title: button.title, payload: button.payload });
+    const message = payload.quickReplies?.length
+      ? { text: payload.text, quick_replies: payload.quickReplies.map((reply) => ({ content_type: 'text', title: reply.title, payload: reply.payload })) }
+      : buttons.length
+        ? { attachment: { type: 'template', payload: { template_type: 'button', text: payload.text, buttons } } }
+        : { text: payload.text };
 
     try {
       const result = await this.request(
@@ -240,9 +254,10 @@ export class MetaProvider implements SocialProvider {
       if (!messageId) {
         return { outcome: 'ambiguous', safeErrorCode: 'meta_missing_message_id', usageHeaders: safeUsage(object(result.__safe_usage)) };
       }
-      return { outcome: 'accepted', messageId, usageHeaders: safeUsage(object(result.__safe_usage)) };
+      const recipientId = opaqueId(result.recipient_id);
+      return { outcome: 'accepted', messageId, ...(recipientId ? { recipientId } : {}), usageHeaders: safeUsage(object(result.__safe_usage)) };
     } catch (error) {
-      return sendFailure(error);
+      return interactive ? interactiveSendFailure(error) : sendFailure(error);
     }
   }
 
@@ -277,6 +292,72 @@ export class MetaProvider implements SocialProvider {
     } catch (error) {
       return publicReplyFailure(error);
     }
+  }
+
+  /**
+   * READ-ONLY diagnostics (follow gate phase 0, experimental). GET requests only: find the conversation with one user
+   * (`/{ig-id}/conversations?platform=instagram&user_id=`), list its message ids (`/{conversation-id}?fields=messages`)
+   * and read at most the 20 most recent (Meta only serves details of the last 20). Every message is reduced to a
+   * bounded summary; raw bodies are never returned. Calls are spaced (Meta documents 2 calls/s for this API).
+   */
+  async diagnoseConversation(account: AccountRef, igsid: string): Promise<ConversationDiagnostics> {
+    if (!opaqueId(igsid)) return { found: false, messages: [], safeErrorCode: 'invalid_igsid' };
+    const { connection, token } = this.accountContext(account);
+    const get = async (path: string, first = false): Promise<MetaObject> => {
+      if (!first) await this.diagnosticPause();
+      return this.request(connection.loginKind, connection.graphVersion, path, token);
+    };
+    try {
+      const query = new URLSearchParams({ platform: 'instagram', user_id: igsid });
+      const conversations = await get(`/${encodeURIComponent(account.providerAccountId)}/conversations?${query.toString()}`, true);
+      if (!Array.isArray(conversations.data)) return { found: false, messages: [], safeErrorCode: 'invalid_provider_response' };
+      const first = conversations.data[0];
+      if (first === undefined) return { found: false, messages: [] };
+      const conversationId = opaqueId(object(first)?.id, 256);
+      if (!conversationId) return { found: false, messages: [], safeErrorCode: 'invalid_provider_response' };
+      const listing = await get(`/${encodeURIComponent(conversationId)}?fields=messages`);
+      const rows = object(listing.messages)?.data;
+      if (!Array.isArray(rows)) return { found: true, messages: [], safeErrorCode: 'invalid_provider_response' };
+      const ids = rows.slice(0, DIAGNOSTIC_MAX_MESSAGES).map((row) => opaqueId(object(row)?.id, 256)).filter((id): id is string => Boolean(id));
+      const messages: DiagnosticMessage[] = [];
+      for (const id of ids) {
+        try {
+          const raw = await get(`/${encodeURIComponent(id)}?fields=id,created_time,from,to,message,attachments`);
+          messages.push(summarizeMessage(id, raw, account));
+        } catch (error) {
+          messages.push({ id, direction: 'unknown', keys: [], attachmentsShape: 'missing', safeErrorCode: safeMetaCode(error) });
+        }
+      }
+      return { found: true, messages };
+    } catch (error) {
+      return { found: false, messages: [], safeErrorCode: safeMetaCode(error) };
+    }
+  }
+
+  /**
+   * READ-ONLY follow check (experimental): `GET /{igsid}?fields=name,username,is_user_follow_business,is_business_follow_user`.
+   * Only the two booleans are returned. Meta requires prior user consent (the user messaged the account); the
+   * documented "User consent is required" error maps to `user_consent_required`.
+   */
+  async getUserProfile(account: AccountRef, igsid: string): Promise<UserProfileProbe> {
+    if (!opaqueId(igsid)) return { ok: false, safeErrorCode: 'invalid_igsid' };
+    const { connection, token } = this.accountContext(account);
+    try {
+      const profile = await this.request(connection.loginKind, connection.graphVersion,
+        `/${encodeURIComponent(igsid)}?fields=name,username,is_user_follow_business,is_business_follow_user`, token);
+      return {
+        ok: true,
+        ...(typeof profile.is_user_follow_business === 'boolean' ? { isUserFollowBusiness: profile.is_user_follow_business } : {}),
+        ...(typeof profile.is_business_follow_user === 'boolean' ? { isBusinessFollowUser: profile.is_business_follow_user } : {}),
+      };
+    } catch (error) {
+      return { ok: false, safeErrorCode: error instanceof MetaSafeError && error.consentRequired ? 'user_consent_required' : safeMetaCode(error) };
+    }
+  }
+
+  private async diagnosticPause(): Promise<void> {
+    const spacing = Math.max(0, this.options.diagnosticSpacingMs ?? DIAGNOSTIC_SPACING_MS);
+    if (spacing > 0) await new Promise((resolve) => setTimeout(resolve, spacing));
   }
 
   async readMessage(account: AccountRef, messageId: string): Promise<MessageReadback> {
@@ -570,6 +651,8 @@ export interface ReadbackDiagnostics {
 
 class MetaSafeError extends Error {
   diagnostics?: ReadbackDiagnostics;
+  /** True when Meta's error message says user consent is required (the message itself is never kept). */
+  consentRequired?: boolean;
   usageHeaders?: { appUsage?: string; pageUsage?: string; retryAfter?: string };
   constructor(
     readonly code: string,
@@ -667,7 +750,75 @@ function sanitizeRetryAfter(value: string | null): string | undefined {
 
 function metaError(body: unknown, status: number): MetaSafeError {
   const error = object(object(body)?.error);
-  return new MetaSafeError('meta_api_error', status, number(error?.code), number(error?.error_subcode));
+  const safe = new MetaSafeError('meta_api_error', status, number(error?.code), number(error?.error_subcode));
+  const message = string(error?.message);
+  if (message && /user consent is required/iu.test(message.slice(0, 500))) safe.consentRequired = true;
+  return safe;
+}
+
+/**
+ * EXPERIMENTAL interactive payload failure: an explicit 400 from Meta (other than token/permission or throttling codes)
+ * means the new shape was rejected; it is definitive and never retried. 429/throttling keeps its retryable status;
+ * timeouts, network errors, 5xx and malformed bodies stay ambiguous (UNKNOWN_OUTCOME, never retried).
+ */
+function interactiveSendFailure(error: unknown): SendResult {
+  const base = sendFailure(error);
+  const safeError = error instanceof MetaSafeError ? error : undefined;
+  const code = safeError?.metaCode;
+  const tokenOrPermission = code !== undefined && (PERMISSION_CODES.has(code) || (code >= 200 && code <= 299));
+  const throttled = code !== undefined && RATE_LIMIT_CODES.has(code);
+  if (base.outcome === 'definitive_rejection' && safeError?.code === 'meta_api_error' && safeError.httpStatus === 400
+    && !tokenOrPermission && !throttled) {
+    return { ...base, safeErrorCode: 'interactive_payload_rejected' };
+  }
+  return base;
+}
+
+const DIAGNOSTIC_MAX_MESSAGES = 20;
+const DIAGNOSTIC_SPACING_MS = 500;
+const DIAGNOSTIC_TEXT_MAX = 80;
+const DIAGNOSTIC_MAX_KEYS = 30;
+
+/** Opaque provider id (IGSID, conversation or message id): bounded and URL-safe characters only. */
+function opaqueId(value: unknown, maximum = 64): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const pattern = maximum === 64 ? /^[A-Za-z0-9_-]{1,64}$/u : /^[A-Za-z0-9_\-=.:]{1,256}$/u;
+  return pattern.test(value) && !value.includes('..') ? value : undefined;
+}
+
+function commentAuthorId(item: MetaObject): string | undefined {
+  return opaqueId(object(item.from)?.id);
+}
+
+function safeMetaCode(error: unknown): string {
+  const safeError = error instanceof MetaSafeError ? error : undefined;
+  if (safeError?.metaCode) return `meta_${safeError.metaCode}${safeError.metaSubcode ? `_${safeError.metaSubcode}` : ''}`;
+  return safeError?.code ?? 'meta_error';
+}
+
+/** Bounded summary of one raw message: names of its top-level keys, never their values (except truncated text). */
+function summarizeMessage(id: string, raw: MetaObject, account: AccountRef): DiagnosticMessage {
+  const keys = Object.keys(raw).filter((key) => key !== '__safe_usage' && /^[a-z0-9_]{1,40}$/u.test(key)).sort().slice(0, DIAGNOSTIC_MAX_KEYS);
+  const sender = object(raw.from);
+  const senderId = string(sender?.id);
+  const senderUsername = string(sender?.username);
+  const direction: DiagnosticMessage['direction'] = !sender ? 'unknown'
+    : senderId === account.providerAccountId || (senderUsername !== undefined && senderUsername.trim() !== ''
+      && normalizeMatchText(senderUsername) === normalizeMatchText(account.username)) ? 'account' : 'user';
+  const text = string(raw.message);
+  const createdTime = string(raw.created_time)?.slice(0, 40);
+  const attachments = raw.attachments;
+  const attachmentsObject = object(attachments);
+  return {
+    id,
+    ...(createdTime ? { createdTime } : {}),
+    direction,
+    ...(text !== undefined ? { text: Array.from(text).slice(0, DIAGNOSTIC_TEXT_MAX).join('') } : {}),
+    keys,
+    attachmentsShape: Array.isArray(attachments) ? 'array'
+      : attachmentsObject && Array.isArray(attachmentsObject.data) ? 'data'
+        : attachments === undefined || attachments === null ? 'missing' : 'other',
+  };
 }
 
 async function readBounded(response: Response, maximumBytes: number): Promise<string> {
@@ -724,9 +875,25 @@ function validCursor(cursor: string): boolean {
   return cursor.trim().length > 0 && cursor.length <= 2048;
 }
 
+/** EXPERIMENTAL interactive buttons: 1-3 distinct titles (1-20 chars, no links) with server-generated payloads. */
+function validInteractiveButtons(value: unknown): value is Array<{ title: string; payload: string }> {
+  if (!Array.isArray(value) || value.length < 1 || value.length > INTERACTIVE_MAX_BUTTONS) return false;
+  const valid = value.every((button) => isObject(button) && typeof button.title === 'string' && button.title.trim() !== ''
+    && Array.from(button.title).length <= INTERACTIVE_TITLE_MAX && !looksLikeUrl(button.title)
+    && typeof button.payload === 'string' && INTERACTIVE_PAYLOAD_PATTERN.test(button.payload));
+  return valid && new Set(value.map((button) => normalizeMatchText((button as { title: string }).title))).size === value.length;
+}
+
 function validPrivateReplyPayload(payload: PrivateReplyPayload): boolean {
   if (!payload || typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 1000
     || !Array.isArray(payload.buttons) || payload.buttons.length > 2) return false;
+  if (payload.quickReplies !== undefined) {
+    // Quick replies only on a plain text message (mixing with a template is undocumented: fail closed).
+    if (!validInteractiveButtons(payload.quickReplies) || payload.buttons.length > 0 || payload.postbackButtons !== undefined) return false;
+  }
+  if (payload.postbackButtons !== undefined) {
+    if (!validInteractiveButtons(payload.postbackButtons) || payload.buttons.length + payload.postbackButtons.length > INTERACTIVE_MAX_BUTTONS) return false;
+  }
   return payload.buttons.every((button) => {
     if (!button || typeof button.title !== 'string' || !button.title.trim() || button.title.length > 20
       || typeof button.url !== 'string') return false;

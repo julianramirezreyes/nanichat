@@ -286,12 +286,13 @@ export class Scanner {
   private upsertComment(accountId: string, mediaId: string, comment: ProviderComment): void {
     const now = new Date().toISOString();
     this.database.prepare(`INSERT INTO comments
-      (account_id, media_id, comment_id, text, username, created_at, parent_id, first_seen_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (account_id, media_id, comment_id, text, username, created_at, parent_id, first_seen_at, last_seen_at, author_igsid)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(account_id, comment_id) DO UPDATE SET text=excluded.text, username=excluded.username,
-        created_at=excluded.created_at, parent_id=excluded.parent_id, last_seen_at=excluded.last_seen_at`)
+        created_at=excluded.created_at, parent_id=excluded.parent_id, last_seen_at=excluded.last_seen_at,
+        author_igsid=COALESCE(excluded.author_igsid, comments.author_igsid)`)
       .run(accountId, mediaId, comment.commentId, comment.text ?? null, comment.username ?? null,
-        comment.createdAt ?? null, comment.parentId ?? null, now, now);
+        comment.createdAt ?? null, comment.parentId ?? null, now, now, comment.authorId ?? null);
   }
 
   private writeCheckpoint(accountId: string, mediaId: string, scanId: string, value: Record<string, unknown>, key = `scan:${scanId}`): void {

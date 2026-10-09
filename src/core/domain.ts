@@ -45,6 +45,8 @@ export type ProviderComment = {
   username?: string;
   createdAt?: string;
   parentId?: string;
+  /** Opaque author id from `from.id` (validated shape only); used as the IGSID for read-only diagnostics. */
+  authorId?: string;
 };
 
 export type ProviderPage<T> = {
@@ -57,11 +59,20 @@ export type ProviderPage<T> = {
 export type PrivateReplyPayload = {
   text: string;
   buttons: Array<{ title: string; url: string }>;
+  /** EXPERIMENTAL (follow gate phase 0): quick replies next to the text. Payloads are server-generated. */
+  quickReplies?: InteractiveButton[];
+  /** EXPERIMENTAL (follow gate phase 0): postback buttons inside the button template. Payloads are server-generated. */
+  postbackButtons?: InteractiveButton[];
 };
+
+export type InteractiveButton = { title: string; payload: string };
+export type InteractiveMode = 'none' | 'quick_reply' | 'postback';
 
 export type SendResult = {
   outcome: 'accepted' | 'definitive_rejection' | 'ambiguous';
   messageId?: string;
+  /** Instagram-scoped id of the recipient as returned by the send response (validated shape only). */
+  recipientId?: string;
   safeErrorCode?: string;
   httpStatus?: number;
   metaCode?: number;
@@ -100,7 +111,25 @@ export interface SocialProvider {
   sendPrivateReply(account: AccountRef, commentId: string, payload: PrivateReplyPayload): Promise<SendResult>;
   readMessage(account: AccountRef, messageId: string): Promise<MessageReadback>;
   replyToComment(account: AccountRef, commentId: string, message: string): Promise<PublicReplyResult>;
+  diagnoseConversation?(account: AccountRef, igsid: string): Promise<ConversationDiagnostics>;
+  getUserProfile?(account: AccountRef, igsid: string): Promise<UserProfileProbe>;
 }
+
+/** Sanitized, bounded summary of one conversation message (read-only diagnostics). */
+export type DiagnosticMessage = {
+  id: string;
+  createdTime?: string;
+  direction: 'account' | 'user' | 'unknown';
+  text?: string;
+  /** Sorted top-level keys present in the raw message object (names only, never values). */
+  keys: string[];
+  attachmentsShape: 'array' | 'data' | 'missing' | 'other';
+  safeErrorCode?: string;
+};
+
+export type ConversationDiagnostics = { found: boolean; messages: DiagnosticMessage[]; safeErrorCode?: string };
+
+export type UserProfileProbe = { ok: boolean; isUserFollowBusiness?: boolean; isBusinessFollowUser?: boolean; safeErrorCode?: string };
 
 export type QueueState =
   | 'DISCOVERED'

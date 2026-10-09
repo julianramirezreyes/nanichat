@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
-import type { AccountRef } from '../core/domain.ts';
+import type { AccountRef, SocialProvider } from '../core/domain.ts';
 import type { ConnectionService } from '../services/connections.ts';
 import type { AutomationService } from '../services/automations.ts';
 import type { Scheduler } from '../services/scheduler.ts';
@@ -9,6 +9,7 @@ import { ScanProgress, type BacklogService } from '../services/backlog.ts';
 import { QueueReadbackError, type QueueService } from '../services/queue.ts';
 import { listPendingReview, truncateText } from '../services/pending-review.ts';
 import { storedPublicReplyVariants } from '../services/public-reply.ts';
+import { storedInteractiveConfig } from '../services/automations.ts';
 import type { ImportedMetaEnvironment } from '../security/env-import.ts';
 
 const BODY_LIMIT = 64 * 1024;
@@ -27,6 +28,8 @@ export type ApiDependencies = {
   /** Server clock (ms); injectable for deterministic expiry tests. */
   clock?: () => number;
   importEnvironment?: () => Promise<ImportedMetaEnvironment>;
+  /** EXPERIMENTAL read-only diagnostics (follow gate phase 0): GET-only provider calls. */
+  diagnostics?: Required<Pick<SocialProvider, 'diagnoseConversation' | 'getUserProfile'>>;
   legacy?: {
     inspect(username: string): { blocked: boolean; reasonCode?: string; lockPresent: boolean; counterVersion: string; holdConfigured?: boolean };
     acknowledge(username: string, version: string): { ok: boolean; state: { lockPresent: boolean; counterVersion: string } };
@@ -36,6 +39,7 @@ export type ApiDependencies = {
 export function createApiHandler(deps: ApiDependencies) {
   const csrfToken = deps.csrfToken ?? randomBytes(32).toString('base64url');
   const jobs = new Map<string, ScanJob>();
+  const diagnosticsCalls = new Map<string, number>();
 
   return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     response.setHeader('cache-control', 'no-store');
@@ -60,7 +64,7 @@ export function createApiHandler(deps: ApiDependencies) {
       }
       let body: Json = {};
       if (mutation) body = await readJson(request);
-      await route(request, response, url, method, body, deps, jobs, csrfToken);
+      await route(request, response, url, method, body, deps, jobs, csrfToken, diagnosticsCalls);
     } catch (error) {
       if (error instanceof QueueReadbackError) return send(response, error.status, { error: error.code });
       const status = error instanceof ApiError ? error.status : error instanceof TypeError ? 400 : 409;
@@ -89,6 +93,7 @@ async function route(
   deps: ApiDependencies,
   jobs: Map<string, ScanJob>,
   csrfToken: string,
+  diagnosticsCalls: Map<string, number> = new Map(),
 ): Promise<void> {
   const { database: db } = deps;
   const path = url.pathname;
@@ -165,7 +170,9 @@ async function route(
     // (boolean, list of valid variants, enabled requires >= 1) and never coerces; any violation is a TypeError (400).
     const automationId = service.create({ accountId: account, scope, mediaId: scope === 'account' ? null : text(body.mediaId), name: text(body.name),
       replyText: text(body.replyText), matchMode: matchMode(body.matchMode, true), buttons: buttons(body.buttons),
-      publicReplyEnabled: body.publicReplyEnabled as boolean | undefined, publicReplyVariants: body.publicReplyVariants as string[] | undefined });
+      publicReplyEnabled: body.publicReplyEnabled as boolean | undefined, publicReplyVariants: body.publicReplyVariants as string[] | undefined,
+      // EXPERIMENTAL: validated strictly by the service (TypeError -> 400); omitted means 'none'.
+      interactiveMode: body.interactiveMode as never, interactiveTitles: body.interactiveTitles as never });
     for (const keyword of keywords) service.addKeyword(account, automationId, keyword);
     return send(response, 201, { automationId });
   }
@@ -179,6 +186,8 @@ async function route(
       matchMode: matchMode(body.matchMode, false), buttons: buttons(body.buttons), keywords: stringList(body.keywords, 20),
       // Omitted: the stored public reply configuration is kept.
       publicReplyEnabled: body.publicReplyEnabled as boolean | undefined, publicReplyVariants: body.publicReplyVariants as string[] | undefined,
+      // EXPERIMENTAL: omitted keeps the stored interactive configuration.
+      interactiveMode: body.interactiveMode as never, interactiveTitles: body.interactiveTitles as never,
     });
     return send(response, 200, { ok: true });
   }
@@ -288,6 +297,32 @@ async function route(
     const selected = accountId(body.accountId, db);
     return send(response, 200, await requireService(deps.queue, 'queue').verifyReadback(selected, decodeURIComponent(readbackMatch[1]!)));
   }
+  if (path === '/api/diagnostics/conversation' && method === 'GET') {
+    // EXPERIMENTAL read-only diagnostics. Although it is a GET, it triggers provider calls, so it also requires the
+    // session CSRF token (a cross-site page cannot send this header without a CORS preflight, which is never granted).
+    if (request.headers['x-csrf-token'] !== csrfToken) throw new ApiError(403, 'origin_or_csrf_rejected');
+    const selected = accountId(url.searchParams.get('accountId'), db);
+    const commentId = url.searchParams.get('commentId') ?? '';
+    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(commentId)) throw new TypeError('Invalid comment ID');
+    const comment = db.prepare(`SELECT author_igsid FROM comments WHERE account_id=? AND comment_id=?`).get(selected, commentId) as
+      { author_igsid: string | null } | undefined;
+    if (!comment) throw new ApiError(404, 'comment_not_found');
+    const igsid = comment.author_igsid;
+    if (!igsid || !/^[A-Za-z0-9_-]{1,64}$/u.test(igsid)) throw new ApiError(409, 'igsid_unknown');
+    const provider = requireService(deps.diagnostics, 'diagnostics');
+    const account = accountRef(db, selected);
+    const now = (deps.clock ?? Date.now)();
+    const key = `${selected}:${commentId}`;
+    const last = diagnosticsCalls.get(key);
+    if (last !== undefined && now - last < DIAGNOSTICS_MIN_INTERVAL_MS) throw new ApiError(429, 'diagnostics_rate_limited');
+    if (diagnosticsCalls.size > 500) {
+      for (const [entry, at] of diagnosticsCalls) if (now - at >= DIAGNOSTICS_MIN_INTERVAL_MS) diagnosticsCalls.delete(entry);
+    }
+    diagnosticsCalls.set(key, now);
+    const conversation = await provider.diagnoseConversation(account, igsid);
+    const profile = await provider.getUserProfile(account, igsid);
+    return send(response, 200, { igsid: `…${igsid.slice(-4)}`, conversation: safeConversation(conversation), profile: safeProfile(profile) });
+  }
   if (path === '/api/settings/legacy' && method === 'GET') {
     const username = (url.searchParams.get('username') ?? '').replace(/^@/u, '').toLowerCase();
     if (!/^[a-z0-9._]{1,30}$/u.test(username)) throw new TypeError('Invalid username');
@@ -352,9 +387,12 @@ function listAutomations(db: DatabaseSync, selected?: string) {
   const rows = db.prepare(`SELECT automation_id AS automationId, account_id AS accountId, media_id AS mediaId, scope, name,
       status, match_mode AS matchMode, reply_text AS replyText, buttons_json AS buttonsJson, real_enabled AS realEnabled,
       monitoring_started_at AS monitoringStartedAt, public_reply_enabled AS publicReplyEnabled,
-      public_reply_variants_json AS publicReplyVariantsJson FROM automations ${selected ? "WHERE account_id=? AND name NOT LIKE '% (archived)'" : "WHERE name NOT LIKE '% (archived)'"} ORDER BY updated_at DESC LIMIT 500`)
+      public_reply_variants_json AS publicReplyVariantsJson, interactive_mode AS interactiveMode,
+      interactive_titles_json AS interactiveTitlesJson FROM automations ${selected ? "WHERE account_id=? AND name NOT LIKE '% (archived)'" : "WHERE name NOT LIKE '% (archived)'"} ORDER BY updated_at DESC LIMIT 500`)
     .all(...(selected ? [selected] : [])) as Array<Record<string, unknown>>;
-  return rows.map(({ publicReplyVariantsJson, ...row }) => ({ ...row, buttons: JSON.parse(String(row.buttonsJson)), realEnabled: Boolean(row.realEnabled),
+  return rows.map(({ publicReplyVariantsJson, interactiveTitlesJson, ...row }) => ({ ...row,
+    ...(({ mode, titles }) => ({ interactiveMode: mode, interactiveTitles: titles }))(storedInteractiveConfig(row.interactiveMode, interactiveTitlesJson)),
+    buttons: JSON.parse(String(row.buttonsJson)), realEnabled: Boolean(row.realEnabled),
     publicReplyEnabled: Boolean(row.publicReplyEnabled), publicReplyVariants: storedPublicReplyVariants(String(publicReplyVariantsJson)),
     keywords: db.prepare(`SELECT phrase FROM automation_keywords WHERE account_id=? AND automation_id=? ORDER BY rowid`)
       .all(String(row.accountId), String(row.automationId)) }));
@@ -397,8 +435,49 @@ function queuePage(db: DatabaseSync, selected: string | undefined, url: URL) {
 }
 
 function safePayload(value: string): unknown {
-  try { const parsed = JSON.parse(value) as Json; return { text: typeof parsed.text === 'string' ? parsed.text : '', buttons: Array.isArray(parsed.buttons) ? parsed.buttons : [] }; }
+  try {
+    const parsed = JSON.parse(value) as Json;
+    const titles = (list: unknown) => (Array.isArray(list) ? list : []).slice(0, 3)
+      .filter((entry): entry is Json => Boolean(entry) && typeof entry === 'object' && typeof (entry as Json).title === 'string')
+      .map((entry) => ({ title: String(entry.title).slice(0, 20) }));
+    // EXPERIMENTAL interactive buttons: titles only (payload strings stay server-side); absent keys keep the old DTO.
+    return { text: typeof parsed.text === 'string' ? parsed.text : '', buttons: Array.isArray(parsed.buttons) ? parsed.buttons : [],
+      ...(Array.isArray(parsed.quickReplies) ? { quickReplies: titles(parsed.quickReplies) } : {}),
+      ...(Array.isArray(parsed.postbackButtons) ? { postbackButtons: titles(parsed.postbackButtons) } : {}) };
+  }
   catch { return { text: '', buttons: [] }; }
+}
+
+const DIAGNOSTICS_MIN_INTERVAL_MS = 20_000;
+const SAFE_CODE = /^[a-z][a-z0-9_]{1,63}$/u;
+
+/** Allow-list of the diagnostics conversation DTO (defense in depth over the provider's own sanitizing). */
+function safeConversation(value: unknown): Json {
+  const source = value && typeof value === 'object' ? value as Json : {};
+  const messages = (Array.isArray(source.messages) ? source.messages : []).slice(0, 20).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const message = entry as Json;
+    if (typeof message.id !== 'string') return [];
+    return [{
+      id: message.id.slice(0, 256),
+      ...(typeof message.createdTime === 'string' ? { createdTime: message.createdTime.slice(0, 40) } : {}),
+      direction: ['account', 'user'].includes(String(message.direction)) ? message.direction : 'unknown',
+      ...(typeof message.text === 'string' ? { text: Array.from(message.text).slice(0, 80).join('') } : {}),
+      keys: (Array.isArray(message.keys) ? message.keys : []).filter((key): key is string => typeof key === 'string' && /^[a-z0-9_]{1,40}$/u.test(key)).slice(0, 30),
+      attachmentsShape: ['array', 'data', 'missing', 'other'].includes(String(message.attachmentsShape)) ? message.attachmentsShape : 'other',
+      ...(typeof message.safeErrorCode === 'string' && SAFE_CODE.test(message.safeErrorCode) ? { safeErrorCode: message.safeErrorCode } : {}),
+    }];
+  });
+  return { found: source.found === true, messages,
+    ...(typeof source.safeErrorCode === 'string' && SAFE_CODE.test(source.safeErrorCode) ? { safeErrorCode: source.safeErrorCode } : {}) };
+}
+
+function safeProfile(value: unknown): Json {
+  const source = value && typeof value === 'object' ? value as Json : {};
+  return { ok: source.ok === true,
+    ...(typeof source.isUserFollowBusiness === 'boolean' ? { isUserFollowBusiness: source.isUserFollowBusiness } : {}),
+    ...(typeof source.isBusinessFollowUser === 'boolean' ? { isBusinessFollowUser: source.isBusinessFollowUser } : {}),
+    ...(typeof source.safeErrorCode === 'string' && SAFE_CODE.test(source.safeErrorCode) ? { safeErrorCode: source.safeErrorCode } : {}) };
 }
 
 function safeAttemptDetails(value: string): Record<string, unknown> {

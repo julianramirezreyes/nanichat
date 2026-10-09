@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-const VERSION = 11;
+const VERSION = 12;
 
 const INITIAL_SCHEMA = `
 CREATE TABLE connections (
@@ -173,6 +173,7 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
     if (current < 9 && target >= 9) migrateMediaDisplay(database);
     if (rebuild) migrateAutomationScope(database);
     if (current < 11 && target >= 11) migratePublicReply(database);
+    if (current < 12 && target >= 12) migrateFollowGatePhase0(database);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -180,6 +181,19 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
   } finally {
     if (rebuild && foreignKeys) database.exec('PRAGMA foreign_keys = ON');
   }
+}
+
+/**
+ * v12 (follow gate phase 0, experimental): additive only. `comments.author_igsid` keeps the opaque author id from
+ * `from.id` for read-only diagnostics; automations gain an experimental interactive mode (default 'none', which keeps
+ * the historic payload exactly) and its button titles. No table is rebuilt and no row changes.
+ */
+function migrateFollowGatePhase0(database: DatabaseSync): void {
+  database.exec(`ALTER TABLE comments ADD COLUMN author_igsid TEXT;
+  ALTER TABLE automations ADD COLUMN interactive_mode TEXT NOT NULL DEFAULT 'none'
+    CHECK (interactive_mode IN ('none', 'quick_reply', 'postback'));
+  ALTER TABLE automations ADD COLUMN interactive_titles_json TEXT NOT NULL DEFAULT '[]';
+  PRAGMA user_version = 12;`);
 }
 
 /**

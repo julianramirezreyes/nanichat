@@ -36,6 +36,8 @@ const backlog = new BacklogService(database, scanner, queue);
 // Opt-in (SOCIAL_DESK_IMPORT_ENV_PATH): without it the explicit .env import endpoint is unavailable.
 const importEnvPath = config.importEnvPath;
 const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue,
+  // EXPERIMENTAL read-only conversation/profile diagnostics (GET requests only; never sends).
+  diagnostics: provider,
   ...(legacyInterlock ? { legacy: legacyInterlock } : {}),
   ...(importEnvPath ? { importEnvironment: async () => readImportedEnvironment(importEnvPath) } : {}) });
 export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog };

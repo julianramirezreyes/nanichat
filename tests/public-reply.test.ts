@@ -103,7 +103,7 @@ test('migration v10 -> v11 adds public reply columns and append-only attempts ta
         VALUES ('q1','acc','c1','a1','SENT',0,'{"text":"x"}','2026','2026');
       INSERT INTO send_attempts(attempt_event_id,account_id,queue_item_id,event_type,event_at) VALUES ('e1','acc','q1','accepted','2026');`);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 11);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 12);
     assert.equal(one(db, 'PRAGMA foreign_keys').foreign_keys, 1);
     const auto = one(db, `SELECT * FROM automations WHERE automation_id='a1'`);
     assert.equal(auto.public_reply_enabled, 0);
@@ -127,7 +127,7 @@ test('migration v10 -> v11 adds public reply columns and append-only attempts ta
     assert.throws(() => db.exec(`UPDATE public_reply_attempts SET safe_error_code='x'`), /append-only/);
     assert.throws(() => db.exec(`DELETE FROM public_reply_attempts`), /append-only/);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 11);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 12);
   }, 10);
 });
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AccountRef, MessageReadback, PublicReplyResult, SendResult, SocialProvider } from '../core/domain.ts';
-import { claimsMediaSql, classifyComment, hasEnabledMediaAutomation, hasOwnerReply, isPastPrivateReplyWindow, matchAutomation, renderReply } from './automations.ts';
+import { claimsMediaSql, classifyComment, hasEnabledMediaAutomation, hasOwnerReply, isPastPrivateReplyWindow, matchAutomation, renderReply, storedInteractiveConfig } from './automations.ts';
 import {
   PUBLIC_REPLY_MAX_ATTEMPTS, PUBLIC_REPLY_RECENT_WINDOW, PUBLIC_REPLY_SPACING_MS, PUBLIC_REPLY_WINDOW_MS,
   renderPublicReply, selectPublicReplyVariant, storedPublicReplyVariants,
@@ -88,10 +88,11 @@ export class QueueService {
   async enqueueReviewed(accountId: string, automationId: string, reviewedCommentIds: string[]): Promise<string[]> {
     if (!reviewedCommentIds.length) return [];
     const automation = this.database.prepare(`SELECT media_id, scope, status, real_enabled, match_mode, reply_text, buttons_json, version,
-      public_reply_enabled, public_reply_variants_json
+      public_reply_enabled, public_reply_variants_json, interactive_mode, interactive_titles_json
       FROM automations WHERE account_id = ? AND automation_id = ?`).get(accountId, automationId) as {
       media_id: string | null; scope: 'media' | 'account'; status: string; real_enabled: number; match_mode: 'exact' | 'contains';
       reply_text: string; buttons_json: string; version: number; public_reply_enabled: number; public_reply_variants_json: string;
+      interactive_mode: string; interactive_titles_json: string;
     } | undefined;
     if (!automation) throw new Error('Automation does not belong to this account');
     if (automation.status !== 'enabled') throw new Error('Automation is not enabled');
@@ -147,7 +148,9 @@ export class QueueService {
       const payload = renderReply(automation.reply_text, {
         username: comment.username ?? '', comment: comment.text ?? '', keyword: classification.matchedKeywords[0]!,
         account: account.username, media: mediaLabel,
-      }, JSON.parse(automation.buttons_json) as Array<{ title: string; url: string }>);
+      }, JSON.parse(automation.buttons_json) as Array<{ title: string; url: string }>,
+      // EXPERIMENTAL interactive buttons are frozen into the payload at enqueue time ('none' adds no keys).
+      { ...storedInteractiveConfig(automation.interactive_mode, automation.interactive_titles_json), automationId });
       const now = new Date().toISOString();
       // Simulated items keep the would-be public reply as an inert preview (WOULD_REPLY_PUBLIC); it is never posted.
       const preview = simulated && automation.public_reply_enabled === 1
@@ -286,8 +289,9 @@ export class QueueService {
         this.database.exec('ROLLBACK');
         return row.queue_item_id;
       }
+      const recipientId = safeRecipientId(result.recipientId);
       this.appendEvent(row, 'accepted', result.messageId, undefined,
-        { httpStatus: result.httpStatus, usageHeaders: result.usageHeaders });
+        { httpStatus: result.httpStatus, usageHeaders: result.usageHeaders, ...(recipientId ? { recipientId } : {}) });
       // Private first, public after: the public step becomes PENDING in the SAME transaction that records the
       // accepted private reply, so a crash can never leave a SENT item without its scheduled public step (or the reverse).
       this.schedulePublicReply(row, freshComment);
@@ -847,6 +851,11 @@ function publicRetryDelay(retryAfter: string | undefined, attempts: number, now:
     if (Number.isFinite(delay) && delay > 0) return delay;
   }
   return Math.min(PUBLIC_RETRY_MAX_DELAY_MS, PUBLIC_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attempts - 1)));
+}
+
+/** Opaque Instagram-scoped id from the send response: bounded, simple charset, otherwise dropped. */
+function safeRecipientId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/u.test(value) ? value : undefined;
 }
 
 /** Maps a readback failure to a short safe code: never raw messages, bodies or tokens. */
