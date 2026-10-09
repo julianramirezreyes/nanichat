@@ -14,11 +14,12 @@ import { ATTACHMENT_ERROR_LABELS, attachmentErrorHint, attachmentPartStateLabel,
 import {
   FOLLOW_GATE_RETIRED_LABEL, MEDIA_LINK_TIP, followGateErrorHint, followGateEventLabel, followGateStateLabel, showFollowGateDetail,
 } from './follow-gate';
+import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight } from 'lucide-react';
 import { PUBLIC_REPLY_SAMPLE_USERNAME, describePublicReply, parseVariantLines, previewExamples, publicReplyErrorHint, type PublicReplyDto, variantCountLabel } from './public-reply';
 
 type Account = { accountId: string; connectionId: string; username: string; status: string; monitoringPaused: boolean; sendHoldReason?: string | null; last_sync?: string; last_error?: string; coverage?: string };
 type Connection = { id: string; name: string; login_kind: string; app_id?: string | null; graph_version: string; status: string; last_validated_at: string | null };
-type Media = { accountId: string; mediaId: string; permalink?: string; publishedAt?: string; caption?: string | null; mediaType?: string | null };
+type Media = { accountId: string; mediaId: string; permalink?: string; publishedAt?: string; caption?: string | null; mediaType?: string | null; thumbnailUrl?: string | null };
 type ScanJob = { id: string; status: string; createdAt?: string; result?: any; progress?: ScanProgressDto; errorCode?: string };
 const SCAN_JOB_KEY = 'social-desk.activeScanJob';
 type Automation = { automationId: string; accountId: string; mediaId: string | null; scope?: 'media' | 'account'; name: string; status: string; realEnabled: boolean; keywords: Array<{ phrase: string }>; buttons?: Array<{ title: string; url: string }>; replyText?: string; matchMode?: 'exact' | 'contains'; publicReplyEnabled?: boolean; publicReplyVariants?: string[]; followGateEnabled?: boolean; followGateMessage?: string; followGateButtonTitle?: string; resourceAttachmentKind?: string; resourceAttachmentUrl?: string };
@@ -36,6 +37,13 @@ type Tone = 'good' | 'neutral' | 'warn' | 'danger';
 
 /** Thrown inside an `act` operation when the user declines a confirmation: no feedback, no refresh. */
 class Cancelled extends Error {}
+
+
+const TAB_ICONS: Record<string, any> = { dashboard: LayoutDashboard, connections: PlugZap, media: Images, automations: Zap, monitor: Radar, backlog: Inbox, queue: History, settings: Settings };
+
+function RingAvatar({ username }: { username?: string | null }) {
+  return <div className="ring-avatar"><div className="ring-avatar-inner">{username ? username[0].toUpperCase() : 'V'}</div></div>;
+}
 
 const sections = [
   ['dashboard', 'Resumen', 'Vea de un vistazo qué está pasando y qué falta por configurar.'],
@@ -177,7 +185,9 @@ export default function HomePage() {
         </div>
         <div className="spacer"></div>
         <div className="head-pills">
-          <label className="account-picker"><span>Cuenta</span><select aria-label="Filtrar por cuenta" value={accountFilter} onChange={(event) => chooseAccount(event.target.value)}><option value="all">Todas las cuentas</option>{(allAccounts.length ? allAccounts : accounts).map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select></label>
+          <label className="account-picker"><span className="visually-hidden">Cuenta</span>
+            <RingAvatar username={accounts.find(a => a.accountId === accountFilter)?.username || allAccounts.find(a => a.accountId === accountFilter)?.username} />
+            <select aria-label="Filtrar por cuenta" value={accountFilter} onChange={(event) => chooseAccount(event.target.value)}><option value="all">Todas las cuentas</option>{(allAccounts.length ? allAccounts : accounts).map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select></label>
           {mode === 'checking'
             ? <button className="mode-pill checking-pill" disabled aria-disabled="true"><span className="state"><i></i></span>Verificando modo…</button>
             : <button className={mode === 'dry' ? 'mode-pill dry-pill' : 'mode-pill real-pill'} title={mode === 'dry' ? 'Cambiar a modo real (pide confirmación)' : 'Volver a Dry Run'} onClick={() => void toggleDryRun()}><span className={mode === 'dry' ? 'state on' : 'state'}><i></i></span>{mode === 'dry' ? 'Dry Run · Activo' : 'Modo real · Activo'}</button>}
@@ -186,14 +196,17 @@ export default function HomePage() {
     </header>
     <nav className="tabs" aria-label="Navegación principal">
       <div className="tabs-inner">
-        {sections.map(([id, label]) => <button key={id} type="button" className={section === id ? 'tab active' : 'tab'} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>{label}</button>)}
+        {sections.map(([id, label]) => {
+          const Icon = TAB_ICONS[id] || Circle;
+          return <button key={id} type="button" className={section === id ? 'tab active' : 'tab'} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}><Icon size={18} strokeWidth={1.75} aria-hidden="true" /><span>{label}</span></button>;
+        })}
       </div>
     </nav>
     <main className="page">
-      <header className="welcome-row"><div><span className="eyebrow">ESPACIO DE TRABAJO</span><h1>{current[1]}</h1><p className="page-desc">{current[2]}</p></div></header>
+      <header className="welcome-row"><div><span className="eyebrow">Espacio de trabajo</span><h1>{current[1]}</h1><p className="page-desc">{current[2]}</p></div></header>
       <div className={`mode-banner ${mode}`}>
         {mode === 'checking' && <span>Verificando el modo de envío…</span>}
-        {mode === 'dry' && <span><strong>Modo prueba:</strong> la app analiza y simula, no envía mensajes reales</span>}
+        {mode === 'dry' && <><ShieldCheck size={20} /> <span><strong>Modo prueba:</strong> la app analiza y simula, no envía mensajes reales</span></>}
         {mode === 'real' && <span><strong>Modo real:</strong> se enviarán mensajes privados reales en automatizaciones autorizadas</span>}
       </div>
       {loading && <div className="loading-line">Actualizando datos locales…</div>}
@@ -263,7 +276,7 @@ function DashboardView({ data, accounts, connections, automations, accountFilter
   const total = (states: string[]) => data.queue.filter((row) => states.includes(row.state)).reduce((sum, row) => sum + row.count, 0);
   const onboarding = deriveOnboarding({ connections, accounts, automations, monitoringEnabled: data.monitoringEnabled });
   return <>
-    <div className="welcome-row"><div><p className="eyebrow">VISTA GENERAL · {accountLabel.toUpperCase()}</p><h2>Estado operativo</h2><p className="muted">Resumen basado en la información guardada en esta instalación.</p></div><button className="btn" onClick={onRefresh}>Actualizar datos</button></div>
+    <div className="welcome-row"><div><p className="eyebrow">Vista general · {accountLabel}</p><h2>Estado operativo</h2><p className="muted">Resumen basado en la información guardada en esta instalación.</p></div><button className="btn" onClick={onRefresh}>Actualizar datos</button></div>
     {shouldShowOnboarding({ allDone: onboarding.allDone, filter: accountFilter, accountCount }) && <section className="panel onboarding" aria-labelledby="onboarding-title">
       <div className="panel-heading"><div><h3 id="onboarding-title">Primeros pasos</h3><p className="muted">Cuatro pasos para empezar. Mientras Dry Run esté activo, nada se envía de verdad.</p></div><span className="count-badge">{onboarding.steps.filter((step) => step.state === 'done').length} de {onboarding.steps.length} listos</span></div>
       <ol className="steps">{onboarding.steps.map((step, index) => <li key={step.id} className={`step ${step.state}`} aria-current={step.state === 'current' ? 'step' : undefined}>
@@ -272,11 +285,21 @@ function DashboardView({ data, accounts, connections, automations, accountFilter
         <button className={step.state === 'current' ? 'button primary' : 'button secondary'} onClick={() => onNavigate(step.target)}>{step.state === 'done' ? 'Revisar' : step.actionLabel}</button>
       </li>)}</ol>
     </section>}
-    <div className="metric-grid"><Metric label="Cuentas" value={accounts.length} note="Cuentas seleccionadas" /><Metric label="En cola" value={total(['QUEUED', 'FAILED_RETRYABLE'])} note="Pendientes de procesamiento" /><Metric label="Enviadas" value={total(['SENT'])} note="Confirmadas por API" /><Metric label="Revisión" value={total(['UNKNOWN_OUTCOME', 'FAILED_PERMANENT'])} note="Requieren atención" /><Metric label="Expirados" value={total(['EXPIRED'])} note="Superaron la ventana de 7 días" /></div>
-    <div className="panel"><div className="panel-heading"><div><h3>Estado por cuenta</h3><p className="muted">Sincronización, cobertura y monitoreo</p></div><button className="btn-link text-button" onClick={() => onNavigate('monitor')}>Abrir monitoreo →</button></div>
-      {!accounts.length ? <Empty title="No hay cuentas conectadas" detail="Añada una conexión y seleccione una cuenta descubierta." action={() => onNavigate('connections')} actionLabel="Configurar conexión" /> : <div className="table-wrap"><table><thead><tr><th>Cuenta</th><th>Estado</th><th>Última sincronización</th><th>Cobertura</th><th>Incidencia</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.accountId}><td><strong>@{account.username}</strong></td><td>{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : account.status === 'valid' ? <Status value="Validada" tone="good" /> : <Status value="No validada" tone="warn" />}</td><td>{account.last_sync ? formatDate(account.last_sync) : 'Sin sincronización'}</td><td>{account.coverage ?? 'Sin datos'}</td><td>{account.last_error ?? '—'}</td></tr>)}</tbody></table></div>}
+    <div className="metrics-strip">
+      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><PlugZap size={18} strokeWidth={1.75}/></div><div className="metric-val">{accounts.length}</div></div><span>Cuentas</span><small>Seleccionadas</small></div>
+      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><History size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['QUEUED', 'FAILED_RETRYABLE'])}</div></div><span>En cola</span><small>Pendientes</small></div>
+      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><CheckCircle2 size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['SENT'])}</div></div><span>Enviadas</span><small>Confirmadas por API</small></div>
+      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><AlertTriangle size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['UNKNOWN_OUTCOME', 'FAILED_PERMANENT'])}</div></div><span>Revisión</span><small>Atención requerida</small></div>
+      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><History size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['EXPIRED'])}</div></div><span>Expirados</span><small>&gt; 7 días</small></div>
     </div>
-    <div className="quick-actions"><button className="action-card" onClick={() => onNavigate('connections')}><strong>Administrar conexiones</strong><span>Validar credenciales y cuentas</span></button><button className="action-card" onClick={() => onNavigate('automations')}><strong>Configurar automatizaciones</strong><span>Elegir publicación y palabras clave</span></button><button className="action-card" onClick={() => onNavigate('backlog')}><strong>Revisar comentarios</strong><span>Analizar una ventana sin enviar</span></button></div>
+    <div className="panel"><div className="panel-heading"><div><h3>Estado por cuenta</h3><p className="muted">Sincronización, cobertura y monitoreo</p></div><button className="btn-link text-button" onClick={() => onNavigate('monitor')}>Abrir monitoreo →</button></div>
+      {!accounts.length ? <Empty title="No hay cuentas conectadas" detail="Añada una conexión y seleccione una cuenta descubierta." action={() => onNavigate('connections')} actionLabel="Configurar conexión" /> : <div>{accounts.map((account) => <div className="list-row" key={account.accountId}><div className="list-row-content"><RingAvatar username={account.username} /><div className="list-row-text"><strong>@{account.username}</strong><div className="meta">{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : account.status === 'valid' ? <Status value="Validada" tone="good" /> : <Status value="No validada" tone="warn" />}{account.last_sync ? <span>Última sincronización: {formatDate(account.last_sync)}</span> : <span>Sin sincronización</span>}{account.coverage && <span>{account.coverage}</span>}{account.last_error && <span style={{color: 'var(--red)'}}>{account.last_error}</span>}</div></div></div></div>)}</div>}
+    </div>
+    <div className="quick-actions">
+      <button className="action-card" onClick={() => onNavigate('connections')}><div className="action-card-icon"><PlugZap size={20} strokeWidth={2}/></div><div className="action-card-text"><strong>Administrar conexiones</strong><span>Validar credenciales</span></div><ChevronRight size={16} className="muted" /></button>
+      <button className="action-card" onClick={() => onNavigate('automations')}><div className="action-card-icon"><Zap size={20} strokeWidth={2}/></div><div className="action-card-text"><strong>Configurar reglas</strong><span>Elegir publicación y palabras</span></div><ChevronRight size={16} className="muted" /></button>
+      <button className="action-card" onClick={() => onNavigate('backlog')}><div className="action-card-icon"><Inbox size={20} strokeWidth={2}/></div><div className="action-card-text"><strong>Revisar pendientes</strong><span>Analizar sin enviar</span></div><ChevronRight size={16} className="muted" /></button>
+    </div>
   </>;
 }
 
@@ -307,7 +330,10 @@ function ConnectionsView({ connections, accounts, candidates, setCandidates, api
   }
   return <div className="two-col"><div className="col-main">
     <div className="panel"><div className="panel-heading"><div><h3>Conexiones Meta</h3><p className="muted">Los tokens se cifran en el servidor y nunca se vuelven a mostrar.</p></div></div>
-      {!connections.length ? <Empty title="Aún no hay conexiones" detail="Guarde un token de Meta con el formulario «Nueva conexión»; después valídelo para descubrir sus cuentas." action={() => focusById('conn-name')} actionLabel="Crear la primera conexión" primary /> : connections.map((connection) => <div className="list-row" key={connection.id}><div><strong>{connection.name}</strong><span className="muted">{connection.login_kind === 'instagram_login' ? 'Instagram Login' : 'Facebook Login'} · {connection.graph_version}</span><span><ConnectionBadge status={connection.status} /></span></div><div className="row-actions"><button className="btn-main small" onClick={() => void discover(connection.id)}>Probar y descubrir</button><button className="btn small" onClick={() => { setEditing(connection); setEditName(connection.name); setEditAppId(connection.app_id ?? ''); setEditVersion(connection.graph_version); setEditToken(''); }}>Editar</button><button className="btn btn-danger small" onClick={() => void disconnect(connection)}>Desconectar</button><button className="btn btn-danger small" onClick={() => void remove(connection)}>Eliminar</button></div></div>)}
+      {!connections.length ? <Empty title="Aún no hay conexiones" detail="Guarde un token de Meta con el formulario «Nueva conexión»; después valídelo para descubrir sus cuentas." action={() => focusById('conn-name')} actionLabel="Crear la primera conexión" primary /> : connections.map((connection) => <div className="list-row" key={connection.id}><div className="list-row-content"><div className="metric-icon"><PlugZap size={20}/></div><div className="list-row-text"><strong>{connection.name}</strong><div className="meta"><span>{connection.login_kind === 'instagram_login' ? 'Instagram Login' : 'Facebook Login'} · {connection.graph_version}</span><ConnectionBadge status={connection.status} /></div></div></div><div className="row-actions"><button className="btn-main small" onClick={() => void discover(connection.id)}><Search size={14}/> Probar y descubrir</button>
+<button className="btn-icon" aria-label="Editar" title="Editar" onClick={() => { setEditing(connection); setEditName(connection.name); setEditAppId(connection.app_id ?? ''); setEditVersion(connection.graph_version); setEditToken(''); }}><Pencil size={16}/></button>
+<button className="btn-icon danger" aria-label="Desconectar" title="Desconectar" onClick={() => void disconnect(connection)}><Unplug size={16}/></button>
+<button className="btn-icon danger" aria-label="Eliminar" title="Eliminar" onClick={() => void remove(connection)}><Trash2 size={16}/></button></div></div>)}
     </div>
     <form className="panel form-panel" onSubmit={(event) => void create(event)}><div className="panel-heading"><div><h3>Nueva conexión</h3><p className="muted">Use un token con acceso autorizado a la cuenta que desea administrar.</p></div></div>
       <div className="form-grid"><Field label="Nombre"><input id="conn-name" required value={name} onChange={(event) => setName(event.target.value)} placeholder="Cuenta principal" /></Field><Field label="Tipo de acceso"><select value={loginKind} onChange={(event) => setLoginKind(event.target.value)}><option value="instagram_login">Instagram Login · token de Instagram</option><option value="facebook_login">Facebook Login · token de usuario y página vinculada</option></select></Field><Field label="App ID (opcional)"><input value={appId} onChange={(event) => setAppId(event.target.value)} /></Field><Field label="Versión Graph"><input required pattern="v[0-9]+\.[0-9]+" value={version} onChange={(event) => setVersion(event.target.value)} /></Field><Field label="Token de acceso · solo captura"><input required type="password" autoComplete="new-password" value={token} onChange={(event) => setToken(event.target.value)} /></Field></div>
@@ -315,7 +341,7 @@ function ConnectionsView({ connections, accounts, candidates, setCandidates, api
     </form>
     {editing && <form className="panel form-panel" onSubmit={(event) => void update(event)}><div className="panel-heading"><div><h3>Editar conexión</h3><p className="muted">Deje el token vacío para conservarlo. Si cambia, se invalida la validación anterior.</p></div></div><div className="form-grid"><Field label="Nombre"><input required value={editName} onChange={(event) => setEditName(event.target.value)} /></Field><Field label="App ID"><input value={editAppId} onChange={(event) => setEditAppId(event.target.value)} /></Field><Field label="Versión Graph"><input required pattern="v[0-9]+\.[0-9]+" value={editVersion} onChange={(event) => setEditVersion(event.target.value)} /></Field><Field label="Nuevo token · captura opcional"><input type="password" autoComplete="new-password" value={editToken} onChange={(event) => setEditToken(event.target.value)} /></Field></div><div className="row-actions"><button className="btn-main">Guardar cambios</button><button type="button" className="btn" onClick={() => { setEditToken(''); setEditing(null); }}>Cancelar</button></div></form>}
   </div><div className="col-main"><div className="panel"><div className="panel-heading"><div><h3>Cuentas seleccionadas</h3><p className="muted">Los ID se obtienen de la respuesta oficial de Meta.</p></div></div>{accounts.length ? accounts.map((account) => <div className="list-row" key={account.accountId}><div><strong>@{account.username}</strong><span className="muted">{account.status === 'valid' ? 'Validada' : account.status} · {account.accountId}</span></div></div>) : <p className="empty-inline">Aún no hay cuentas seleccionadas. Pruebe una conexión y pulse «Seleccionar» en la cuenta que desea usar.</p>}</div>
-    <div className="panel"><h3>Cuentas descubiertas</h3>{candidates.length ? candidates.map((candidate) => <div className="list-row" key={candidate.providerAccountId}><div><strong>@{candidate.username}</strong><span className="muted">ID de proveedor: {candidate.providerAccountId}</span></div><button className="btn-main small" onClick={() => void act(() => api(`/api/connections/${candidate.connectionId}/select`, 'POST', { account: candidate }), 'Cuenta vinculada con su historial.')}>Seleccionar</button></div>) : <p className="empty-inline">Pulse «Probar y descubrir» en una conexión para listar las cuentas disponibles.</p>}</div>
+    <div className="panel"><h3>Cuentas descubiertas</h3>{candidates.length ? candidates.map((candidate) => <div className="list-row" key={candidate.providerAccountId}><div className="list-row-content"><RingAvatar username={candidate.username}/> <div className="list-row-text"><strong>@{candidate.username}</strong><span className="muted">ID de proveedor: {candidate.providerAccountId}</span></div></div><button className="btn-main small" onClick={() => void act(() => api(`/api/connections/${candidate.connectionId}/select`, 'POST', { account: candidate }), 'Cuenta vinculada con su historial.')}>Seleccionar</button></div>) : <p className="empty-inline">Pulse «Probar y descubrir» en una conexión para listar las cuentas disponibles.</p>}</div>
     {legacyAccounts.length > 0 && <div className="panel"><h3>Retención heredada</h3><p className="muted">{features.legacyInterlock ? 'Una cuenta usada antes con otra herramienta puede tener un bloqueo o historial de rechazos previos. La aplicación nunca borra ni modifica esos archivos.' : 'Esta cuenta conserva una retención de una configuración heredada anterior. Revísela y reconózcala para liberarla.'}</p>{legacyAccounts.map((account) => <div className="list-row" key={`legacy-${account.accountId}`}><strong>@{account.username}</strong><button className="btn small" onClick={() => void acknowledgeLegacy(account)}>Revisar estado y reconocer</button></div>)}</div>}</div></div>;
 }
 
@@ -324,10 +350,14 @@ function MediaView({ accounts, allAccounts, onSelectAccount, media, selected, on
   const own = media.filter((item) => item.accountId === current);
   const choices = allAccounts.length ? allAccounts : accounts;
   const reload = () => void act(() => api(`/api/connections/${choices.find((item) => item.accountId === current)?.connectionId}/media`, 'POST', { accountId: current }), 'Publicaciones actualizadas.');
-  return <div className="panel"><div className="panel-heading"><div><h3>Publicaciones de la cuenta</h3><p className="muted">Elija una cuenta para cargar sus publicaciones autorizadas.</p></div>{current && <button className="btn" onClick={reload}>Actualizar publicaciones</button>}</div>
-    {current ? own.length ? <div className="media-grid">{own.map((item) => { const type = mediaTypeLabel(item.mediaType); const caption = shortCaption(item.caption, 80); return <article className="media-card" key={item.mediaId}><span className="media-icon" aria-hidden="true">▧</span><div>{type && <span className="type-badge">{type}</span>}<strong className={caption ? 'media-caption' : 'media-caption muted-text'}>{caption ?? `Sin texto · ${shortId(item.mediaId)}`}</strong><span>{item.publishedAt ? formatDate(item.publishedAt) : 'Fecha no disponible'}</span>{item.permalink && <a href={item.permalink} target="_blank" rel="noreferrer">Ver comentarios ↗</a>}</div></article>; })}</div>
+  return <div className="panel"><div className="panel-heading"><div><h3>Publicaciones de la cuenta</h3><p className="muted">Elija una cuenta para cargar sus publicaciones autorizadas.</p></div>{current && <button className="btn" onClick={reload}><RefreshCw size={16} /> Actualizar publicaciones</button>}</div>
+    {current ? own.length ? <div className="media-grid">{own.map((item) => { const caption = shortCaption(item.caption, 80); return <article className="media-card" key={item.mediaId}><MediaThumb item={item} />
+<div>
+  <strong className={caption ? 'media-caption' : 'media-caption muted-text'}>{caption ?? `Sin texto · ${shortId(item.mediaId)}`}</strong>
+  <div className="media-meta"><span>{item.publishedAt ? formatDate(item.publishedAt) : 'Sin fecha'}</span>{item.permalink && <a className="media-link" href={item.permalink} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" /> Ver en Instagram</a>}</div>
+</div></article>; })}</div>
       : <Empty title="Sin publicaciones guardadas" detail="Descargue las publicaciones de esta cuenta para poder crear automatizaciones." action={reload} actionLabel="Actualizar publicaciones" primary />
-      : choices.length ? <div className="account-prompt" role="group" aria-labelledby="media-account-prompt"><strong id="media-account-prompt">Elija una cuenta para ver sus publicaciones</strong><p className="muted">Las publicaciones se cargan de una cuenta a la vez.</p><div className="row-actions">{choices.map((account) => <button key={account.accountId} className="btn" onClick={() => onSelectAccount(account.accountId)}>@{account.username}</button>)}</div></div>
+      : choices.length ? <div className="account-prompt" role="group" aria-labelledby="media-account-prompt"><strong id="media-account-prompt">Elija una cuenta para ver sus publicaciones</strong><p className="muted">Las publicaciones se cargan de una cuenta a la vez.</p><div className="account-prompt-chips">{choices.map((account) => <button key={account.accountId} className="account-chip" onClick={() => onSelectAccount(account.accountId)}><RingAvatar username={account.username} /> @{account.username}</button>)}</div></div>
         : <Empty title="Aún no hay cuentas" detail="Conecte Meta y elija una cuenta antes de ver sus publicaciones." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}</div>;
 }
 
@@ -347,15 +377,41 @@ function AutomationView({ accounts, media, rows, selected, api, act, confirm }: 
     if (!(await confirm({ title: `Archivar «${row.name}»`, body: 'Archivar detiene esta automatización y conserva el historial. No podrá reactivarla desde esta pantalla.', confirmLabel: 'Archivar', danger: true }))) return;
     await act(() => api(`/api/automations/${row.automationId}/delete`, 'POST', { accountId: row.accountId }), 'Automatización archivada.');
   }
-  return <div className="two-col">
-    <div className="col-main"><form className="panel form-panel" onSubmit={(event) => void create(event)}><div className="panel-heading"><div><h3>Nueva automatización</h3><p className="muted">Seleccione primero la cuenta; las publicaciones pertenecen a esa cuenta.</p></div></div><div className="form-grid"><Field label="Cuenta"><select id="auto-account" required value={accountId} onChange={(event) => { setAccountId(event.target.value); setMediaId(''); }}><option value="">Seleccione una cuenta</option>{accounts.map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select></Field><Field label="Publicación"><select required disabled={!accountId} value={mediaId} onChange={(event) => setMediaId(event.target.value)}><option value="">Seleccione una publicación</option><option value={GENERAL_MEDIA_OPTION}>Todas las publicaciones (general)</option>{ownMedia.map((item) => <option key={item.mediaId} value={item.mediaId}>{mediaLabel(item)}</option>)}</select>{mediaId === GENERAL_MEDIA_OPTION && <small className="hint">Se aplica a cualquier publicación de la cuenta que no tenga su propia automatización; solo comentarios posteriores a la activación.</small>}</Field><Field label="Nombre"><input required value={name} onChange={(event) => setName(event.target.value)} /></Field><Field label="Palabras clave · separadas por coma"><input required value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="guia, ebook" /></Field><Field label="Coincidencia"><select value={mode} onChange={(event) => setMode(event.target.value)}><option value="contains">Frase dentro del comentario</option><option value="exact">Comentario exacto</option></select></Field><Field label="Respuesta · variables {{username}}, {{comment}}, {{keyword}}"><textarea required rows={4} value={replyText} onChange={(event) => setReplyText(event.target.value)} /></Field><Field label="Botón URL opcional · título"><input maxLength={20} value={buttonTitle} onChange={(event) => setButtonTitle(event.target.value)} placeholder="Ver recurso" /></Field><Field label="URL HTTPS"><input type="url" value={buttonUrl} onChange={(event) => setButtonUrl(event.target.value)} placeholder="https://…" /></Field><Field label="Segundo botón · título opcional"><input maxLength={20} value={buttonTitle2} onChange={(event) => setButtonTitle2(event.target.value)} /></Field><Field label="Segundo botón · URL HTTPS"><input type="url" value={buttonUrl2} onChange={(event) => setButtonUrl2(event.target.value)} /></Field></div><p className="hint">{MEDIA_LINK_TIP}</p><PublicReplyFields idPrefix="new" enabled={publicEnabled} setEnabled={setPublicEnabled} text={publicVariants} setText={setPublicVariants} /><p className="hint">Puede añadir cero, uno o dos botones URL en esta pantalla. Las palabras clave son sinónimos: si varias aparecen en un mismo comentario, se procesa una sola coincidencia.</p><div><button className="btn-main" disabled={!accountId || !mediaId}>Guardar automatización</button></div></form>
+  return <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
+<div className="col-main" style={{ gridColumn: "1 / -1" }}>
+    <div className="panel"><h3>Tus automatizaciones</h3>{rows.length ? rows.map((row) => <article className="automation-row" key={row.automationId}><div className="list-row"><div className="list-row-content">
+  {row.scope === 'account' ? <div className="media-thumb-mid"><Zap size={24} /></div> : <MiniThumb size="mid" item={media.find(m => m.mediaId === row.mediaId)} />}
+  <div className="list-row-text">
+    <strong>{row.name}</strong>
+    <div className="meta"><RingAvatar username={accounts.find((item) => item.accountId === row.accountId)?.username} /> @{accounts.find((item) => item.accountId === row.accountId)?.username || 'Cuenta'} · {automationTargetLabel(row, media)}</div>
+    <div className="keyword-list">{row.keywords.length ? row.keywords.map((keyword) => <span className="kw-chip" key={keyword.phrase}>{keyword.phrase}</span>) : <span className="muted">Sin palabras clave</span>}</div>
+  </div>
+</div>
+<div className="row-actions">
+  {row.scope === 'account' && <Status value="General" tone="neutral" />}
+  <Status value={row.status === 'enabled' ? 'Activa' : 'Pausada'} tone={row.status === 'enabled' ? 'good' : 'neutral'} />
+  <Status value={row.realEnabled ? 'Real autorizado' : 'Solo prueba'} tone={row.realEnabled ? 'warn' : 'neutral'} />
+  {row.publicReplyEnabled && <Status value={`Respuesta pública · ${variantCountLabel(row.publicReplyVariants?.length ?? 0)}`} tone="neutral" />}
+  <div style={{width: '100%', height: '4px'}}></div>
+  <button className="btn-icon" title={row.status === 'enabled' ? 'Pausar' : 'Activar'} aria-label={row.status === 'enabled' ? 'Pausar' : 'Activar'} onClick={() => void act(() => api(`/api/automations/${row.automationId}/enabled`, 'PATCH', { accountId: row.accountId, enabled: row.status !== 'enabled' }), row.status === 'enabled' ? 'Automatización pausada.' : 'Automatización activada con corte desde ahora.')}>{row.status === 'enabled' ? <Pause size={16} /> : <Play size={16} />}</button>
+  <button className="btn-icon" title="Editar" aria-label="Editar" onClick={() => setEditing(row)}><Pencil size={16} /></button>
+  <button className={row.realEnabled ? 'btn small' : 'btn btn-danger small'} onClick={() => void toggleReal(row)}>{row.realEnabled ? <ShieldOff size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />} {row.realEnabled ? 'Quitar permiso real' : 'Autorizar real'}</button>
+  <button className="btn-icon danger" title="Archivar" aria-label="Archivar" onClick={() => void archive(row)}><Archive size={16} /></button>
+</div>
+</div></article>) : <Empty title="Aún no hay automatizaciones" detail="Cree una automatización asociada a una de sus publicaciones. Empieza en modo prueba." action={() => focusById('auto-account')} actionLabel="Crear la primera automatización" primary />}</div>
+    {editing && <AutomationEditDialog row={editing} mediaOptions={media.filter((item) => item.accountId === editing.accountId).map((item) => ({ id: item.mediaId, label: mediaLabel(item) }))} onClose={() => setEditing(null)} onSave={async (values) => {
+      const saved = await act(() => api(`/api/automations/${editing.automationId}`, 'PUT', { accountId: editing.accountId, mediaId: editing.scope === 'account' ? null : values.mediaId, name: values.name, replyText: values.replyText, matchMode: values.matchMode, buttons: editing.buttons ?? [], keywords: values.keywords.split(',').map((keyword) => keyword.trim()).filter(Boolean), publicReplyEnabled: values.publicReplyEnabled, publicReplyVariants: parseVariantLines(values.publicReplyVariants) }), 'Automatización actualizada; se invalidaron elementos con plantilla anterior.');
+      if (saved) setEditing(null);
+    }} />}
+  </div>
+<div className="two-col">
+<div className="col-main"><form className="panel form-panel" onSubmit={(event) => void create(event)}><div className="panel-heading"><div><h3>Nueva automatización</h3><p className="muted">Seleccione primero la cuenta; las publicaciones pertenecen a esa cuenta.</p></div></div><div className="seq-header"><span className="seq-num">1</span> Dónde responder</div><div className="form-grid"><Field label="Cuenta"><select id="auto-account" required value={accountId} onChange={(event) => { setAccountId(event.target.value); setMediaId(''); }}><option value="">Seleccione una cuenta</option>{accounts.map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select></Field><Field label="Publicación"><select required disabled={!accountId} value={mediaId} onChange={(event) => setMediaId(event.target.value)}><option value="">Seleccione una publicación</option><option value={GENERAL_MEDIA_OPTION}>Todas las publicaciones (general)</option>{ownMedia.map((item) => <option key={item.mediaId} value={item.mediaId}>{mediaLabel(item)}</option>)}</select>{mediaId === GENERAL_MEDIA_OPTION && <small className="hint">Se aplica a cualquier publicación de la cuenta que no tenga su propia automatización; solo comentarios posteriores a la activación.</small>}</Field><Field label="Nombre"><input required value={name} onChange={(event) => setName(event.target.value)} /></Field></div><div className="seq-header"><span className="seq-num">2</span> Cuándo</div><div className="form-grid"><Field label="Palabras clave · separadas por coma"><input required value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="guia, ebook" /></Field><Field label="Coincidencia"><select value={mode} onChange={(event) => setMode(event.target.value)}><option value="contains">Frase dentro del comentario</option><option value="exact">Comentario exacto</option></select></Field></div><div className="seq-header"><span className="seq-num">3</span> Qué responde</div><div className="form-grid full-width"><Field label="Respuesta · variables {{username}}, {{comment}}, {{keyword}}"><textarea required rows={4} value={replyText} onChange={(event) => setReplyText(event.target.value)} /></Field></div><div className="seq-header"><span className="seq-num">4</span> Botones (opcional)</div><div className="form-grid"><Field label="Botón URL opcional · título"><input maxLength={20} value={buttonTitle} onChange={(event) => setButtonTitle(event.target.value)} placeholder="Ver recurso" /></Field><Field label="URL HTTPS"><input type="url" value={buttonUrl} onChange={(event) => setButtonUrl(event.target.value)} placeholder="https://…" /></Field><Field label="Segundo botón · título opcional"><input maxLength={20} value={buttonTitle2} onChange={(event) => setButtonTitle2(event.target.value)} /></Field><Field label="Segundo botón · URL HTTPS"><input type="url" value={buttonUrl2} onChange={(event) => setButtonUrl2(event.target.value)} /></Field></div><p className="hint">{MEDIA_LINK_TIP}</p><div className="seq-header"><span className="seq-num">5</span> Respuesta pública (opcional)</div><PublicReplyFields idPrefix="new" enabled={publicEnabled} setEnabled={setPublicEnabled} text={publicVariants} setText={setPublicVariants} /><p className="hint">Puede añadir cero, uno o dos botones URL en esta pantalla. Las palabras clave son sinónimos: si varias aparecen en un mismo comentario, se procesa una sola coincidencia.</p><div><button className="btn-main" disabled={!accountId || !mediaId}>Guardar automatización</button></div></form>
     </div>
-
-      <aside className="side">
+<aside className="side">
         <div className="phone">
           <div className="screen">
             <div className="chat-top">
-              <div className="avatar">{(accounts.find(a => a.accountId === accountId)?.username?.[0] ?? 'V').toUpperCase()}</div>
+              <RingAvatar username={accounts.find(a => a.accountId === accountId)?.username} />
               <div>
                 <b>Vista previa</b>
                 <small>@{accounts.find(a => a.accountId === accountId)?.username ?? 'cuenta'}</small>
@@ -376,14 +432,8 @@ function AutomationView({ accounts, media, rows, selected, api, act, confirm }: 
           </div>
         </div>
       </aside>
-
-    <div className="col-main" style={{ gridColumn: "1 / -1" }}>
-    <div className="panel"><h3>Automatizaciones</h3>{rows.length ? rows.map((row) => <article className="automation-row" key={row.automationId}><div className="row-between"><div><strong>{row.name}</strong><span className="muted">{accounts.find((item) => item.accountId === row.accountId)?.username ? `@${accounts.find((item) => item.accountId === row.accountId)?.username}` : 'Cuenta'} · {automationTargetLabel(row, media)}</span><span className="keyword-list">{row.keywords.map((keyword) => keyword.phrase).join(' · ') || 'Sin palabras clave'}</span></div><div className="badge-col">{row.scope === 'account' && <Status value="General" tone="neutral" />}<Status value={row.status === 'enabled' ? 'Activa' : 'Pausada'} tone={row.status === 'enabled' ? 'good' : 'neutral'} /><Status value={row.realEnabled ? 'Real autorizado' : 'Solo prueba'} tone={row.realEnabled ? 'warn' : 'neutral'} />{row.publicReplyEnabled && <Status value={`Respuesta pública · ${variantCountLabel(row.publicReplyVariants?.length ?? 0)}`} tone="neutral" />}</div></div><div className="row-actions"><button className="btn small" onClick={() => void act(() => api(`/api/automations/${row.automationId}/enabled`, 'PATCH', { accountId: row.accountId, enabled: row.status !== 'enabled' }), row.status === 'enabled' ? 'Automatización pausada.' : 'Automatización activada con corte desde ahora.')}>{row.status === 'enabled' ? 'Pausar' : 'Activar'}</button><button className="btn small" onClick={() => setEditing(row)}>Editar</button><button className={row.realEnabled ? 'button secondary small' : 'button danger small'} onClick={() => void toggleReal(row)}>{row.realEnabled ? 'Quitar permiso real' : 'Autorizar real'}</button><button className="btn btn-danger small" onClick={() => void archive(row)}>Archivar</button></div></article>) : <Empty title="Aún no hay automatizaciones" detail="Cree una automatización asociada a una de sus publicaciones. Empieza en modo prueba." action={() => focusById('auto-account')} actionLabel="Crear la primera automatización" primary />}</div>
-    {editing && <AutomationEditDialog row={editing} mediaOptions={media.filter((item) => item.accountId === editing.accountId).map((item) => ({ id: item.mediaId, label: mediaLabel(item) }))} onClose={() => setEditing(null)} onSave={async (values) => {
-      const saved = await act(() => api(`/api/automations/${editing.automationId}`, 'PUT', { accountId: editing.accountId, mediaId: editing.scope === 'account' ? null : values.mediaId, name: values.name, replyText: values.replyText, matchMode: values.matchMode, buttons: editing.buttons ?? [], keywords: values.keywords.split(',').map((keyword) => keyword.trim()).filter(Boolean), publicReplyEnabled: values.publicReplyEnabled, publicReplyVariants: parseVariantLines(values.publicReplyVariants) }), 'Automatización actualizada; se invalidaron elementos con plantilla anterior.');
-      if (saved) setEditing(null);
-    }} />}
-  </div></div>;
+</div>
+</div>;
 }
 
 function AutomationEditDialog({ row, mediaOptions, onSave, onClose }: { row: Automation; mediaOptions: Array<{ id: string; label: string }>; onSave(values: { name: string; mediaId: string; keywords: string; replyText: string; matchMode: 'exact' | 'contains'; publicReplyEnabled: boolean; publicReplyVariants: string }): Promise<void>; onClose(): void }) {
@@ -407,7 +457,7 @@ function AutomationEditDialog({ row, mediaOptions, onSave, onClose }: { row: Aut
         <Field label="Nombre"><input data-autofocus required value={name} onChange={(event) => setName(event.target.value)} /></Field>
         {isGeneral ? <p className="hint">Automatización general: se aplica a todas las publicaciones sin automatización propia. El alcance no se puede cambiar; para una sola publicación cree una nueva.</p>
           : <Field label="ID de publicación de esta cuenta"><input required list="edit-media-options" value={mediaId} onChange={(event) => setMediaId(event.target.value)} /></Field>}
-        <Field label="Palabras clave sinónimas · separadas por coma"><input required value={keywords} onChange={(event) => setKeywords(event.target.value)} /></Field>
+        </div><div className="form-grid"><Field label="Palabras clave sinónimas · separadas por coma"><input required value={keywords} onChange={(event) => setKeywords(event.target.value)} /></Field>
         <Field label="Coincidencia"><select value={matchMode} onChange={(event) => setMatchMode(event.target.value)}><option value="contains">Frase dentro del comentario (contains)</option><option value="exact">Comentario exacto (exact)</option></select></Field>
         <Field label="Plantilla de respuesta · variables {{username}}, {{comment}}, {{keyword}}"><textarea required rows={4} value={replyText} onChange={(event) => setReplyText(event.target.value)} /></Field>
       </div>
@@ -426,7 +476,13 @@ function PublicReplyFields({ idPrefix, enabled, setEnabled, text, setText }: { i
   // `seed` re-rolls the two random examples on "Otros ejemplos".
   const examples = useMemo(() => (seed >= 0 ? previewExamples(variants) : []), [variants, seed]);
   return <fieldset className="public-reply-fields">
-    <label className="check-row" htmlFor={`${idPrefix}-public-enabled`}><input id={`${idPrefix}-public-enabled`} type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Responder también públicamente al comentario</label>
+    <label className="toggle-row" htmlFor={`${idPrefix}-public-enabled`}>
+  <input id={`${idPrefix}-public-enabled`} type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+  <div className="toggle-row-text">
+    <strong>Responder también públicamente al comentario</strong>
+    <span>Enviará un comentario de respuesta visible en la publicación.</span>
+  </div>
+</label>
     {enabled && <>
       <Field label="Variantes de la respuesta pública (una por línea)"><textarea id={`${idPrefix}-public-variants`} required rows={5} value={text} onChange={(event) => setText(event.target.value)} placeholder={'¡Listo @{{username}}! Te escribí por mensaje privado\nRevisa tu bandeja de entrada, @{{username}}'} aria-describedby={`${idPrefix}-public-hint`} /></Field>
       <div className="row-between"><span className="count-badge" aria-live="polite">{variantCountLabel(variants.length)}</span>{examples.length > 0 && <button type="button" className="btn-link text-button" onClick={() => setSeed((value) => value + 1)}>Otros ejemplos</button>}</div>
@@ -466,7 +522,7 @@ function ConversationInspector({ item, api }: { item: QueueItem; api: Api }) {
 }
 
 function MonitorView({ accounts, status, onNavigate, api, act }: { accounts: Account[]; status: boolean; onNavigate(id: string): void; api: Api; act: Act }) {
-  return <div className="panel"><div className="panel-heading"><div><h3>Monitoreo</h3><p className="muted">El monitoreo siempre inicia apagado al reiniciar la aplicación.</p></div><Status value={status ? 'Activo' : 'Detenido'} tone={status ? 'good' : 'neutral'} /></div><div className="row-actions"><button className="btn-main" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'start' }), 'Monitoreo iniciado para cuentas validadas.')}>Iniciar todas</button><button className="btn" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'stop' }), 'Todo el monitoreo se detuvo.')}>Detener todas</button></div>{accounts.length ? <div className="table-wrap"><table><thead><tr><th>Cuenta</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.accountId}><td>@{account.username}</td><td>{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : <Status value="En monitoreo" tone="good" />}</td><td><button className="btn small" onClick={() => void act(() => api(`/api/monitor/${account.accountId}`, 'POST', { action: account.monitoringPaused ? 'start' : 'stop' }), account.monitoringPaused ? 'Cuenta en monitoreo.' : 'Monitoreo pausado.')}>{account.monitoringPaused ? 'Reanudar' : 'Detener'}</button></td></tr>)}</tbody></table></div> : <Empty title="Sin cuentas disponibles" detail="Valide y seleccione una cuenta antes de iniciar el monitoreo." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}</div>;
+  return <div className="panel"><div className="panel-heading"><div><h3>Monitoreo</h3><p className="muted">El monitoreo siempre inicia apagado al reiniciar la aplicación.</p></div><Status value={status ? 'Activo' : 'Detenido'} tone={status ? 'good' : 'neutral'} /></div><div className="row-actions"><button className="btn-main" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'start' }), 'Monitoreo iniciado para cuentas validadas.')}>Iniciar todas</button><button className="btn" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'stop' }), 'Todo el monitoreo se detuvo.')}>Detener todas</button></div>{accounts.length ? <div className="table-wrap"><table><thead><tr><th>Cuenta</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.accountId}><td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={account.username}/> @{account.username}</div></td><td>{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : <Status value="En monitoreo" tone="good" />}</td><td><button className="btn small" onClick={() => void act(() => api(`/api/monitor/${account.accountId}`, 'POST', { action: account.monitoringPaused ? 'start' : 'stop' }), account.monitoringPaused ? 'Cuenta en monitoreo.' : 'Monitoreo pausado.')}>{account.monitoringPaused ? <><Play size={14}/> Reanudar</> : <><Pause size={14}/> Detener</>}</button></td></tr>)}</tbody></table></div> : <Empty title="Sin cuentas disponibles" detail="Valide y seleccione una cuenta antes de iniciar el monitoreo." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}</div>;
 }
 
 const WINDOW_LABELS: Record<string, string> = { '2h': 'Últimas 2 horas', '24h': 'Últimas 24 horas', '3d': 'Últimos 3 días', '7d': 'Últimos 7 días', custom: 'Desde una fecha…' };
@@ -506,7 +562,7 @@ function BacklogView({ allAccounts, accounts, selected, onSelectAccount, job, se
     {job && !running && <ScanSummaryCard status={job.status} summary={summary} />}
     <div className="pending-review">
       <div className="panel-heading"><div><h3>Comentarios pendientes de revisión</h3><p className="muted">Resultados del último análisis completo; se conservan al recargar. Ya en cola o con más de 7 días no aparecen.</p></div>{pending && <span className="count-badge">{pending.total} pendientes</span>}</div>
-      {!processAccount ? (choices.length ? <div className="account-prompt" role="group" aria-labelledby="backlog-account-prompt"><strong id="backlog-account-prompt">Elija una cuenta para ver sus comentarios pendientes</strong><p className="muted">La revisión se hace de una cuenta a la vez.</p><div className="row-actions">{choices.map((account) => <button key={account.accountId} className="btn" onClick={() => onSelectAccount(account.accountId)}>@{account.username}</button>)}</div></div> : <p className="hint">Aún no hay cuentas disponibles.</p>)
+      {!processAccount ? (choices.length ? <div className="account-prompt" role="group" aria-labelledby="backlog-account-prompt"><strong id="backlog-account-prompt">Elija una cuenta para ver sus comentarios pendientes</strong><p className="muted">La revisión se hace de una cuenta a la vez.</p><div className="account-prompt-chips">{choices.map((account) => <button key={account.accountId} className="account-chip" onClick={() => onSelectAccount(account.accountId)}><RingAvatar username={account.username} /> @{account.username}</button>)}</div></div> : <p className="hint">Aún no hay cuentas disponibles.</p>)
         : pendingError ? <p className="form-problem" role="alert">No se pudieron cargar los comentarios pendientes. <button className="btn-link text-button" onClick={() => void loadPending()}>Reintentar</button></p>
         : !pending ? <p className="hint">Cargando comentarios pendientes…</p>
         : <>
@@ -514,7 +570,7 @@ function BacklogView({ allAccounts, accounts, selected, onSelectAccount, job, se
           {items.length > 0 ? <>
             <div className="table-wrap"><table><thead><tr><th>Seleccionar</th><th>Usuario</th><th>Comentario</th><th>Fecha</th><th>Automatización · publicación</th><th>Palabra clave</th><th>Vista previa del mensaje</th></tr></thead><tbody>{items.map((item) => <tr key={`${item.commentId}-${item.automationId}`}>
               <td><input type="checkbox" aria-label={`Seleccionar comentario de @${item.username || 'usuario'}: ${item.commentText.slice(0, 40)}`} disabled={!eligibleForChoice(item)} checked={selectedIds.includes(item.commentId)} onChange={(event) => setSelectedIds(event.target.checked ? [...selectedIds, item.commentId] : selectedIds.filter((id) => id !== item.commentId))} /></td>
-              <td>{item.username ? `@${item.username}` : '—'}</td><td className="comment-cell" title={item.commentText}>{item.commentText || '—'}</td><td>{item.commentCreatedAt ? formatDate(item.commentCreatedAt) : '—'}</td><td>{item.automationName}{item.scope === 'account' && <> <Status value="General" tone="neutral" /></>}<small className="muted cell-sub">{mediaLabel({ mediaId: item.mediaId, caption: item.mediaCaption, mediaType: item.mediaType, publishedAt: item.mediaPublishedAt })}</small></td><td>{item.matchedKeywords.join(', ') || '—'}</td>
+              <td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={item.username}/> {item.username ? `@${item.username}` : '—'}</div></td><td className="comment-cell" title={item.commentText}>{item.commentText || '—'}</td><td>{item.commentCreatedAt ? formatDate(item.commentCreatedAt) : '—'}</td><td>{item.automationName}{item.scope === 'account' && <> <Status value="General" tone="neutral" /></>}<small className="muted cell-sub">{mediaLabel({ mediaId: item.mediaId, caption: item.mediaCaption, mediaType: item.mediaType, publishedAt: item.mediaPublishedAt })}</small></td><td>{item.matchedKeywords.join(', ') || '—'}</td>
               <td>{item.previewText ? <details className="message-preview"><summary>Ver mensaje</summary><div className="preview-box"><p>{item.previewText}</p>{item.previewButtons.length > 0 && <ul>{item.previewButtons.map((button) => <li key={button.url}>Botón «{button.title}» → {button.url}</li>)}</ul>}<small className="muted">Vista previa; nada se envía hasta procesar.</small></div></details> : <span className="muted">Sin vista previa</span>}</td>
             </tr>)}</tbody></table></div>
             {pending.total > PENDING_PAGE && <div className="pagination"><button className="btn" disabled={pendingOffset <= 0} onClick={() => setPendingOffset(Math.max(0, pendingOffset - PENDING_PAGE))}>Anterior</button><span>{pendingOffset + 1}–{pendingOffset + items.length} de {pending.total}</span><button className="btn" disabled={pendingOffset + items.length >= pending.total} onClick={() => setPendingOffset(pendingOffset + PENDING_PAGE)}>Siguiente</button></div>}
@@ -627,7 +683,9 @@ function QueueView({ items, total, offset, setOffset, state, setState, onNavigat
       <div className="table-wrap"><table>
         <thead><tr><th>Cuenta</th><th>Autor</th><th>Comentario</th><th>Estado</th><th>Intentos</th><th>ID de mensaje</th><th>Código seguro</th><th>Fecha</th><th>Historial</th></tr></thead>
         <tbody>{items.map((item) => <tr key={item.id}>
-          <td>@{item.username}</td><td>{item.commentUsername ? `@${item.commentUsername}` : '—'}</td><td className="comment-cell" title={item.commentText || item.commentId}>{item.commentText || item.commentId}</td><td><Status value={stateLabel(item.state)} tone={queueTone(item.state)} />{item.state === 'UNKNOWN_OUTCOME' && <small className="state-hint">Revise manualmente en Instagram; nunca se reintenta.</small>}</td>
+          <td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={item.username}/> @{item.username}</div></td>
+<td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={item.commentUsername}/> {item.commentUsername ? `@${item.commentUsername}` : '—'}</div></td>
+<td className="comment-cell" title={item.commentText || item.commentId}>{item.commentText || item.commentId}</td><td><Status value={stateLabel(item.state)} tone={queueTone(item.state)} />{item.state === 'UNKNOWN_OUTCOME' && <small className="state-hint">Revise manualmente en Instagram; nunca se reintenta.</small>}</td>
           <td>{item.attemptCount}</td><td>{item.messageId ?? '—'}</td><td>{item.safeErrorCode ?? '—'}</td>
           <td>{formatDate(item.createdAt)}</td><td><button className="btn-link text-button" onClick={() => void showAttempts(item)}>{expanded === item.id ? 'Ocultar' : 'Ver'}</button></td>
         </tr>).flatMap((row, index) => {
@@ -686,6 +744,23 @@ function SettingsView({ mode, api, act, confirm, features }: { mode: 'checking' 
   </div>;
 }
 
+function MediaThumb({ item }: { item: Media }) {
+  const [error, setError] = useState(false);
+  const TypeIcon = item.mediaType === 'VIDEO' || item.mediaType === 'REELS' ? Clapperboard : item.mediaType === 'CAROUSEL_ALBUM' ? Layers : ImageIcon;
+  return <div className="media-thumb-wrapper">
+    {item.thumbnailUrl && !error ? <img src={item.thumbnailUrl} alt={item.caption ?? "Publicación"} loading="lazy" onError={() => setError(true)} /> : <div className="placeholder"><TypeIcon size={32} strokeWidth={1.5} /></div>}
+    <div className="media-type-chip" title={mediaTypeLabel(item.mediaType) ?? undefined}><TypeIcon size={14} strokeWidth={2} aria-hidden="true" /></div>{mediaTypeLabel(item.mediaType) && <span className="visually-hidden">{mediaTypeLabel(item.mediaType)}</span>}
+  </div>;
+}
+
+function MiniThumb({ item, size }: { item?: Media; size?: 'small' | 'mid' }) {
+  const [error, setError] = useState(false);
+  const cls = size === 'mid' ? 'media-thumb-mid' : 'media-thumb-small';
+  if (!item) return <div className={cls}><ImageIcon size={size === 'mid' ? 24 : 16} strokeWidth={1.5} /></div>;
+  const TypeIcon = item.mediaType === 'VIDEO' || item.mediaType === 'REELS' ? Clapperboard : item.mediaType === 'CAROUSEL_ALBUM' ? Layers : ImageIcon;
+  if (item.thumbnailUrl && !error) return <img src={item.thumbnailUrl} alt="" className={cls} loading="lazy" onError={() => setError(true)} />;
+  return <div className={cls}><TypeIcon size={size === 'mid' ? 24 : 16} strokeWidth={1.5} /></div>;
+}
 /* ---------- Shared pieces ---------- */
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
@@ -708,9 +783,9 @@ function queueTone(state: string): Tone {
   if (state === 'FAILED_RETRYABLE' || state === 'UNKNOWN_OUTCOME') return 'warn';
   return 'neutral';
 }
-const TONE_ICON: Record<Tone, string> = { good: '✓', neutral: '•', warn: '!', danger: '✕' };
+const TONE_ICON: Record<Tone, any> = { good: CheckCircle2, neutral: Circle, warn: AlertTriangle, danger: XCircle };
 /** Color is never the only signal: each tone also has a glyph and always carries text. */
-function Status({ value, tone }: { value: string; tone: Tone }) { return <span className={`status-badge ${tone}`}><span aria-hidden="true">{TONE_ICON[tone]}</span>{value}</span>; }
+function Status({ value, tone }: { value: string; tone: Tone }) { const Icon = TONE_ICON[tone]; return <span className={`status-badge ${tone}`}><Icon size={14} strokeWidth={2.5} aria-hidden="true" />{value}</span>; }
 function ConnectionBadge({ status }: { status: string }) {
   if (status === 'valid') return <Status value="Validada" tone="good" />;
   if (status === 'unvalidated') return <Status value="Sin validar" tone="neutral" />;
@@ -718,6 +793,6 @@ function ConnectionBadge({ status }: { status: string }) {
   if (status === 'disconnected') return <Status value="Desconectada" tone="neutral" />;
   return <Status value={status} tone="warn" />;
 }
-function Empty({ title, detail, action, actionLabel, primary }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean }) { return <div className="empty-state"><span className="empty-icon" aria-hidden="true">◎</span><strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
+function Empty({ title, detail, action, actionLabel, primary }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean }) { return <div className="empty-state"><div className="empty-icon"><Circle size={24} strokeWidth={2} aria-hidden="true" /></div><strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }); }
 function safeErrorLabel(code: string) { const labels: Record<string, string> = { account_not_found: 'La cuenta indicada no existe.', connection_not_found: 'La conexión indicada no existe.', invalid_request: 'Revise los campos e inténtelo de nuevo.', origin_or_csrf_rejected: 'La solicitud local no superó la protección de origen.', operation_rejected: 'La operación fue rechazada por una condición de seguridad o estado.', account_scan_failed: 'No se pudo completar el análisis para una cuenta.', follow_gate_invalid: 'La opción «Pedir primero que me sigan» no es válida.', follow_gate_message_invalid: 'Revise el «Mensaje previo»: es obligatorio, de hasta 640 caracteres y solo admite las variables indicadas.', follow_gate_button_title_invalid: 'Revise el «Título del botón»: de 1 a 20 caracteres, sin enlaces ni saltos de línea.', follow_gate_retired: FOLLOW_GATE_RETIRED_LABEL, interactive_mode_retired: INTERACTIVE_RETIRED_LABEL, ...ATTACHMENT_ERROR_LABELS }; return labels[code] ?? 'Revise el estado de la cuenta y vuelva a intentarlo.'; }

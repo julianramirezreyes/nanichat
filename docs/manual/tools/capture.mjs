@@ -383,7 +383,7 @@ async function phaseB(browser) {
   await browser.shot('07-automation-list');
 
   // 08 Edit dialog of the general automation
-  await browser.eval(`(() => { const row = [...document.querySelectorAll('.automation-row')].find((r) => r.textContent.includes('Guía gratuita')); [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Editar').click(); return true; })()`);
+  await browser.eval(`(() => { const row = [...document.querySelectorAll('.automation-row')].find((r) => r.textContent.includes('Guía gratuita')); [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Editar' || b.getAttribute('aria-label') === 'Editar').click(); return true; })()`);
   await browser.waitFor('document.querySelector(".modal.wide")');
   await sleep(500);
   await browser.metrics(VIEW_W, 1100);
