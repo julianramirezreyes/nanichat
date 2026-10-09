@@ -287,7 +287,7 @@ async function route(
     const owner = db.prepare(`SELECT 1 FROM queue_items WHERE queue_item_id=? AND account_id=?`).get(queueId, selected);
     if (!owner) throw new ApiError(404, 'queue_item_not_found');
     const events = db.prepare(`SELECT event_type AS type, event_at AS at, message_id AS messageId, safe_error_code AS safeErrorCode, details_json
-      FROM send_attempts WHERE account_id=? AND queue_item_id=? ORDER BY event_at, attempt_event_id`).all(selected, queueId) as Array<Record<string, unknown>>;
+      FROM send_attempts WHERE account_id=? AND queue_item_id=? ORDER BY event_at, rowid`).all(selected, queueId) as Array<Record<string, unknown>>;
     const publicEvents = db.prepare(`SELECT event_type AS type, event_at AS at, reply_id AS replyId, safe_error_code AS safeErrorCode, details_json
       FROM public_reply_attempts WHERE account_id=? AND queue_item_id=? ORDER BY event_at, rowid`).all(selected, queueId) as Array<Record<string, unknown>>;
     const gateEvents = db.prepare(`SELECT e.event_type AS type, e.event_at AS at, e.safe_error_code AS safeErrorCode, e.details_json
@@ -447,11 +447,11 @@ function queuePage(db: DatabaseSync, selected: string | undefined, url: URL) {
       g.last_error_code AS gateLastErrorCode, g.button_title AS gateButtonTitle, g.gate_session_id AS gateSessionId,
       g.resource_attachment_kind AS gateAttachmentKind, g.resource_attachment_url AS gateAttachmentUrl,
       CASE WHEN q.state IN ('EXPIRED','SKIPPED') AND q.state_reason_code IS NOT NULL THEN q.state_reason_code
-        ELSE (SELECT safe_error_code FROM send_attempts e WHERE e.account_id=q.account_id AND e.queue_item_id=q.queue_item_id ORDER BY event_at DESC LIMIT 1) END AS safeErrorCode
+        ELSE (SELECT safe_error_code FROM send_attempts e WHERE e.account_id=q.account_id AND e.queue_item_id=q.queue_item_id ORDER BY e.event_at DESC, e.rowid DESC LIMIT 1) END AS safeErrorCode
       FROM queue_items q JOIN social_accounts s ON s.account_id=q.account_id LEFT JOIN automations a ON a.automation_id=q.automation_id AND a.account_id=q.account_id
       LEFT JOIN comments cm ON cm.account_id=q.account_id AND cm.comment_id=q.comment_id
       LEFT JOIN gate_sessions g ON g.queue_item_id=q.queue_item_id AND g.account_id=q.account_id
-      ${where} ORDER BY q.created_at DESC LIMIT ? OFFSET ?`).all(...values, limit, offset) as Array<Record<string, unknown>>;
+      ${where} ORDER BY q.created_at DESC, q.rowid DESC LIMIT ? OFFSET ?`).all(...values, limit, offset) as Array<Record<string, unknown>>;
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM queue_items q ${where}`).get(...values as never[]) as { count: number }).count;
   const partRows = db.prepare(`SELECT part, event_type, safe_error_code FROM gate_part_events WHERE gate_session_id=? AND account_id=? ORDER BY rowid`);
   return { items: items.map(({ payload, commentText, publicReplyState, publicReplyText, publicReplyAttempts, publicReplyNextAt, publicReplyErrorCode, publicReplyId,

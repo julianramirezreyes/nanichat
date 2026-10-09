@@ -416,7 +416,7 @@ export class QueueService {
     const rows = this.database.prepare(`SELECT q.queue_item_id, q.account_id, q.state, c.created_at
       FROM queue_items q JOIN comments c ON c.account_id=q.account_id AND c.comment_id=q.comment_id
       WHERE q.state IN ('QUEUED','FAILED_RETRYABLE','SIMULATED') ${accountId ? 'AND q.account_id=?' : ''}
-      ORDER BY q.created_at, q.queue_item_id`).all(...(accountId ? [accountId] : [])) as Array<{
+      ORDER BY q.created_at, q.rowid`).all(...(accountId ? [accountId] : [])) as Array<{
         queue_item_id: string; account_id: string; state: 'QUEUED' | 'FAILED_RETRYABLE' | 'SIMULATED'; created_at: string | null;
       }>;
     let expired = 0;
@@ -569,7 +569,7 @@ export class QueueService {
   private expireStalePublicReplies(): number {
     const now = this.clock();
     const rows = this.database.prepare(`SELECT queue_item_id, account_id FROM queue_items WHERE public_reply_state='PENDING'
-      ORDER BY created_at, queue_item_id LIMIT ?`).all(PUBLIC_SWEEP_LIMIT) as Array<{ queue_item_id: string; account_id: string }>;
+      ORDER BY created_at, rowid LIMIT ?`).all(PUBLIC_SWEEP_LIMIT) as Array<{ queue_item_id: string; account_id: string }>;
     let expired = 0;
     for (const row of rows) {
       const acceptedAt = this.privateAcceptedAt(row.queue_item_id);
@@ -596,7 +596,7 @@ export class QueueService {
         AND s.status='valid' AND s.monitoring_paused=0 AND c.status='valid' AND c.monitoring_paused=0 AND c.deleted_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM account_send_holds h WHERE h.account_id=q.account_id)
         ${accountId ? 'AND q.account_id=?' : ''}
-      ORDER BY q.created_at, q.queue_item_id LIMIT 1`).get(new Date(now).toISOString(), ...(accountId ? [accountId] : [])) as PublicRow | undefined;
+      ORDER BY q.created_at, q.rowid LIMIT 1`).get(new Date(now).toISOString(), ...(accountId ? [accountId] : [])) as PublicRow | undefined;
   }
 
   /** Commits the durable public intent (SENDING + attempt count + intent event) before any POST; false when not allowed now. */
@@ -783,7 +783,7 @@ export class QueueService {
       JOIN social_accounts s ON s.account_id=q.account_id
       JOIN connections c ON c.id=s.connection_id
       WHERE (q.state='QUEUED' OR (q.state='FAILED_RETRYABLE' AND (q.next_attempt_at IS NULL OR q.next_attempt_at<=?)))
-        ${filter} ORDER BY q.created_at, q.queue_item_id LIMIT 1`).get(new Date(now).toISOString(), ...(parameter ? [parameter] : [])) as QueueRow | undefined;
+        ${filter} ORDER BY q.created_at, q.rowid LIMIT 1`).get(new Date(now).toISOString(), ...(parameter ? [parameter] : [])) as QueueRow | undefined;
   }
 
   private stillAllowed(row: QueueRow, comment: { commentId: string; text?: string; username?: string; createdAt?: string; parentId?: string }): boolean {
@@ -896,7 +896,8 @@ export class QueueService {
     this.database.prepare(`INSERT INTO send_attempts
       (attempt_event_id, account_id, queue_item_id, event_type, event_at, message_id, safe_error_code, details_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(randomUUID(), row.account_id, row.queue_item_id, event, new Date().toISOString(), messageId ?? null,
+      // event_at uses the queue clock: the send-spacing check compares it with this.clock(), so both must share one clock.
+      .run(randomUUID(), row.account_id, row.queue_item_id, event, new Date(this.clock()).toISOString(), messageId ?? null,
         errorCode ?? null, JSON.stringify(details));
   }
 
