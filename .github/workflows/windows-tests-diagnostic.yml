@@ -1,0 +1,79 @@
+name: Windows tests diagnostic
+
+# Runs every test file on its own on a real Windows runner, with a hard per-file timeout, so Windows-specific
+# failures and hangs can be told apart. Manual trigger, or any push that edits this file.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/windows-tests-diagnostic.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-tests-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  per-file:
+    name: Each test file on Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run each test file separately
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: |
+          New-Item -ItemType Directory -Force -Path diag | Out-Null
+          $rows = @()
+          $files = Get-ChildItem tests -Filter *.test.ts | Sort-Object Name
+          foreach ($f in $files) {
+            $name = $f.Name
+            $out = "diag\$name.out.txt"
+            $err = "diag\$name.err.txt"
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $p = Start-Process -FilePath node -ArgumentList @('--import','tsx','--test','--test-timeout=120000','--test-force-exit',"tests/$name") `
+                 -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+            $finished = $p.WaitForExit(240000)
+            $sw.Stop()
+            if (-not $finished) {
+              & taskkill /PID $p.Id /T /F | Out-Null
+              $status = 'TIMEOUT'
+            } elseif ($p.ExitCode -eq 0) { $status = 'PASS' } else { $status = "FAIL($($p.ExitCode))" }
+            $summary = ''
+            if (Test-Path $out) {
+              $line = Select-String -Path $out -Pattern '^(ℹ|#)?\s*(pass|fail) ' -SimpleMatch:$false | ForEach-Object { $_.Line.Trim() }
+              $summary = ($line -join ' ')
+            }
+            $rows += [pscustomobject]@{ File = $name; Status = $status; Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1); Summary = $summary }
+            Write-Host ("{0,-42} {1,-10} {2,7}s  {3}" -f $name, $status, [math]::Round($sw.Elapsed.TotalSeconds,1), $summary)
+            Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+          $md = @('## Windows: one test file at a time', '', '| File | Status | Seconds | Summary |', '|---|---|---|---|')
+          foreach ($r in $rows) { $md += "| $($r.File) | $($r.Status) | $($r.Seconds) | $($r.Summary) |" }
+          $md -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $rows | ConvertTo-Json | Out-File diag\summary.json -Encoding utf8
+          # Never fail this diagnostic: the point is the report.
+          exit 0
+
+      - name: Upload per-file logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-diagnostic
+          path: diag
+          if-no-files-found: warn
