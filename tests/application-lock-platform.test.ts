@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,13 +8,14 @@ import {
   nodeProcessProbe,
   type ProcessProbe,
 } from '../src/core/application-lock.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 const LOCK_FILE = '.application-owner.json';
 const REFUSAL = /already running or ownership is uncertain/;
 
 function tempDir(context: { after(fn: () => void): void }): string {
   const directory = mkdtempSync(join(tmpdir(), 'social-app-lock-platform-'));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  context.after(() => removeTempDir(directory));
   return directory;
 }
 

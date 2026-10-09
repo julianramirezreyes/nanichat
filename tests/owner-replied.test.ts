@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import { listPendingReview } from '../src/services/pending-review.ts';
 import { QueueService } from '../src/services/queue.ts';
 import { Scanner } from '../src/services/scanner.ts';
 import { reasonLabel, summarizeScan } from '../app/scan-summary.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 const NOW = Date.parse('2026-10-06T12:00:00Z');
@@ -23,7 +24,7 @@ async function withDb(run: (db: Db) => Promise<void> | void): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), 'owner-replied-'));
   const db = openDatabase(directory);
   migrateDatabase(db);
-  try { await run(db); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seed(db: Db): string {

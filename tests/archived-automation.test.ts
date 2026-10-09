@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import { addDiscoveredAccount, createComment, createConnection, createMedia } fr
 import { AutomationService } from '../src/services/automations.ts';
 import { listPendingReview } from '../src/services/pending-review.ts';
 import { QueueService } from '../src/services/queue.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 const NOW = Date.now();
@@ -18,7 +19,7 @@ function withDb(run: (db: Db) => void | Promise<void>): Promise<void> | void {
   const directory = mkdtempSync(join(tmpdir(), 'archived-automation-'));
   const db = openDatabase(directory);
   migrateDatabase(db);
-  const done = () => { db.close(); rmSync(directory, { recursive: true, force: true }); };
+  const done = () => { db.close(); removeTempDir(directory); };
   try {
     const result = run(db);
     if (result) return result.finally(done);

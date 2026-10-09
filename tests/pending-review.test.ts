@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, request } from 'node:http';
 import type { Server } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,7 @@ import { addDiscoveredAccount, createComment, createConnection, createMedia } fr
 import { createApiHandler } from '../src/http/router.ts';
 import { truncateText } from '../src/services/pending-review.ts';
 import { autoPickAutomation, describeQueuePayload } from '../app/pending-review.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 const NOW = Date.parse('2026-10-06T12:00:00Z');
@@ -37,7 +38,7 @@ async function withEnv(run: (ctx: { db: Db; origin: string }) => Promise<void>, 
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('no address');
   try { await run({ db, origin: `http://127.0.0.1:${address.port}` }); }
-  finally { server.close(); db.close(); rmSync(directory, { recursive: true, force: true }); }
+  finally { server.close(); db.close(); removeTempDir(directory); }
 }
 
 function scan(db: Db, id: string, account: string, kind: string, status: string, finishedAt = '2026-10-06T11:00:00Z') {

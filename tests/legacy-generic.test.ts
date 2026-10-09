@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer, request, type Server } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import { addDiscoveredAccount, createComment, createConnection, createMedia } fr
 import { AutomationService } from '../src/services/automations.ts';
 import { createLegacyInterlock, legacyInterlockFromConfig } from '../src/services/legacy-interlock.ts';
 import { QueueService } from '../src/services/queue.ts';
+import { cleanupStack, removeTempDir } from './helpers/tmp.ts';
 
 const CSRF = 'legacy-csrf';
 
@@ -39,10 +40,25 @@ function call(origin: string, path: string, body?: unknown) {
   });
 }
 
-function tempDir(context: { after(fn: () => void): void }, prefix: string): string {
+type TestContext = { after(fn: () => void | Promise<void>): void };
+const deferStacks = new WeakMap<TestContext, ReturnType<typeof cleanupStack>>();
+
+/** One LIFO cleanup stack per test: servers and databases close before their temp directory is removed. */
+function defer(context: TestContext, cleanup: () => void | Promise<void>): void {
+  let stack = deferStacks.get(context);
+  if (!stack) { stack = cleanupStack(context); deferStacks.set(context, stack); }
+  stack(cleanup);
+}
+
+function tempDir(context: TestContext, prefix: string): string {
   const directory = mkdtempSync(join(tmpdir(), prefix));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  defer(context, () => removeTempDir(directory));
   return directory;
+}
+
+function closeServer(server: Server): Promise<void> {
+  server.closeAllConnections();
+  return new Promise((done) => server.close(() => done()));
 }
 
 test('configuration: legacy interlock and .env import are disabled unless their variables are set', () => {
@@ -101,18 +117,18 @@ function seedAccount(database: ReturnType<typeof openDatabase>, username: string
   addDiscoveredAccount(database, { accountId: 'account', connectionId: 'connection', providerAccountId: 'provider', username, status: 'valid' });
 }
 
-async function selectThroughApi(context: { after(fn: () => void): void }, username: string,
+async function selectThroughApi(context: TestContext, username: string,
   legacy?: ReturnType<typeof createLegacyInterlock>) {
   const directory = tempDir(context, 'social-legacy-api-');
   const database = openDatabase(directory);
   migrateDatabase(database);
-  context.after(() => database.close());
+  defer(context, () => database.close());
   seedAccount(database, username);
   const handler = createApiHandler({ database, csrfToken: CSRF, automations: new AutomationService(database),
     connections: { async selectAccount() { return { accountId: 'account', username }; } } as never,
     ...(legacy ? { legacy } : {}) });
   const { server, origin } = await listen(handler);
-  context.after(() => server.close());
+  defer(context, () => closeServer(server));
   const selected = await call(origin, '/api/connections/connection/select', { account: { providerAccountId: 'provider', username } });
   assert.equal(selected.status, 201);
   const hold = database.prepare(`SELECT reason_code FROM account_send_holds WHERE account_id='account'`).get() as { reason_code: string } | undefined;
@@ -160,19 +176,19 @@ test('API: .env import is reported as enabled only when an import source is conf
   const directory = tempDir(context, 'social-env-feature-');
   const database = openDatabase(directory);
   migrateDatabase(database);
-  context.after(() => database.close());
+  defer(context, () => database.close());
   const handler = createApiHandler({ database, csrfToken: CSRF,
     async importEnvironment() { throw new Error('not called'); } });
   const { server, origin } = await listen(handler);
-  context.after(() => server.close());
+  defer(context, () => closeServer(server));
   assert.deepEqual((await call(origin, '/api/settings/features')).json, { envImport: true, legacyInterlock: false });
 });
 
-async function queueFixture(context: { after(fn: () => void): void }) {
+async function queueFixture(context: TestContext) {
   const directory = tempDir(context, 'social-legacy-queue-generic-');
   const database = openDatabase(directory);
   migrateDatabase(database);
-  context.after(() => database.close());
+  defer(context, () => database.close());
   seedAccount(database, 'cuenta_demo');
   createMedia(database, { accountId: 'account', mediaId: 'media', permalink: null, publishedAt: null });
   const createdAt = new Date(Date.now() - 1000).toISOString();

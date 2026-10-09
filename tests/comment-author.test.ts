@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -14,6 +14,7 @@ import { createVault } from '../src/security/vault.ts';
 import { AutomationService } from '../src/services/automations.ts';
 import { QueueService } from '../src/services/queue.ts';
 import { Scanner } from '../src/services/scanner.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 async function withProvider(
   rows: unknown,
@@ -44,7 +45,7 @@ async function withProvider(
     await run({ db, provider, account, urls });
   } finally {
     db.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDir(directory);
   }
 }
 

@@ -4,11 +4,12 @@ import test from 'node:test';
 import { createApiHandler } from '../src/http/router.ts';
 import { openDatabase } from '../src/db/database.ts';
 import { migrateDatabase } from '../src/db/migrations.ts';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { addDiscoveredAccount, createComment, createConnection, createMedia } from '../src/db/repositories.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 async function listen(handler: ReturnType<typeof createApiHandler>): Promise<{ server: Server; origin: string }> {
   const server = createServer((req, res) => { void handler(req, res); });
@@ -47,7 +48,7 @@ test('local API requires same-origin CSRF token and strict bounded JSON for muta
   context.after(() => {
     server.close();
     database.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDir(directory);
   });
 
   const noOrigin = await call(origin, '/api/settings/dry-run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"enabled":false}' });
@@ -92,7 +93,7 @@ test('queue pagination, dashboard, and attempt history enforce account ownership
   database.prepare(`INSERT INTO send_attempts(attempt_event_id,account_id,queue_item_id,event_type,event_at,message_id,safe_error_code,details_json)
     VALUES ('event-a','account-a','queue-a','ambiguous_outcome',CURRENT_TIMESTAMP,NULL,'network_timeout','{"secret":"must-not-escape","usageHeaders":{"appUsage":"safe"}}')`).run();
   const { server, origin } = await listen(createApiHandler({ database }));
-  context.after(() => { server.close(); database.close(); rmSync(directory, { recursive: true, force: true }); });
+  context.after(() => { server.close(); database.close(); removeTempDir(directory); });
 
   const own = await call(origin, '/api/queue?accountId=account-a&limit=1');
   assert.equal(JSON.parse(own.body).total, 1);
@@ -123,7 +124,7 @@ test('explicit root environment import is invoked only after confirmation and ne
     connections: { async create(input: { accessToken: string }) { receivedToken = input.accessToken; return { id: 'safe-connection', status: 'unvalidated' }; } },
   } as never);
   const { server, origin } = await listen(handler);
-  context.after(() => { server.close(); database.close(); rmSync(directory, { recursive: true, force: true }); });
+  context.after(() => { server.close(); database.close(); removeTempDir(directory); });
 
   await call(origin, '/api/session');
   assert.equal(imports, 0);

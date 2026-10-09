@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,7 @@ import {
   FOLLOW_GATE_DEFAULT_MESSAGE, FOLLOW_GATE_DEFAULT_TITLE, FOLLOW_GATE_NOTE, followGateErrorHint, followGateEventLabel,
   followGatePreview, followGateRequestFields, followGateStateLabel,
 } from '../app/follow-gate.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 /**
@@ -40,7 +41,7 @@ async function withDb(run: (db: Db, directory: string) => Promise<void> | void, 
   const directory = mkdtempSync(join(tmpdir(), 'follow-gate-v13-'));
   const db = openDatabase(directory);
   if (target === undefined) migrateDatabase(db); else migrateDatabase(db, target);
-  try { await run(db, directory); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db, directory); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seed(db: Db, suffix = ''): AccountRef & { mediaId: string } {
@@ -454,7 +455,7 @@ async function withProvider(respond: (call: Call) => Response | Promise<Response
       return respond(entry);
     }, { diagnosticSpacingMs: 0 });
     await run(provider, calls, state);
-  } finally { state.db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { state.db.close(); removeTempDir(directory); }
 }
 
 test('gate first message: exact JSON of the private reply (button template with ONE postback button, no URL buttons)', async () => {

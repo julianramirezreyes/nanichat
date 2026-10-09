@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -32,6 +32,7 @@ import {
 import { createVault } from '../src/security/vault.ts';
 import { ConnectionService } from '../src/services/connections.ts';
 import { MetaProvider } from '../src/providers/meta/provider.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 function withTempDb(run: (directory: string, db: ReturnType<typeof openDatabase>) => Promise<void> | void): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), 'social-connections-'));
@@ -39,7 +40,7 @@ function withTempDb(run: (directory: string, db: ReturnType<typeof openDatabase>
   migrateDatabase(db);
   return Promise.resolve(run(directory, db)).finally(() => {
     db.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDir(directory);
   });
 }
 

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { removeTempDir } from './helpers/tmp.ts';
 
 test('npm scripts use no shell-specific syntax so they run the same on Windows, macOS and Linux', () => {
   const scripts = (JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }).scripts;
@@ -14,9 +15,19 @@ test('npm scripts use no shell-specific syntax so they run the same on Windows, 
   assert.equal(scripts.start, 'node scripts/start.mjs');
 });
 
+test('the test script puts every node option before the file pattern (options after it are silently ignored)', () => {
+  const scripts = (JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }).scripts;
+  const words = scripts.test!.trim().split(/\s+/u);
+  const pattern = words.indexOf('tests/*.test.ts');
+  assert.equal(pattern, words.length - 1, 'the file pattern must be the last argument');
+  for (const option of ['--test', '--test-timeout=120000', '--test-force-exit']) {
+    assert.ok(words.indexOf(option) > -1 && words.indexOf(option) < pattern, `${option} must precede the file pattern`);
+  }
+});
+
 test('the portable start script sets NODE_ENV=production before loading the TypeScript entry point', (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'social-start-script-'));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  context.after(() => removeTempDir(directory));
   const entry = join(directory, 'entry.ts');
   // A static import is evaluated before the entry body: it must already observe production mode.
   writeFileSync(join(directory, 'observer.ts'), `export const observedMode: string | undefined = process.env.NODE_ENV;\n`);

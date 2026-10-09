@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +21,7 @@ import {
   ATTACHMENT_ERROR_LABELS, ATTACHMENT_OPTIONS, attachmentBadge, attachmentErrorHint, attachmentPartStateLabel, attachmentPreviewLine,
   attachmentRequestFields, attachmentWarnings, describeAttachment,
 } from '../app/resource-attachment.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 /**
@@ -40,7 +41,7 @@ async function withDb(run: (db: Db, directory: string) => Promise<void> | void, 
   const directory = mkdtempSync(join(tmpdir(), 'resource-attachment-'));
   const db = openDatabase(directory);
   if (target === undefined) migrateDatabase(db); else migrateDatabase(db, target);
-  try { await run(db, directory); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db, directory); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seed(db: Db, suffix = ''): AccountRef & { mediaId: string } {
@@ -322,7 +323,7 @@ async function withProvider(respond: () => Response, run: (provider: MetaProvide
     const provider = new MetaProvider(db, vault, async (input, init = {}) => { urls.push(String(input)); bodies.push(String(init.body)); return respond(); });
     await run(provider, bodies, { accountId: 'acc', connectionId: 'conn', providerAccountId: ACCOUNT_IG_ID, username: 'brand' });
     assert.ok(urls.every((url) => url === `https://graph.instagram.com/v26.0/${ACCOUNT_IG_ID}/messages`));
-  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { db.close(); removeTempDir(directory); }
 }
 
 test('sendMessage attachment: exact JSON for image, audio, video and file (payload.url), and the text message stays the button template', async () => {

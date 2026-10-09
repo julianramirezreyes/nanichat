@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +20,7 @@ import {
   FOLLOW_GATE_RETIRED_LABEL, MEDIA_LINK_TIP, followGateErrorHint, showFollowGateDetail,
 } from '../app/follow-gate.ts';
 import { ATTACHMENT_ERROR_LABELS, ATTACHMENT_RETIRED_LABEL } from '../app/resource-attachment.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 /*
  * Retirement of the follow gate («Pedir primero que me sigan») and of the resource attachment (2026-10-09). With a
@@ -38,7 +39,7 @@ async function withDb(run: (db: Db) => Promise<void> | void): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), 'retire-follow-gate-'));
   const db = openDatabase(directory);
   migrateDatabase(db);
-  try { await run(db); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seed(db: Db): AccountRef & { mediaId: string } {

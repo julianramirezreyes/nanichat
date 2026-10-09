@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import { createVault } from '../src/security/vault.ts';
 import { AutomationService } from '../src/services/automations.ts';
 import { QueueService } from '../src/services/queue.ts';
 import { INTERACTIVE_RETIRED_LABEL } from '../app/interactive-buttons.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 /*
  * Phase 0 of "attachments by URL": the experimental interactive buttons (quick replies / postback buttons on a normal
@@ -27,7 +28,7 @@ async function withDb(run: (db: Db, directory: string) => Promise<void> | void):
   const directory = mkdtempSync(join(tmpdir(), 'retire-interactive-'));
   const db = openDatabase(directory);
   migrateDatabase(db);
-  try { await run(db, directory); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db, directory); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seed(db: Db, suffix = ''): AccountRef & { mediaId: string } {
@@ -212,7 +213,7 @@ test('provider no longer builds quick replies (rejected before any request); the
     const gate = await provider.sendPrivateReply(account, '18000', { text: 'Hola', buttons: [], postbackButtons: [{ title: 'Ya te sigo', payload: 'gate:a1:0' }] });
     assert.equal(gate.outcome, 'accepted');
     assert.equal(bodies[0], '{"recipient":{"comment_id":"18000"},"message":{"attachment":{"type":"template","payload":{"template_type":"button","text":"Hola","buttons":[{"type":"postback","title":"Ya te sigo","payload":"gate:a1:0"}]}}}}');
-  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { db.close(); removeTempDir(directory); }
 });
 
 test('UI: the experimental section and badge are gone, the inspector stays, the retired code has a Spanish label', () => {

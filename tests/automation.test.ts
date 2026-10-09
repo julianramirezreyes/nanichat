@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,6 +12,7 @@ import { QueueService } from '../src/services/queue.ts';
 import { getCatchUpCutoff, Scanner } from '../src/services/scanner.ts';
 import { BacklogService } from '../src/services/backlog.ts';
 import { Scheduler } from '../src/services/scheduler.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 test('keyword matching uses Unicode normalization, spacing, and whole phrase boundaries', () => {
   assert.equal(normalizeMatchText('  Guía\t RÁPIDA  '), 'guia rapida');
@@ -702,7 +703,7 @@ async function withDatabase(run: (db: ReturnType<typeof openDatabase>, directory
     await run(db, directory);
   } finally {
     db.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDir(directory);
   }
 }
 

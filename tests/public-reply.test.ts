@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +15,7 @@ import { AutomationService } from '../src/services/automations.ts';
 import { QueueService } from '../src/services/queue.ts';
 import { Scanner } from '../src/services/scanner.ts';
 import { Scheduler } from '../src/services/scheduler.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 const HOUR = 60 * 60 * 1000;
@@ -24,7 +25,7 @@ async function withDb(run: (db: Db, directory: string) => Promise<void> | void, 
   const directory = mkdtempSync(join(tmpdir(), 'public-reply-'));
   const db = openDatabase(directory);
   if (target === undefined) migrateDatabase(db); else migrateDatabase(db, target);
-  try { await run(db, directory); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db, directory); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seed(db: Db, suffix = ''): AccountRef & { mediaId: string } {
@@ -178,7 +179,7 @@ for (const [loginKind, origin, token] of [['instagram_login', 'https://graph.ins
       assert.equal((await provider.replyToComment(state.account, '18000000000000001', '   ')).outcome, 'definitive_rejection');
       assert.equal((await provider.replyToComment(state.account, '18000000000000001', 'x'.repeat(1001))).outcome, 'definitive_rejection');
       assert.equal(calls.length, 1);
-    } finally { state.db.close(); rmSync(directory, { recursive: true, force: true }); }
+    } finally { state.db.close(); removeTempDir(directory); }
   });
 }
 
@@ -210,7 +211,7 @@ test('provider replyToComment maps permission, rate-limit, server and malformed 
     assert.equal((await reply(() => { throw new TypeError('redirect'); })).outcome, 'ambiguous');
     const serialized = JSON.stringify(await reply(error(403, 10)));
     assert.equal(serialized.includes('secret'), false);
-  } finally { state.db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { state.db.close(); removeTempDir(directory); }
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -462,6 +463,34 @@ test('variant rotation persists the rendered text and never repeats within the l
     for (let index = 0; index < posted.length; index++) assert.equal(posted.slice(Math.max(0, index - 3), index).includes(posted[index]!), false);
   });
 });
+
+// Regression (Windows CI): the private send-spacing check compared the injected queue clock against intent events
+// stamped with the wall clock. When the queue clock lags wall time (slow runner, coarse timer) every later send was
+// refused, so the rotation above saw null public replies. All queue timestamps must come from one clock.
+for (const [label, makeClock] of [
+  ['lags wall time', () => { let now = Date.now() - 5_000; return () => (now += 1); }],
+  ['returns the same millisecond for every call', () => { const now = Date.now() - 5_000; return () => now; }],
+] as const) {
+  test(`variant rotation still holds when the queue clock ${label}`, async () => {
+    await withDb(async (db) => {
+      const ctx = seed(db);
+      const variants = ['A {{username}}', 'B {{username}}', 'C {{username}}', 'D {{username}}', 'E {{username}}'];
+      const automationId = automation(db, ctx, { variants });
+      const provider = fakeProvider();
+      const queue = new QueueService(db, provider as never, { clock: makeClock(), rng: () => 0, sendSpacingMs: 0, publicReplySpacingMs: 0 } as never);
+      queue.setDryRun(false, true);
+      const posted: Array<string | null> = [];
+      for (let index = 0; index < 6; index++) {
+        comment(db, ctx, `c${index}`);
+        await sendPrivate(db, queue, ctx, automationId, `c${index}`);
+        await queue.processPublicReply();
+        posted.push(item(db, `c${index}`).public_reply_text as string | null);
+      }
+      assert.deepEqual(posted, ['A customer', 'B customer', 'C customer', 'D customer', 'A customer', 'B customer']);
+      assert.equal(privateIntents(db), 6);
+    });
+  });
+}
 
 test('public replies keep their own minimum spacing (default 20 s)', async () => {
   await withDb(async (db) => {

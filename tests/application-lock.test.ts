@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import test from 'node:test';
 import { acquireApplicationLock } from '../src/core/application-lock.ts';
+import { stopProcessTree } from './helpers/process.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 test('application ownership rejects a second process and recovers only after its owner dies', async (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'social-app-owner-'));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
 
   const script = `import { acquireApplicationLock } from './src/core/application-lock.ts';\n` +
     `const lock = acquireApplicationLock(${JSON.stringify(directory)});\n` +
@@ -18,11 +19,9 @@ test('application ownership rejects a second process and recovers only after its
     cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'],
   });
   context.after(async () => {
-    if (owner.exitCode === null && owner.signalCode === null) {
-      const exited = once(owner, 'exit');
-      owner.kill('SIGKILL');
-      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 3000))]);
-    }
+    await stopProcessTree(owner, 'SIGKILL');
+    // Only after the owner process is gone: Windows cannot remove files another process still holds.
+    removeTempDir(directory);
   });
 
   let output = '';

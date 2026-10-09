@@ -20,10 +20,11 @@ import {
 import { RepositoryConflictError } from '../src/core/errors.ts';
 import { createVault } from '../src/security/vault.ts';
 import { redactSecrets } from '../src/security/redact.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 function withTempDir(run: (directory: string) => void): void {
   const directory = mkdtempSync(join(tmpdir(), 'local-social-foundation-'));
-  try { run(directory); } finally { rmSync(directory, { recursive: true, force: true }); }
+  try { run(directory); } finally { removeTempDir(directory); }
 }
 
 function seededDatabase(directory: string) {
@@ -59,9 +60,13 @@ test('vault encrypts with authenticated connection context and refuses missing k
     const encrypted = vault.encrypt('connection-one', 'secret-access-token');
     assert.equal(vault.decrypt('connection-one', encrypted), 'secret-access-token');
     assert.throws(() => vault.decrypt('connection-two', encrypted));
-    const keyMode = statSync(join(directory, 'vault.key')).mode & 0o777;
-    assert.equal(keyMode, 0o600);
-    assert.equal(statSync(directory).mode & 0o777, 0o700);
+    // Windows has no POSIX permission bits (chmod only toggles the read-only flag), so the mode
+    // assertions only hold on POSIX platforms. The product code still calls chmod everywhere.
+    if (process.platform !== 'win32') {
+      const keyMode = statSync(join(directory, 'vault.key')).mode & 0o777;
+      assert.equal(keyMode, 0o600);
+      assert.equal(statSync(directory).mode & 0o777, 0o700);
+    }
     assert.ok(!JSON.stringify(encrypted).includes('secret-access-token'));
     rmSync(join(directory, 'vault.key'));
     assert.throws(() => createVault(directory, () => [{ contextId: 'connection-one', secret: encrypted }]), /key.*missing|missing.*key/i);

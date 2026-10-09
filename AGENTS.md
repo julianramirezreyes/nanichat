@@ -21,7 +21,7 @@ Este archivo es para asistentes de programación (Claude Code, Codex, Cursor, et
 | `npm run dev` | Servidor en modo desarrollo (`tsx server.ts`, Next.js con recarga en caliente). |
 | `npm run build` | Compila la interfaz (`next build`) en `.next`. |
 | `npm start` | Servidor en modo producción (`node scripts/start.mjs`: pone `NODE_ENV=production` y carga `server.ts` con la API de `tsx`; funciona en PowerShell, `cmd`, macOS y Linux). Requiere `npm run build` previo. |
-| `npm test` | Todas las pruebas (`node --import tsx --test tests/*.test.ts`). |
+| `npm test` | Todas las pruebas (`node --import tsx --test --test-timeout=120000 --test-force-exit tests/*.test.ts`). Las opciones de `node` van siempre antes del patrón de archivos: después de él se ignoran sin aviso, así que `npm test -- --opcion` no sirve. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `node packaging/windows/fetch-node.mjs` y `node packaging/windows/build-payload.mjs` | Arman el instalador de Windows (los ejecuta el flujo `.github/workflows/windows-installer.yml` en Windows; ver [packaging/windows/README.md](packaging/windows/README.md)). |
 | `curl http://127.0.0.1:3000/api/health` | Verificación de salud: `{"status":"ok","ready":true}`. |

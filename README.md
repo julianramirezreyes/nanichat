@@ -273,7 +273,8 @@ npm run typecheck   # verificación de tipos con TypeScript
 ```
 
 - Las pruebas nunca tocan `./data` ni llaman a Meta: usan carpetas temporales y proveedores simulados.
-- `npm test` funciona igual en Windows: el propio Node expande el patrón `tests/*.test.ts`.
+- `npm test` funciona igual en Windows: el propio Node expande el patrón `tests/*.test.ts`. Cada prueba tiene un límite de 120 s y `--test-force-exit` evita que un proceso que quedó abierto bloquee la corrida.
+- Para pasar más opciones a `node --test`, escríbelas antes del patrón (`node --import tsx --test --test-name-pattern="..." tests/*.test.ts`); `npm test -- --opcion` las pone después del patrón y Node las ignora.
 - `tests/server.test.ts` levanta el servidor en modo desarrollo en puertos libres elegidos al azar; si tienes un `npm run dev` abierto en la misma carpeta, Next.js lo rechaza con `Another next dev server is already running in this directory.` Detén el servidor de desarrollo antes de correr las pruebas.
 - El proyecto sigue TDD: primero una prueba que falla, luego el código. Lee [AGENTS.md](AGENTS.md) antes de enviar cambios.
 

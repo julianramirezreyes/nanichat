@@ -9,10 +9,11 @@ import { migrateDatabase } from '../src/db/migrations.ts';
 import { addDiscoveredAccount, createComment, createConnection, createMedia } from '../src/db/repositories.ts';
 import { AutomationService } from '../src/services/automations.ts';
 import { QueueService } from '../src/services/queue.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 test('legacy lock adapter blocks pre-existing ownership, acknowledges an unchanged counter version, and releases only its own lock', async (context) => {
   const root = mkdtempSync(join(tmpdir(), 'social-legacy-interlock-'));
-  context.after(() => rmSync(root, { recursive: true, force: true }));
+  context.after(() => removeTempDir(root));
   const directory = join(root, 'customer');
   mkdirSync(directory);
   const counter = join(directory, 'rejection-counter.json');
@@ -35,10 +36,10 @@ test('legacy lock adapter blocks pre-existing ownership, acknowledges an unchang
 
 test('real queue sends only while holding the canonical lock and matching the acknowledged counter version', async (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'social-legacy-queue-'));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
   const database = openDatabase(directory);
+  // One hook, in order: node:test runs after-hooks FIFO, and Windows cannot remove a directory holding an open database.
+  context.after(() => { database.close(); removeTempDir(directory); });
   migrateDatabase(database);
-  context.after(() => database.close());
   createConnection(database, { id: 'connection', name: 'Test', providerCode: 'META', loginKind: 'instagram_login', graphVersion: 'v26.0', status: 'valid', accessToken: { nonce: 'n', ciphertext: 'c', tag: 't' } });
   addDiscoveredAccount(database, { accountId: 'account', connectionId: 'connection', providerAccountId: 'provider', username: 'customer', status: 'valid' });
   createMedia(database, { accountId: 'account', mediaId: 'media', permalink: null, publishedAt: null });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +15,7 @@ import { AutomationService, renderReply } from '../src/services/automations.ts';
 import { QueueService } from '../src/services/queue.ts';
 import { Scanner } from '../src/services/scanner.ts';
 import { directionLabel } from '../app/interactive-buttons.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 const one = (db: Db, sql: string, ...params: unknown[]) => ({ ...(db.prepare(sql).get(...params as never[]) as Record<string, any>) });
@@ -25,7 +26,7 @@ async function withDb(run: (db: Db, directory: string) => Promise<void> | void, 
   const directory = mkdtempSync(join(tmpdir(), 'follow-gate-'));
   const db = openDatabase(directory);
   if (target === undefined) migrateDatabase(db); else migrateDatabase(db, target);
-  try { await run(db, directory); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db, directory); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seed(db: Db, suffix = ''): AccountRef & { mediaId: string } {
@@ -62,7 +63,7 @@ async function withProvider(respond: (call: Call) => Response | Promise<Response
       return respond(call);
     }, { diagnosticSpacingMs: 0 });
     await run(provider, calls, state);
-  } finally { state.db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally { state.db.close(); removeTempDir(directory); }
 }
 
 // ---------------------------------------------------------------------------------------------------------------

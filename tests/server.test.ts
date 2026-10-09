@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { createServer as createTcpServer, request } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -12,6 +12,8 @@ import { migrateDatabase } from '../src/db/migrations.ts';
 import { addDiscoveredAccount, createComment, createConnection, createMedia } from '../src/db/repositories.ts';
 import { AutomationService } from '../src/services/automations.ts';
 import { createVault } from '../src/security/vault.ts';
+import { stopProcessTree } from './helpers/process.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 async function unusedPort(): Promise<number> {
   const server = createTcpServer();
@@ -45,14 +47,8 @@ test('local server starts with the supported Node runner and exposes a loopback-
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   context.after(async () => {
-    if (child.exitCode === null) {
-      child.kill('SIGTERM');
-      await Promise.race([
-        once(child, 'exit'),
-        new Promise((resolve) => setTimeout(resolve, 3000)),
-      ]);
-    }
-    rmSync(directory, { recursive: true, force: true });
+    await stopProcessTree(child);
+    removeTempDir(directory);
   });
 
   let output = '';
@@ -109,6 +105,7 @@ test('local server starts with the supported Node runner and exposes a loopback-
   second.stderr.setEncoding('utf8');
   second.stdout.on('data', (chunk) => { secondOutput += chunk; });
   second.stderr.on('data', (chunk) => { secondOutput += chunk; });
+  context.after(() => stopProcessTree(second));
   await Promise.race([once(second, 'exit'), new Promise((resolve) => setTimeout(resolve, 5000))]);
   assert.equal(second.exitCode, 1, `second owner did not fail safely; output=${secondOutput}`);
   assert.match(secondOutput, /already running|ownership is uncertain/i);
@@ -137,11 +134,8 @@ test('server refuses readiness when the vault key cannot authenticate persisted 
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   context.after(async () => {
-    if (child.exitCode === null) {
-      child.kill('SIGTERM');
-      await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 3000))]);
-    }
-    rmSync(directory, { recursive: true, force: true });
+    await stopProcessTree(child);
+    removeTempDir(directory);
   });
 
   let output = '';

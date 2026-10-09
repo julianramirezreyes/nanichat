@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, request } from 'node:http';
 import type { Server } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,6 +13,7 @@ import { AutomationService, renderReply } from '../src/services/automations.ts';
 import { BacklogService } from '../src/services/backlog.ts';
 import { QueueService } from '../src/services/queue.ts';
 import { Scanner } from '../src/services/scanner.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 
@@ -20,7 +21,7 @@ async function withDatabase(run: (db: Db) => Promise<void> | void): Promise<void
   const directory = mkdtempSync(join(tmpdir(), 'social-automation-review-'));
   const db = openDatabase(directory);
   migrateDatabase(db);
-  try { await run(db); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seedAccount(db: Db, suffix = '', username = 'brand') {
@@ -129,7 +130,7 @@ test('POST /api/backlog/process rejects unreviewed IDs with a safe 4xx', async (
   createComment(db, { accountId: account.accountId, mediaId: 'media', commentId: 'unscanned', text: 'guide', username: 'customer', createdAt: new Date(Date.now() - 1000).toISOString() });
   const backlog = new BacklogService(db, new Scanner(db, providerWith('x', true)), new QueueService(db, {} as never));
   const { server, origin } = await listen(createApiHandler({ database: db, csrfToken: 'csrf', backlog } as never));
-  context.after(() => { server.close(); db.close(); rmSync(directory, { recursive: true, force: true }); });
+  context.after(() => { server.close(); db.close(); removeTempDir(directory); });
   const response = await post(origin, '/api/backlog/process', { accountId: account.accountId, automationId, commentIds: ['unscanned'], confirmed: true });
   assert.ok(response.status >= 400 && response.status < 500, String(response.status));
   assert.equal((db.prepare(`SELECT COUNT(*) AS c FROM queue_items`).get() as { c: number }).c, 0);
@@ -141,7 +142,7 @@ test('router rejects invalid matchMode on create and update, defaults only when 
   migrateDatabase(db);
   const account = seedAccount(db);
   const { server, origin } = await listen(createApiHandler({ database: db, csrfToken: 'csrf', automations: new AutomationService(db) } as never));
-  context.after(() => { server.close(); db.close(); rmSync(directory, { recursive: true, force: true }); });
+  context.after(() => { server.close(); db.close(); removeTempDir(directory); });
   const base = { accountId: account.accountId, mediaId: 'media', name: 'n', keywords: ['guide'], replyText: 'Hi' };
   for (const bad of ['EXACT', 'regex', '', 5, null]) {
     const created = await post(origin, '/api/automations', { ...base, matchMode: bad });

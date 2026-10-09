@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer, request } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -18,6 +18,7 @@ import { QueueService } from '../src/services/queue.ts';
 import { Scanner } from '../src/services/scanner.ts';
 import { autoSelectAccount } from '../app/account-filter.ts';
 import { mediaLabel, mediaTypeLabel } from '../app/media-label.ts';
+import { removeTempDir } from './helpers/tmp.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 
@@ -25,7 +26,7 @@ async function withDb(run: (db: Db, directory: string) => Promise<void> | void, 
   const directory = mkdtempSync(join(tmpdir(), 'ux-fixes2-'));
   const db = openDatabase(directory);
   if (target === undefined) migrateDatabase(db); else migrateDatabase(db, target);
-  try { await run(db, directory); } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  try { await run(db, directory); } finally { db.close(); removeTempDir(directory); }
 }
 
 function seedAccounts(db: Db, ids: string[], mediaPerAccount: number): AccountRef[] {
