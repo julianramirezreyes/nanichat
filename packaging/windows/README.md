@@ -39,11 +39,13 @@ Accesos directos: **Social Desk** (escritorio, activado por defecto, y menú Ini
 | 4 | `ISCC.exe /DAppVersion=<v> /DPayloadDir=<…> /DOutputDir=<…> packaging\windows\SocialDesk.iss` | Inno Setup 6 empaqueta `dist/payload` en `dist/installer/SocialDesk-Setup-<v>.exe` (LZMA2). |
 | 5 | `packaging\windows\test\smoke.ps1 -Installer <exe>` | Prueba de humo (ver abajo). |
 
-Decisiones de tamaño (≈ 215 MB sin comprimir en una prueba en Linux; el objetivo es < 300 MB):
+Decisiones de tamaño (≈ 215 MB sin comprimir en una prueba en Linux antes del modelo local; con `node-llama-cpp` se estiman **≈ 270 MB**: +46 MB del binario `@node-llama-cpp/win-x64` y +7 MB del paquete y sus dependencias tras la poda; el objetivo es < 300 MB):
 
 - `tsx` es una dependencia de **producción**: `scripts/start.mjs` la necesita para cargar `server.ts`.
 - `next.config.mjs` (no `.ts`): así Next.js no necesita el compilador nativo SWC al arrancar, y el instalador lo omite (≈ 100 MB). Con un `next.config.ts`, Next.js intentaría **descargar** SWC en cada equipo.
 - Se podan `sharp`/`@img` (la app no usa `next/image`), mapas de código fuente, declaraciones `.d.ts`, Markdown y `next/dist/docs`. Las licencias se conservan.
+- **Modelo local (`node-llama-cpp`):** `npm ci --omit=dev` en Windows instala todos los binarios precompilados cuyo `os`/`cpu` coinciden: `win-x64` (CPU, ≈ 46 MB, el único que se conserva), `win-x64-cuda` (≈ 175 MB), `win-x64-cuda-ext` (≈ 368 MB), `win-x64-vulkan` (≈ 103 MB) y `win-arm64` (declara también x64). La poda conserva solo `@node-llama-cpp/win-x64` (la app usa solo CPU: `gpu: false`) y quita `node-llama-cpp/llama/gitRelease.bundle` (≈ 34 MB, código fuente de llama.cpp para compilar, cosa que la app nunca hace: `build: 'never'`). `build-payload.mjs` falla si falta `@node-llama-cpp/win-x64`. Los modelos (1–2,5 GB) **no** van en el instalador: se descargan desde la aplicación a `%LOCALAPPDATA%\SocialDesk\data\models`, que la desinstalación conserva.
+- `typescript` y `@typescript/*`: `node-llama-cpp` declara `typescript` como dependencia *peer* opcional, así que npm la marca `devOptional` y `npm ci --omit=dev` la instala igual. Se poda (la app no la usa en ejecución); la comprobación de fuga de dependencias de desarrollo ahora mira `@types/node` antes de podar y `typescript` después.
 - Solo se extrae `node.exe` del zip oficial (sin npm ni corepack). El lector ZIP es Node puro (`lib/zip.mjs`): funciona igual en Windows y Linux, se prueba en `tests/windows-packaging.test.ts` y verifica tamaño y CRC-32 de cada archivo.
 
 ## Cómo funciona el lanzador

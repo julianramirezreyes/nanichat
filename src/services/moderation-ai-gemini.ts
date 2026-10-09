@@ -14,6 +14,9 @@ export const GEMINI_MODEL_PATTERN = /^gemini-[0-9a-z.-]+$/u;
 export const GEMINI_TIMEOUT_MS = 20_000;
 export const GEMINI_MAX_RETRY_DELAY_MS = 60_000;
 export const GEMINI_RATE_LIMIT_RETRIES = 3;
+/** Comments per request and minimum pause between two requests (free-tier friendly). */
+export const GEMINI_CHUNK_SIZE = 40;
+export const GEMINI_CHUNK_SPACING_MS = 4000;
 const DEFAULT_RATE_LIMIT_DELAY_MS = 15_000;
 const UNAVAILABLE_RETRY_DELAY_MS = 2_000;
 const RESPONSE_LIMIT_BYTES = 256 * 1024;
@@ -83,6 +86,8 @@ export function createGeminiEngine(options: GeminiEngineOptions): ModerationAiEn
   }
 
   return {
+    chunkSize: GEMINI_CHUNK_SIZE,
+    spacingMs: GEMINI_CHUNK_SPACING_MS,
     async classify(batch, signal) {
       let rateLimitRetries = 0;
       let unavailableRetries = 0;

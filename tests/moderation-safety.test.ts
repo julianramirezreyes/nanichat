@@ -438,12 +438,15 @@ test('Docs: README, REFERENCIA-TECNICA and AGENTS describe the moderation rules'
   assert.match(readme, /Nada se borra nunca automáticamente/);
   const reference = read('../docs/REFERENCIA-TECNICA.md');
   for (const fragment of ['nada se borra nunca automáticamente', 'not_attempted', 'confirmation_required', 'account_invalid_or_held',
-    '7 o más dígitos', '3 o más', '10 s', 'DELETE /{comment-id}', 'transmisiones en vivo', 'Esquema (v16, ampliado en v17)', 'moderation_rate_limited',
+    '7 o más dígitos', '3 o más', '10 s', 'DELETE /{comment-id}', 'transmisiones en vivo', 'Esquema (v16, ampliado en v17 y v18)', 'moderation_rate_limited',
     '### Revisión con IA', 'x-goog-api-key', 'ai_rate_limited', 'ai_job_running', 'moderation_ai_jobs', 'confirmed: true']) {
     assert.ok(reference.includes(fragment), fragment);
   }
   const agents = read('../AGENTS.md');
-  assert.match(agents, /esquema v1\.\.v17/);
+  assert.match(agents, /esquema v1\.\.v18/);
+  assert.match(agents, /moderation-ai-local/);
+  assert.ok(reference.includes('### Modelo local') && reference.includes('/api/moderation/ai-local/download'), 'local model documented');
+  assert.match(readme, /Modelo local: gratis y 100 % privado/);
   assert.match(agents, /moderation-ai/);
   assert.match(readme, /### Revisión con IA/);
   assert.match(agents, /moderation-rules/);

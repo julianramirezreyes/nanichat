@@ -7,8 +7,11 @@ import { AI_CATEGORIES, type AiCategory } from './moderation-ai-prompt.ts';
  * - ai_request_rejected: any other 4xx, including other 400s (for example an unknown model; the job stops, no retry).
  * - ai_unavailable: 5xx, timeout or network failure after one retry (the chunk fails, the job continues).
  * - ai_invalid_output: the answer is not a JSON object (the chunk's entries count as invalid output).
+ * - ai_local_unavailable: the local runtime or model could not be loaded (native binary, missing or broken file, memory;
+ *   the job stops). The reason goes to the server log, redacted.
  */
-export type ModerationAiErrorCode = 'ai_rate_limited' | 'ai_auth_failed' | 'ai_request_rejected' | 'ai_unavailable' | 'ai_invalid_output';
+export type ModerationAiErrorCode = 'ai_rate_limited' | 'ai_auth_failed' | 'ai_request_rejected' | 'ai_unavailable' | 'ai_invalid_output'
+  | 'ai_local_unavailable';
 
 export class ModerationAiError extends Error {
   constructor(readonly code: ModerationAiErrorCode) {
@@ -20,8 +23,13 @@ export class ModerationAiError extends Error {
 /**
  * An AI engine classifies one chunk: `{ "<key>": "<comment text>" }` → `{ "<key>": "<category>" }`.
  * The answer is untrusted; callers run it through sanitizeAiResult.
+ *
+ * `chunkSize` (comments per request, default AI_CHUNK_SIZE) and `spacingMs` (pause between two chunks, default 0) are
+ * engine properties: Gemini spaces its requests for the free tier, the local model does not need to.
  */
 export interface ModerationAiEngine {
+  readonly chunkSize?: number;
+  readonly spacingMs?: number;
   classify(batch: Record<string, string>, signal?: AbortSignal): Promise<Record<string, string>>;
 }
 

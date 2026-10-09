@@ -417,6 +417,24 @@ body, html, .app-container {
 .ai-key-row { display: grid; gap: 0; }
 .ai-key-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
 .ai-key-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.ai-local { display: grid; gap: 8px; margin-top: 14px; }
+.ai-local-note { margin: 0; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; background: var(--green-soft); color: var(--green); font-size: 13px; font-weight: 650; line-height: 1.45; }
+.ai-local-note svg { flex: none; }
+.ai-local > .hint { display: flex; align-items: center; gap: 6px; margin: 0; }
+.ai-local > .hint svg { flex: none; }
+.ai-local-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 4px; }
+.ai-local-card { display: grid; gap: 6px; align-content: start; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
+.ai-local-card.in-use { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
+.ai-local-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ai-local-card p { margin: 0; overflow-wrap: anywhere; }
+.ai-local-card .muted { font-size: 13px; }
+.ai-installed { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 12px; font-weight: 700; }
+.ai-in-use { font-size: 13px; font-weight: 700; color: var(--green); }
+.ai-download { display: grid; gap: 4px; }
+.ai-download .progress-text { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ai-local-error { color: var(--red); }
+.ai-local-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.ai-local-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .ai-run { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
 .ai-run .btn-main { display: inline-flex; align-items: center; gap: 8px; }
 .ai-window { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); font-weight: 600; }

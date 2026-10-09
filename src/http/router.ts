@@ -15,6 +15,7 @@ import { followGateAvailable } from '../services/follow-gate-rules.ts';
 import type { ImportedMetaEnvironment } from '../security/env-import.ts';
 import * as moderation from '../services/moderation.ts';
 import { ModerationAiServiceError, type ModerationAiService } from '../services/moderation-ai.ts';
+import { LocalModelError, type LocalModelManager } from '../services/moderation-ai-local-model.ts';
 
 const BODY_LIMIT = 64 * 1024;
 const PAGE_LIMIT = 100;
@@ -32,6 +33,8 @@ export type ApiDependencies = {
   provider?: SocialProvider;
   /** AI comment review (off by default per account); never calls Meta. */
   moderationAi?: ModerationAiService;
+  /** Local AI model files (global to the installation, under <data>/models): status, single download, cancel. */
+  localModels?: LocalModelManager;
   /** Server clock (ms); injectable for deterministic expiry tests. */
   clock?: () => number;
   importEnvironment?: () => Promise<ImportedMetaEnvironment>;
@@ -80,7 +83,7 @@ export function createApiHandler(deps: ApiDependencies) {
         else if (error.message === 'not_found') error = new ApiError(404, error.message);
         else if (error.message === 'invalid_state' || error.message === 'account_invalid_or_held') error = new ApiError(409, error.message);
       }
-      if (error instanceof ModerationAiServiceError) return send(response, error.status, { error: error.code });
+      if (error instanceof ModerationAiServiceError || error instanceof LocalModelError) return send(response, error.status, { error: error.code });
       if (error instanceof QueueReadbackError) return send(response, error.status, { error: error.code });
       const status = error instanceof ApiError ? error.status : error instanceof TypeError ? 400 : 409;
       const code = error instanceof ApiError ? error.code
@@ -439,6 +442,22 @@ async function route(
   }
   if (path === '/api/moderation/ai-review/stop' && method === 'POST') {
     return send(response, 200, requireService(deps.moderationAi, 'moderation_ai').stop(accountId(body.accountId, db)));
+  }
+  // Local AI models: global to this installation (not per account). Downloads only from pinned Hugging Face URLs.
+  if (path === '/api/moderation/ai-local/status' && method === 'GET') {
+    requireService(deps.moderationAi, 'moderation_ai');
+    return send(response, 200, requireService(deps.localModels, 'moderation_ai').status());
+  }
+  if (path === '/api/moderation/ai-local/download' && method === 'POST') {
+    requireService(deps.moderationAi, 'moderation_ai');
+    return send(response, 202, await requireService(deps.localModels, 'moderation_ai').startDownload(body.model));
+  }
+  if (path === '/api/moderation/ai-local/download/cancel' && method === 'POST') {
+    requireService(deps.moderationAi, 'moderation_ai');
+    return send(response, 200, requireService(deps.localModels, 'moderation_ai').cancel());
+  }
+  if (path === '/api/moderation/ai-local/delete' && method === 'POST') {
+    return send(response, 200, await requireService(deps.moderationAi, 'moderation_ai').deleteLocalModel(body.model, body.confirmed));
   }
   const modHideMatch = /^\/api\/moderation\/flags\/([^\/]+)\/hide$/.exec(path);
   if (modHideMatch && method === 'POST') {

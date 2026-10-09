@@ -137,15 +137,32 @@ test('the payload keeps only runtime files: no build cache, traces, SWC, sharp o
   for (const pruned of [
     join('@next', 'swc-win32-x64-msvc'), join('@next', 'swc-linux-x64-gnu', 'next-swc.node'), 'sharp', join('@img', 'sharp-win32-x64'),
     join('next', 'dist', 'server', 'next.js.map'), join('next', 'dist', 'docs'), join('react', 'README.md'), join('tsx', 'dist', 'index.d.ts'),
+    // Local AI: GPU variants (CUDA/Vulkan, 100-370 MB each), other platforms, the llama.cpp source bundle (only used to
+    // compile, and the app never compiles: build 'never') and the TypeScript compiler (an optional peer of node-llama-cpp).
+    join('@node-llama-cpp', 'win-x64-cuda'), join('@node-llama-cpp', 'win-x64-cuda-ext', 'bins', 'x.dll'), join('@node-llama-cpp', 'win-x64-vulkan'),
+    join('@node-llama-cpp', 'win-arm64'), join('@node-llama-cpp', 'linux-x64'), join('node-llama-cpp', 'llama', 'gitRelease.bundle'),
+    'typescript', join('@typescript', 'typescript-win32-x64'),
   ]) {
     assert.equal(isPrunedFromNodeModules(pruned), true, pruned);
   }
   for (const kept of [
     join('next', 'dist', 'server', 'next.js'), join('tsx', 'dist', 'esm', 'api', 'index.mjs'), join('@esbuild', 'win32-x64', 'esbuild.exe'),
     join('@next', 'env', 'dist', 'index.js'), join('react', 'LICENSE'), join('next', 'package.json'),
+    // The CPU prebuilt binary for win-x64 and the runtime itself must survive the pruning.
+    join('@node-llama-cpp', 'win-x64'), join('@node-llama-cpp', 'win-x64', 'bins', 'win-x64', 'llama-addon.node'),
+    join('@node-llama-cpp', 'win-x64', 'bins', 'win-x64', 'ggml-cpu-haswell.dll'), join('@node-llama-cpp', 'win-x64', 'package.json'),
+    join('node-llama-cpp', 'dist', 'index.js'), join('node-llama-cpp', 'llama', 'llama.cpp.info.json'), join('node-llama-cpp', 'llama', 'binariesGithubRelease.json'),
   ]) {
     assert.equal(isPrunedFromNodeModules(kept), false, kept);
   }
+});
+
+test('build-payload checks the win-x64 llama binary and that no dev or TypeScript package survives the pruning', () => {
+  const script = readFileSync(join('packaging', 'windows', 'build-payload.mjs'), 'utf8');
+  assert.match(script, /'@node-llama-cpp', 'win-x64'/u);
+  assert.match(script, /@types/u, 'dev leakage is detected with a dev-only package');
+  const afterPrune = script.slice(script.indexOf('pruneNodeModules(nodeModules)'));
+  assert.match(afterPrune, /existsSync\(join\(nodeModules, 'typescript'\)\)/u, 'typescript is checked after pruning');
 });
 
 test('the generated application icon is a valid multi-size ICO with 32-bit images', async () => {

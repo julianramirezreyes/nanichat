@@ -4,19 +4,24 @@ import type { CredentialVault } from '../security/vault.ts';
 import { normalizeMatchText } from './automations.ts';
 import { commentTimeSql } from './moderation.ts';
 import { ModerationAiError, sanitizeAiResult, type ModerationAiEngine } from './moderation-ai-engine.ts';
-import { GEMINI_DEFAULT_MODEL, GEMINI_MODELS, createGeminiEngine, isAllowedGeminiModel } from './moderation-ai-gemini.ts';
+import {
+  GEMINI_CHUNK_SIZE, GEMINI_CHUNK_SPACING_MS, GEMINI_DEFAULT_MODEL, GEMINI_MODELS, createGeminiEngine, isAllowedGeminiModel,
+} from './moderation-ai-gemini.ts';
+import { LOCAL_DEFAULT_MODEL, isLocalModelId, type LocalModelStatusDto } from './moderation-ai-local-model.ts';
 import type { AiFlagCategory } from './moderation-ai-prompt.ts';
 
 /**
- * AI comment review (moderation PR 2). The operator starts a batch job; the job sends the account's unflagged comments
- * in chunks to the configured engine and turns every non-neutral answer into a PENDING flag with source 'ai'. It only
- * creates flags: it never calls Meta (hiding/deleting stays with the PR 1 tools). AI is off by default.
+ * AI comment review (moderation PR 2 + 3). The operator starts a batch job; the job sends the account's unflagged
+ * comments in chunks to the configured engine (Gemini, or the local model that runs in this process) and turns every
+ * non-neutral answer into a PENDING flag with source 'ai'. It only creates flags: it never calls Meta (hiding/deleting
+ * stays with the PR 1 tools). AI is off by default.
  */
-export const AI_CHUNK_SIZE = 40;
+/** Default chunk size when an engine does not declare one (Gemini declares 40, the local model 10). */
+export const AI_CHUNK_SIZE = GEMINI_CHUNK_SIZE;
 export const AI_MAX_COMMENTS = 2000;
 export const AI_TEXT_LIMIT = 500;
-/** Minimum spacing between two chunk requests (free-tier friendly). */
-export const AI_CHUNK_SPACING_MS = 4000;
+/** Gemini's spacing between two chunk requests (free-tier friendly). The spacing is an engine property: local has none. */
+export const AI_CHUNK_SPACING_MS = GEMINI_CHUNK_SPACING_MS;
 export const AI_WINDOWS = ['24h', '3d', '7d', '30d'] as const;
 export type AiWindow = typeof AI_WINDOWS[number];
 export type AiEngineName = 'off' | 'gemini' | 'local';
@@ -46,7 +51,11 @@ export class ModerationAiServiceError extends Error {
 
 export type AiSettingsDto = {
   engine: AiEngineName;
+  /** Gemini model. */
   model: string;
+  /** Local model id (qwen2.5-1.5b | qwen3-4b) and whether its file is installed. */
+  localModel: string;
+  localModelInstalled: boolean;
   hasApiKey: boolean;
   apiKeyHint: string | null;
   consentAt: string | null;
@@ -68,22 +77,32 @@ export type AiJobDto = {
   finishedAt?: string;
 };
 
-export type EngineConfig = { engine: 'gemini'; model: string; apiKey: string };
+export type EngineConfig = { engine: 'gemini'; model: string; apiKey: string } | { engine: 'local'; model: string };
+
+/** The parts of LocalModelManager the service uses (installed check, deletion). */
+export type LocalModelsPort = {
+  isInstalled(id: string): boolean;
+  delete?(model: unknown, confirmed: unknown): Promise<LocalModelStatusDto>;
+};
+/** The parts of LocalAiRuntime the service uses. */
+export type LocalRuntimePort = { engine(modelId: string): ModerationAiEngine; unload(): Promise<void> };
 
 export type ModerationAiOptions = {
   engineFactory?: (config: EngineConfig) => ModerationAiEngine;
+  localModels?: LocalModelsPort;
+  localRuntime?: LocalRuntimePort;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   now?: () => number;
 };
 
 type SettingsRow = {
-  engine: AiEngineName; model: string | null; api_key_nonce: string | null; api_key_ciphertext: string | null;
+  engine: AiEngineName; model: string | null; local_model: string | null; api_key_nonce: string | null; api_key_ciphertext: string | null;
   api_key_tag: string | null; api_key_hint: string | null; consent_at: string | null;
 };
 
-type Running = { jobId: string; controller: AbortController; done: Promise<void> };
+type Running = { jobId: string; controller: AbortController; done: Promise<void>; config: EngineConfig };
 
-const STOP_JOB_CODES = new Set(['ai_rate_limited', 'ai_auth_failed', 'ai_request_rejected']);
+const STOP_JOB_CODES = new Set(['ai_rate_limited', 'ai_auth_failed', 'ai_request_rejected', 'ai_local_unavailable']);
 
 const defaultSleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) => {
   if (signal?.aborted) return resolve();
@@ -96,13 +115,21 @@ export class ModerationAiService {
   private readonly engineFactory: (config: EngineConfig) => ModerationAiEngine;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   private readonly now: () => number;
+  private readonly localModels: LocalModelsPort | undefined;
+  private readonly localRuntime: LocalRuntimePort | undefined;
 
   constructor(
     private readonly database: DatabaseSync,
     private readonly vault: CredentialVault,
     options: ModerationAiOptions = {},
   ) {
-    this.engineFactory = options.engineFactory ?? ((config) => createGeminiEngine({ apiKey: config.apiKey, model: config.model }));
+    this.localModels = options.localModels;
+    this.localRuntime = options.localRuntime;
+    this.engineFactory = options.engineFactory ?? ((config) => {
+      if (config.engine === 'gemini') return createGeminiEngine({ apiKey: config.apiKey, model: config.model });
+      if (!this.localRuntime) throw new ModerationAiServiceError(409, 'ai_engine_unavailable');
+      return this.localRuntime.engine(config.model);
+    });
     this.sleep = options.sleep ?? defaultSleep;
     this.now = options.now ?? Date.now;
   }
@@ -110,15 +137,22 @@ export class ModerationAiService {
   // ---------- Settings ----------
 
   private row(accountId: string): SettingsRow | undefined {
-    return this.database.prepare(`SELECT engine, model, api_key_nonce, api_key_ciphertext, api_key_tag, api_key_hint, consent_at
+    return this.database.prepare(`SELECT engine, model, local_model, api_key_nonce, api_key_ciphertext, api_key_tag, api_key_hint, consent_at
       FROM moderation_ai_settings WHERE account_id=?`).get(accountId) as SettingsRow | undefined;
+  }
+
+  private localModelOf(row: SettingsRow | undefined): string {
+    return row?.local_model && isLocalModelId(row.local_model) ? row.local_model : LOCAL_DEFAULT_MODEL;
   }
 
   getSettings(accountId: string): AiSettingsDto {
     const row = this.row(accountId);
+    const localModel = this.localModelOf(row);
     return {
       engine: row?.engine ?? 'off',
       model: row?.model && isAllowedGeminiModel(row.model) ? row.model : GEMINI_DEFAULT_MODEL,
+      localModel,
+      localModelInstalled: this.localModels?.isInstalled(localModel) ?? false,
       hasApiKey: Boolean(row?.api_key_ciphertext),
       apiKeyHint: row?.api_key_ciphertext ? row.api_key_hint : null,
       consentAt: row?.consent_at ?? null,
@@ -127,19 +161,28 @@ export class ModerationAiService {
   }
 
   /**
-   * engine: 'off' | 'gemini' ('local' is reserved: 409 ai_engine_unavailable). model: optional, allowlisted.
+   * engine: 'off' | 'gemini' | 'local'. model: optional; for 'local' one of the local model ids (stored in local_model),
+   * otherwise an allowlisted Gemini model. 'local' needs that model file installed (409 ai_model_missing) and no consent
+   * (nothing leaves the machine); without a local model manager it stays 409 ai_engine_unavailable.
    * apiKey: write-only; omitted keeps the stored key, '' clears it. Switching to Gemini needs confirmed === true while
-   * no consent was recorded (the privacy disclosure); the consent time is then stored.
+   * no consent was recorded (the privacy disclosure); the consent time is then stored. Switching engines keeps the
+   * Gemini key and model.
    */
   updateSettings(accountId: string, input: { engine: unknown; model?: unknown; apiKey?: unknown; confirmed?: unknown }): AiSettingsDto {
     const engine = input.engine;
-    if (engine === 'local') throw new ModerationAiServiceError(409, 'ai_engine_unavailable');
-    if (engine !== 'off' && engine !== 'gemini') throw new ModerationAiServiceError(400, 'invalid_request');
-    if (input.model !== undefined && !isAllowedGeminiModel(input.model)) throw new ModerationAiServiceError(400, 'ai_model_invalid');
+    if (engine !== 'off' && engine !== 'gemini' && engine !== 'local') throw new ModerationAiServiceError(400, 'invalid_request');
+    const previousRow = this.row(accountId);
+    let localModel = this.localModelOf(previousRow);
+    if (engine === 'local') {
+      if (!this.localModels) throw new ModerationAiServiceError(409, 'ai_engine_unavailable');
+      if (input.model !== undefined && !isLocalModelId(input.model)) throw new ModerationAiServiceError(400, 'ai_model_invalid');
+      if (typeof input.model === 'string') localModel = input.model;
+      if (!this.localModels.isInstalled(localModel)) throw new ModerationAiServiceError(409, 'ai_model_missing');
+    } else if (input.model !== undefined && !isAllowedGeminiModel(input.model)) throw new ModerationAiServiceError(400, 'ai_model_invalid');
     if (input.apiKey !== undefined && input.apiKey !== '' && (typeof input.apiKey !== 'string' || !API_KEY_PATTERN.test(input.apiKey))) {
       throw new ModerationAiServiceError(400, 'ai_key_invalid');
     }
-    const previous = this.row(accountId);
+    const previous = previousRow;
     const nowIso = new Date(this.now()).toISOString();
     let consentAt = previous?.consent_at ?? null;
     if (engine === 'gemini' && !consentAt) {
@@ -157,19 +200,25 @@ export class ModerationAiService {
       const encrypted = this.vault.encrypt(aiKeyContextId(accountId), input.apiKey);
       secret = { ...encrypted, hint: `…${input.apiKey.slice(-4)}` };
     }
-    const model = typeof input.model === 'string' ? input.model : previous?.model ?? GEMINI_DEFAULT_MODEL;
+    const model = engine !== 'local' && typeof input.model === 'string' ? input.model : previous?.model ?? GEMINI_DEFAULT_MODEL;
     this.database.prepare(`
-      INSERT INTO moderation_ai_settings (account_id, engine, model, api_key_nonce, api_key_ciphertext, api_key_tag, api_key_hint, consent_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(account_id) DO UPDATE SET engine=excluded.engine, model=excluded.model, api_key_nonce=excluded.api_key_nonce,
-        api_key_ciphertext=excluded.api_key_ciphertext, api_key_tag=excluded.api_key_tag, api_key_hint=excluded.api_key_hint,
-        consent_at=excluded.consent_at, updated_at=excluded.updated_at
-    `).run(accountId, engine, model, secret.nonce, secret.ciphertext, secret.tag, secret.hint, consentAt, nowIso);
+      INSERT INTO moderation_ai_settings (account_id, engine, model, local_model, api_key_nonce, api_key_ciphertext, api_key_tag, api_key_hint, consent_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(account_id) DO UPDATE SET engine=excluded.engine, model=excluded.model, local_model=excluded.local_model,
+        api_key_nonce=excluded.api_key_nonce, api_key_ciphertext=excluded.api_key_ciphertext, api_key_tag=excluded.api_key_tag,
+        api_key_hint=excluded.api_key_hint, consent_at=excluded.consent_at, updated_at=excluded.updated_at
+    `).run(accountId, engine, model, localModel, secret.nonce, secret.ciphertext, secret.tag, secret.hint, consentAt, nowIso);
     return this.getSettings(accountId);
   }
 
   private engineConfig(accountId: string): EngineConfig {
     const row = this.row(accountId);
+    if (row?.engine === 'local') {
+      const model = this.localModelOf(row);
+      if (!this.localModels) throw new ModerationAiServiceError(409, 'ai_engine_unavailable');
+      if (!this.localModels.isInstalled(model)) throw new ModerationAiServiceError(409, 'ai_model_missing');
+      return { engine: 'local', model };
+    }
     if (!row?.api_key_ciphertext || !row.api_key_nonce || !row.api_key_tag) throw new ModerationAiServiceError(409, 'ai_key_missing');
     const apiKey = this.vault.decrypt(aiKeyContextId(accountId), { nonce: row.api_key_nonce, ciphertext: row.api_key_ciphertext, tag: row.api_key_tag });
     return { engine: 'gemini', model: row.model && isAllowedGeminiModel(row.model) ? row.model : GEMINI_DEFAULT_MODEL, apiKey };
@@ -222,13 +271,13 @@ export class ModerationAiService {
     if (typeof window !== 'string' || !(AI_WINDOWS as readonly string[]).includes(window)) throw new ModerationAiServiceError(400, 'invalid_request');
     const settings = this.getSettings(accountId);
     if (settings.engine === 'off') throw new ModerationAiServiceError(409, 'ai_disabled');
-    if (settings.engine !== 'gemini') throw new ModerationAiServiceError(409, 'ai_engine_unavailable');
     if (this.running.has(accountId)) throw new ModerationAiServiceError(409, 'ai_job_running');
     const config = this.engineConfig(accountId);
     const engine = this.engineFactory(config);
     const { items, total } = this.scope(accountId, window as AiWindow);
+    const chunkSize = Math.max(1, Math.trunc(engine.chunkSize ?? AI_CHUNK_SIZE));
     const chunks: typeof items[] = [];
-    for (let index = 0; index < items.length; index += AI_CHUNK_SIZE) chunks.push(items.slice(index, index + AI_CHUNK_SIZE));
+    for (let index = 0; index < items.length; index += chunkSize) chunks.push(items.slice(index, index + chunkSize));
     const jobId = randomUUID();
     try {
       this.database.prepare(`INSERT INTO moderation_ai_jobs (job_id, account_id, state, review_window, chunks_total, comments_total, truncated, started_at)
@@ -241,7 +290,7 @@ export class ModerationAiService {
     const done = this.run(jobId, accountId, engine, chunks, controller.signal)
       .catch(() => this.finish(jobId, 'failed', 'ai_engine_error'))
       .finally(() => { this.running.delete(accountId); });
-    this.running.set(accountId, { jobId, controller, done });
+    this.running.set(accountId, { jobId, controller, done, config });
     return { jobId };
   }
 
@@ -253,8 +302,9 @@ export class ModerationAiService {
     const insert = this.database.prepare(`INSERT OR IGNORE INTO moderation_flags
       (flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, created_at, updated_at, settings_version)
       VALUES (?, ?, ?, ?, ?, 'ai', ?, 'PENDING', ?, ?, NULL)`);
+    const spacingMs = Math.max(0, engine.spacingMs ?? 0);
     for (const [index, chunk] of chunks.entries()) {
-      if (index > 0) await this.sleep(AI_CHUNK_SPACING_MS, signal);
+      if (index > 0 && spacingMs > 0) await this.sleep(spacingMs, signal);
       if (signal.aborted) return this.finish(jobId, 'stopped');
       // Chunk-local aliases: the model never sees (nor has to copy) Meta comment ids.
       const byAlias = new Map(chunk.map((item, position) => [`c${position + 1}`, item]));
@@ -315,6 +365,21 @@ export class ModerationAiService {
     if (!running) throw new ModerationAiServiceError(409, 'ai_job_not_running');
     running.controller.abort();
     return this.status(accountId);
+  }
+
+  /**
+   * Deletes an installed local model (confirmed === true). Refused while a running job uses that model; the runtime
+   * is unloaded first (Windows cannot delete a mapped file).
+   */
+  async deleteLocalModel(model: unknown, confirmed: unknown): Promise<LocalModelStatusDto> {
+    if (!this.localModels?.delete) throw new ModerationAiServiceError(409, 'ai_engine_unavailable');
+    if (!isLocalModelId(model)) throw new ModerationAiServiceError(400, 'invalid_request');
+    if (confirmed !== true) throw new Error('confirmation_required');
+    for (const running of this.running.values()) {
+      if (running.config.engine === 'local' && running.config.model === model) throw new ModerationAiServiceError(409, 'model_in_use');
+    }
+    await this.localRuntime?.unload();
+    return this.localModels.delete(model, confirmed);
   }
 
   /** Resolves when the account has no running job (used by tests and shutdown). */

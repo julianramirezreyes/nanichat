@@ -30,6 +30,8 @@ Variables de entorno: `PORT` (por defecto `3000`), `LOCAL_SOCIAL_DATA_DIR` (por 
 
 `tsx` debe seguir en `dependencies` y la configuración de Next.js debe seguir siendo `next.config.mjs`: el instalador de Windows instala solo dependencias de producción y no incluye el compilador SWC.
 
+`node-llama-cpp` (motor del modelo local) va en `dependencies` con versión exacta y **nunca** se importa de forma estática: solo con `import()` dinámico dentro de `src/services/moderation-ai-local.ts`, para que un binario nativo que no carga no impida arrancar. `npm test` nunca carga el módulo real ni un modelo (las pruebas inyectan un módulo falso) ni descarga nada (las descargas usan un `fetch` falso).
+
 Los scripts de `package.json` no deben usar sintaxis de una terminal concreta (`VAR=valor`, `$(...)`, `&&`): deben funcionar en Windows, macOS y Linux. `tests/start-script.test.ts` lo comprueba.
 
 ## Mapa de la arquitectura
@@ -41,7 +43,7 @@ scripts/start.mjs            Arranque de producción portable (NODE_ENV=producti
 src/core/                    config.ts (variables de entorno), application-lock.ts (una instancia por carpeta,
                              sonda de plataforma inyectable: kill(pid, 0) en todos los sistemas, /proc en Linux),
                              domain.ts (tipos compartidos), errors.ts.
-src/db/                      database.ts (SQLite, WAL, foreign keys), migrations.ts (esquema v1..v17),
+src/db/                      database.ts (SQLite, WAL, foreign keys), migrations.ts (esquema v1..v18),
                              repositories.ts (consultas compartidas).
 src/security/                vault.ts (AES-256-GCM, vault.key), redact.ts (borra secretos de textos),
                              env-import.ts (importación explícita del .env de SOCIAL_DESK_IMPORT_ENV_PATH).
@@ -54,7 +56,10 @@ src/services/                connections, automations (clasificación y plantill
                              moderation-rules (clasificación pura de comentarios para moderar) + moderation (marcas,
                              ocultar/mostrar/borrar con intención durable, acciones masivas y auto-ocultar solo en modo real),
                              moderation-ai + moderation-ai-gemini + moderation-ai-prompt + moderation-ai-engine (revisión con IA:
-                             desactivada por defecto, key de Gemini cifrada, lotes que solo crean marcas, nunca llaman a Meta).
+                             desactivada por defecto, key de Gemini cifrada, lotes que solo crean marcas, nunca llaman a Meta),
+                             moderation-ai-local (motor local: node-llama-cpp importado con import() dinámico, solo CPU,
+                             gramática JSON Schema) + moderation-ai-local-model (catálogo GGUF fijado por commit/SHA-256 y
+                             descarga única verificada a <LOCAL_SOCIAL_DATA_DIR>/models).
 src/http/router.ts           API JSON /api/*: guardas de host, origen y CSRF; DTOs con campos permitidos.
 app/                         Interfaz Next.js (page.tsx) y funciones puras de presentación con pruebas propias.
 tests/                       Pruebas node:test (bases de datos temporales, proveedores simulados).

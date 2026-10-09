@@ -94,14 +94,15 @@ Todos los comandos siguientes se ejecutan **dentro** de la carpeta `social-autom
 npm install
 ```
 
-Necesita conexión al registro de npm. Tarda pocos segundos. Puede aparecer este aviso, que es inofensivo:
+Necesita conexión al registro de npm. Tarda de unos segundos a un par de minutos: `node-llama-cpp` (el motor del modelo local de la revisión con IA) descarga sus binarios precompilados para el sistema, y en Linux y Windows npm también instala las variantes para GPU (CUDA, Vulkan), que ocupan varios cientos de MB en `node_modules` aunque la aplicación solo usa la de CPU. Puede aparecer este aviso, que es inofensivo:
 
 ```text
-npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+npm warn install-scripts 2 packages have install scripts not yet covered by allowScripts:
 npm warn install-scripts   esbuild@… (postinstall: node install.js)
+npm warn install-scripts   node-llama-cpp@… (postinstall: node ./dist/cli/cli.js postinstall)
 ```
 
-El binario de `esbuild` (que usa `tsx`) llega en un paquete opcional por plataforma; no hace falta aprobar ese script.
+Los binarios de `esbuild` (que usa `tsx`) y de `node-llama-cpp` llegan en paquetes opcionales por plataforma; no hace falta aprobar esos scripts ni tener un compilador. `npm audit` puede listar avisos de `simple-git` (dependencia de `node-llama-cpp` que solo se usa para compilar llama.cpp desde el código fuente, algo que la aplicación nunca hace). El modelo en sí (~1 GB o ~2,5 GB) **no** se descarga al instalar: lo descarga el humano desde la aplicación si quiere usar el modelo local.
 
 ## Paso 4: compilar
 
@@ -233,6 +234,7 @@ El siguiente paso (conectar un token de Meta) lo hace **el humano** desde la pan
 | `Another next dev server is already running in this directory.` | Ya hay un `npm run dev` (o el servidor de las pruebas) en esta carpeta. | Detén ese servidor de desarrollo, o usa `npm start` (modo producción). |
 | `421` con `{"error":"invalid_local_host"}` | Entraste con un nombre de host distinto de `127.0.0.1` o `localhost` (otra IP, un dominio, un proxy). | Abre `http://localhost:<puerto>` desde la misma máquina. |
 | `403` con `{"error":"origin_or_csrf_rejected"}` al llamar la API con `curl` | Las escrituras exigen el mismo origen y un token CSRF. | Es lo esperado: usa la interfaz web. Solo `GET /api/health` está pensado para verificaciones por línea de comandos. |
+| La revisión con el modelo local termina con «El modelo local no pudo cargarse en este equipo…» (`ai_local_unavailable`) | El binario de `node-llama-cpp` no cargó en este sistema, o falta memoria, o el archivo del modelo está dañado. La causa exacta queda en el registro del servidor (línea `[moderation-ai] ai_local_unavailable`). | Prueba el modelo más pequeño (Qwen2.5 1.5B) o bórralo y descárgalo de nuevo desde la aplicación. La aplicación sigue funcionando sin el modelo local. |
 | En Windows, `'NODE_ENV' is not recognized…` | Tienes una versión anterior cuyo `npm start` usaba sintaxis de Unix. | Actualiza (`git pull`): ahora `npm start` es `node scripts/start.mjs` y funciona en PowerShell y `cmd`. |
 
 ## Reglas de seguridad para la IA

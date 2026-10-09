@@ -3,7 +3,7 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { autoSelectAccount } from './account-filter';
 import { mediaLabel, mediaTypeLabel, shortCaption, shortId } from './media-label';
-import { AI_COMPLAINT_HINT, AI_ERROR_LABELS, AI_PRIVACY_NOTICE, AI_WINDOW_LABELS, AUTO_HIDE_OPTIONS, aiJobSummary, aiProgressPercent, aiProgressText, availableActions, bulkAllowed, bulkSummary, categoryLabel, reasonsText, stateLabel as moderationStateLabel, type BulkResultView } from './moderation-labels';
+import { AI_COMPLAINT_HINT, AI_ERROR_LABELS, AI_LOCAL_PRIVACY_NOTE, AI_LOCAL_RESOURCE_NOTE, AI_PRIVACY_NOTICE, AI_WINDOW_LABELS, LOCAL_MODEL_INFO, aiReviewGate, localModelCardState, type DownloadView, type LocalModelEntryView, AUTO_HIDE_OPTIONS, aiJobSummary, aiProgressPercent, aiProgressText, availableActions, bulkAllowed, bulkSummary, categoryLabel, reasonsText, stateLabel as moderationStateLabel, type BulkResultView } from './moderation-labels';
 import { autoPickAutomation, describeQueuePayload, type PendingItem, type PendingPage } from './pending-review';
 import { GENERAL_MEDIA_OPTION, automationTargetLabel, automationTargetPayload } from './automation-scope';
 import { deriveOnboarding, showOnboarding as shouldShowOnboarding } from './onboarding';
@@ -15,7 +15,7 @@ import { ATTACHMENT_ERROR_LABELS, attachmentErrorHint, attachmentPartStateLabel,
 import {
   FOLLOW_GATE_RETIRED_LABEL, MEDIA_LINK_TIP, followGateErrorHint, followGateEventLabel, followGateStateLabel, showFollowGateDetail,
 } from './follow-gate';
-import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff, Sparkles, KeyRound } from 'lucide-react';
+import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff, Sparkles, KeyRound, Download, Cpu } from 'lucide-react';
 import { PUBLIC_REPLY_SAMPLE_USERNAME, describePublicReply, parseVariantLines, previewExamples, publicReplyErrorHint, type PublicReplyDto, variantCountLabel } from './public-reply';
 
 type Account = { accountId: string; connectionId: string; username: string; status: string; monitoringPaused: boolean; sendHoldReason?: string | null; last_sync?: string; last_error?: string; coverage?: string };
@@ -1103,11 +1103,16 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
   </div>;
 }
 
+type LocalStatusView = { models: Array<LocalModelEntryView & { label: string }>; download?: DownloadView | null };
+
 type AiJobView = { state: string; errorCode?: string; progress?: { chunksDone: number; chunksTotal: number; commentsSent: number; flagged: number; invalidOutput: number; chunksFailed?: number; commentsTotal?: number; truncated?: boolean } };
 
 /** "Revisión con IA": engine selector (off by default), Gemini key/model, privacy notice and the batch review job. */
 function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsChanged }: { accountId: string; api: Api; act: Act; confirm: Confirm; onShowAiFlags(): void; onFlagsChanged(): void }) {
-  const [settings, setSettings] = useState<{ engine: string; model: string; hasApiKey: boolean; apiKeyHint: string | null; consentAt: string | null; availableModels: string[] } | null>(null);
+  const [settings, setSettings] = useState<{ engine: string; model: string; localModel?: string; localModelInstalled?: boolean; hasApiKey: boolean; apiKeyHint: string | null; consentAt: string | null; availableModels: string[] } | null>(null);
+  const [localStatus, setLocalStatus] = useState<LocalStatusView | null>(null);
+  // "Modelo local" was picked but no model is installed yet: show the cards without saving the engine.
+  const [localPicked, setLocalPicked] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [reviewWindow, setReviewWindow] = useState('7d');
   const [job, setJob] = useState<AiJobView | null>(null);
@@ -1129,6 +1134,31 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
 
   useEffect(() => { void loadAll(); }, [loadAll]);
 
+  const loadLocal = useCallback(async () => {
+    try {
+      const next = await api('/api/moderation/ai-local/status');
+      setLocalStatus(next && Array.isArray(next.models) ? next : null);
+    } catch {
+      // Keep the last known cards.
+    }
+  }, [api]);
+
+  const showLocal = localPicked || settings?.engine === 'local';
+  useEffect(() => { if (showLocal) void loadLocal(); }, [showLocal, loadLocal]);
+
+  const downloading = localStatus?.download?.state === 'running';
+  useEffect(() => {
+    if (!downloading) return;
+    const timer = setInterval(async () => {
+      try {
+        const next = await api('/api/moderation/ai-local/status');
+        setLocalStatus(next && Array.isArray(next.models) ? next : null);
+        if (next?.download?.state !== 'running') void loadAll();
+      } catch { /* keep polling */ }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [downloading, api, loadAll]);
+
   const running = job?.state === 'running';
   useEffect(() => {
     if (!running) {
@@ -1144,7 +1174,14 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
   }, [running, api, accountId, onFlagsChanged]);
 
   async function chooseEngine(engine: string) {
-    if (!settings || engine === settings.engine) return;
+    if (!settings) return;
+    if (engine === 'local' && !settings.localModelInstalled) {
+      // Nothing to save yet: the engine is stored once a model is installed and chosen.
+      setLocalPicked(true);
+      return;
+    }
+    setLocalPicked(false);
+    if (engine === settings.engine) return;
     let confirmed = false;
     if (engine === 'gemini' && !settings.consentAt) {
       if (!(await confirm({ title: 'Activar revisión con Gemini', body: AI_PRIVACY_NOTICE, confirmLabel: 'Entiendo, activar' }))) return;
@@ -1152,7 +1189,35 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
     }
     await act(async () => {
       setSettings(await api('/api/moderation/ai-settings', 'PUT', { accountId, engine, confirmed }));
-    }, engine === 'off' ? 'Revisión con IA desactivada.' : 'Revisión con Gemini activada.');
+    }, engine === 'off' ? 'Revisión con IA desactivada.' : engine === 'local' ? 'Revisión con el modelo local activada.' : 'Revisión con Gemini activada.');
+  }
+
+  async function activateLocalModel(model: string) {
+    const ok = await act(async () => {
+      setSettings(await api('/api/moderation/ai-settings', 'PUT', { accountId, engine: 'local', model }));
+    }, 'Revisión con el modelo local activada.');
+    if (ok) setLocalPicked(false);
+  }
+
+  async function downloadModel(model: string) {
+    await act(async () => {
+      setLocalStatus(await api('/api/moderation/ai-local/download', 'POST', { model }));
+    }, 'Descarga iniciada.');
+  }
+
+  async function cancelDownload() {
+    await act(async () => {
+      setLocalStatus(await api('/api/moderation/ai-local/download/cancel', 'POST', {}));
+    }, 'Descarga cancelada. Podrá reanudarla después.');
+  }
+
+  async function deleteModel(entry: LocalModelEntryView & { label: string }) {
+    const size = (entry.sizeBytes / 1e9).toFixed(1).replace('.', ',');
+    if (!(await confirm({ title: 'Borrar modelo', body: `Se borrará el archivo del modelo (${size} GB) de este equipo. Podrá descargarlo de nuevo cuando quiera.`, confirmLabel: 'Borrar', danger: true }))) return;
+    const ok = await act(async () => {
+      setLocalStatus(await api('/api/moderation/ai-local/delete', 'POST', { model: entry.id, confirmed: true }));
+    }, 'Modelo borrado.');
+    if (ok) await loadAll();
   }
 
   async function saveKey(event: FormEvent) {
@@ -1201,14 +1266,15 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
     }, 'Deteniendo la revisión…');
   }
 
-  const engine = settings?.engine ?? 'off';
-  const canReview = engine === 'gemini' && Boolean(settings?.hasApiKey) && !running;
-  const disabledHint = engine === 'off' ? 'Active la revisión con IA para usar este botón.'
-    : !settings?.hasApiKey ? 'Guarde una API key de Gemini antes de revisar.' : '';
+  const engine = localPicked ? 'local' : settings?.engine ?? 'off';
+  const savedEngine = settings?.engine ?? 'off';
+  const { canReview, hint: disabledHint } = aiReviewGate({
+    savedEngine, localPicked, running, hasApiKey: Boolean(settings?.hasApiKey), localModelInstalled: Boolean(settings?.localModelInstalled),
+  });
   const engines: Array<{ value: string; label: string; disabled?: boolean }> = [
     { value: 'off', label: 'Desactivada' },
     { value: 'gemini', label: 'Gemini' },
-    { value: 'local', label: 'Modelo local (próximamente)', disabled: true },
+    { value: 'local', label: 'Modelo local' },
   ];
 
   return <section className="panel ai-panel" aria-labelledby="ai-review-title">
@@ -1223,7 +1289,41 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
         className={engine === option.value ? 'ai-engine active' : 'ai-engine'} onClick={() => chooseEngine(option.value)}>{option.label}</button>)}
     </div>
     {running && <p className="hint ai-engine-locked">Detenga la revisión para cambiar el motor.</p>}
-    <p className="ai-privacy" role="note">{AI_PRIVACY_NOTICE}</p>
+    {engine !== 'local' && <p className="ai-privacy" role="note">{AI_PRIVACY_NOTICE}</p>}
+    {engine === 'local' && settings && <div className="ai-local">
+      <p className="ai-local-note" role="note"><ShieldCheck size={16} aria-hidden="true" /> {AI_LOCAL_PRIVACY_NOTE}</p>
+      <p className="hint"><Cpu size={14} aria-hidden="true" /> {AI_LOCAL_RESOURCE_NOTE}</p>
+      <div className="ai-local-models">
+        {(localStatus?.models ?? []).map((entry) => {
+          const card = localModelCardState(entry, localStatus?.download);
+          const info = LOCAL_MODEL_INFO[entry.id] ?? { title: entry.label, detail: '' };
+          const inUse = savedEngine === 'local' && settings.localModel === entry.id;
+          return <article key={entry.id} className={inUse ? 'ai-local-card in-use' : 'ai-local-card'} aria-label={info.title}>
+            <div className="ai-local-card-head">
+              <strong>{info.title}</strong>
+              {card.kind === 'installed' && <span className="ai-installed"><CheckCircle2 size={14} aria-hidden="true" /> Instalado</span>}
+            </div>
+            <p className="muted">{info.detail}</p>
+            {card.kind === 'downloading' && <div className="ai-download">
+              <div className="progress-track" role="progressbar" aria-label="Progreso de la descarga" aria-valuemin={0} aria-valuemax={100} aria-valuenow={card.percent ?? 0} aria-valuetext={card.progressText}>
+                <div className="progress-fill" style={{ width: `${card.percent ?? 0}%` }} />
+              </div>
+              <p className="progress-text">{card.progressText}</p>
+            </div>}
+            {card.message && <p className={card.kind === 'failed' ? 'hint ai-local-error' : 'hint'} role={card.kind === 'failed' ? 'alert' : undefined}>{card.message}</p>}
+            <div className="ai-local-actions">
+              {(card.kind === 'idle' || card.kind === 'failed' || card.kind === 'cancelled') && <button className="btn small" type="button" disabled={!card.canDownload} onClick={() => downloadModel(entry.id)}><Download size={14} aria-hidden="true" /> {card.downloadLabel}</button>}
+              {card.canCancel && <button className="btn small" type="button" onClick={cancelDownload}>Cancelar</button>}
+              {card.kind === 'installed' && (inUse
+                ? <span className="ai-in-use">En uso</span>
+                : <button className="btn small" type="button" disabled={running} onClick={() => activateLocalModel(entry.id)}>Usar este modelo</button>)}
+              {card.canDelete && <button className="btn-link" type="button" disabled={running} onClick={() => deleteModel(entry)}>Borrar modelo</button>}
+            </div>
+          </article>;
+        })}
+        {!localStatus && <p className="hint">Cargando modelos…</p>}
+      </div>
+    </div>}
     {engine === 'gemini' && settings && <div className="ai-gemini">
       <form className="ai-key-row" onSubmit={saveKey}>
         <Field label="API key de Gemini">
@@ -1262,7 +1362,7 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
         <p className="progress-text"><strong>{aiProgressText(job.progress)}</strong></p>
         <button className="btn small" type="button" onClick={stopReview}><Pause size={14} aria-hidden="true" /> Detener</button>
       </div>
-      <p className="hint">Se envía un lote cada pocos segundos para respetar el límite gratuito.</p>
+      <p className="hint">{savedEngine === 'local' ? 'El modelo local revisa los lotes en este equipo, uno tras otro.' : 'Se envía un lote cada pocos segundos para respetar el límite gratuito.'}</p>
     </div>}
     {job && !running && job.progress && <div className="ai-summary">
       <p>{aiJobSummary({ state: job.state, errorCode: job.errorCode, progress: job.progress })}</p>

@@ -58,7 +58,7 @@ test('moderation DB migration and actions', () => {
       INSERT OR REPLACE INTO app_state(state_key, state_value, updated_at) VALUES ('dry_run', 'false', '2026');
     `);
 
-    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 17);
+    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 18);
     db.exec(`INSERT INTO moderation_actions(action_id, flag_id, account_id, comment_id, action, actor, mode, outcome, created_at)
       VALUES ('a0', 'f0', 'acc1', 'c1', 'hide', 'operator', 'dry_run', 'simulated', '2026')`);
     assert.throws(() => db.exec(`UPDATE moderation_actions SET outcome='accepted' WHERE action_id='a0'`), /append-only/);

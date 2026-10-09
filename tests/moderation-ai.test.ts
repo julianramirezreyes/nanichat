@@ -11,8 +11,9 @@ import { createVault, type CredentialVault } from '../src/security/vault.ts';
 import { createApiHandler } from '../src/http/router.ts';
 import * as moderation from '../src/services/moderation.ts';
 import {
-  AI_CHUNK_SIZE, AI_CHUNK_SPACING_MS, AI_MAX_COMMENTS, AI_TEXT_LIMIT, ModerationAiService, aiKeyContextId,
+  AI_CHUNK_SIZE, AI_CHUNK_SPACING_MS, AI_MAX_COMMENTS, AI_TEXT_LIMIT, ModerationAiService, aiKeyContextId, type ModerationAiOptions,
 } from '../src/services/moderation-ai.ts';
+import { LocalModelManager } from '../src/services/moderation-ai-local-model.ts';
 import { ModerationAiError, type ModerationAiEngine } from '../src/services/moderation-ai-engine.ts';
 import type { SocialProvider } from '../src/core/domain.ts';
 import * as labels from '../app/moderation-labels.ts';
@@ -93,7 +94,7 @@ function flags(db: DatabaseSync, account = 'acc1') {
 
 // ---------- Schema ----------
 
-test('schema v17: AI categories accepted, unknown rejected, AI tables created and v16 flags preserved', () => {
+test('schema v17+: AI categories accepted, unknown rejected, AI tables created and v16 flags preserved', () => {
   const db = new DatabaseSync(':memory:');
   try {
     migrateDatabase(db, 16);
@@ -104,7 +105,7 @@ test('schema v17: AI categories accepted, unknown rejected, AI tables created an
       INSERT INTO moderation_flags(flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, created_at, updated_at)
         VALUES ('f1', 'acc1', 'm1', 'c1', 'spam_link', 'rules', '[]', 'HIDDEN', '2026', '2026');`);
     migrateDatabase(db);
-    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 17);
+    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 18);
     assert.deepEqual({ ...(db.prepare(`SELECT flag_id, category, state FROM moderation_flags`).get() as object) }, { flag_id: 'f1', category: 'spam_link', state: 'HIDDEN' });
     for (const [index, category] of ['ai_insult', 'ai_hate', 'ai_spam', 'ai_complaint'].entries()) {
       db.prepare(`INSERT INTO moderation_flags(flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, created_at, updated_at)
@@ -130,8 +131,8 @@ test('AI settings: off by default, DTO never exposes the key, only a masked hint
   await withFixture((fixture) => {
     const { instance } = service(fixture, fakeEngine().engine);
     assert.deepEqual(instance.getSettings('acc1'), {
-      engine: 'off', model: 'gemini-2.5-flash-lite', hasApiKey: false, apiKeyHint: null, consentAt: null,
-      availableModels: ['gemini-2.5-flash-lite', 'gemini-2.5-flash'],
+      engine: 'off', model: 'gemini-2.5-flash-lite', localModel: 'qwen2.5-1.5b', localModelInstalled: false, hasApiKey: false, apiKeyHint: null,
+      consentAt: null, availableModels: ['gemini-2.5-flash-lite', 'gemini-2.5-flash'],
     });
     enableGemini(instance);
     const dto = instance.getSettings('acc1');
@@ -268,7 +269,7 @@ test('AI job: chunks of 40, at most 2000 comments (truncation reported), texts c
   await withFixture(async (fixture) => {
     const fake = fakeEngine();
     const sleeps: number[] = [];
-    const { instance } = service(fixture, fake.engine, sleeps);
+    const { instance } = service(fixture, { ...fake.engine, chunkSize: AI_CHUNK_SIZE, spacingMs: AI_CHUNK_SPACING_MS }, sleeps);
     enableGemini(instance);
     const insert = fixture.db.prepare(`INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at)
       VALUES (?, 'acc1', 'm1', ?, 'cliente', ?, '2026', '2026')`);
@@ -373,7 +374,7 @@ test('AI job: a restart marks running jobs as stopped', async () => {
 
 test('server.ts wires the AI service and recovers interrupted jobs at boot', () => {
   const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
-  assert.match(server, /new ModerationAiService\(database, vault\)/);
+  assert.match(server, /new ModerationAiService\(database, vault[,)]/);
   assert.match(server, /moderationAi\.recoverInterrupted\(\)/);
   assert.match(server, /moderationAi[,\s]/);
 });
@@ -409,8 +410,9 @@ test('auto-hide: ai_complaint can never be allowed nor picked; other AI categori
 // ---------- API ----------
 
 async function withApi(fixture: Fixture, instance: ModerationAiService | undefined, provider: SocialProvider,
-  fn: (call: (path: string, method: string, body?: unknown, headers?: Record<string, string>) => Promise<{ status: number; body: any }>) => Promise<void>): Promise<void> {
-  const deps = { database: fixture.db, provider, csrfToken: 'csrf', ...(instance ? { moderationAi: instance } : {}) };
+  fn: (call: (path: string, method: string, body?: unknown, headers?: Record<string, string>) => Promise<{ status: number; body: any }>) => Promise<void>,
+  extra: Record<string, unknown> = {}): Promise<void> {
+  const deps = { database: fixture.db, provider, csrfToken: 'csrf', ...(instance ? { moderationAi: instance } : {}), ...extra };
   const server = createServer(createApiHandler(deps as never));
   server.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -450,7 +452,7 @@ test('API: AI settings, review job and flags source filter; account scoping, CSR
       assert.equal(saved.status, 200);
       assert.equal(saved.body.hasApiKey, true);
       assert.ok(!JSON.stringify(saved.body).includes(KEY));
-      assert.deepEqual(Object.keys(saved.body).sort(), ['apiKeyHint', 'availableModels', 'consentAt', 'engine', 'hasApiKey', 'model']);
+      assert.deepEqual(Object.keys(saved.body).sort(), ['apiKeyHint', 'availableModels', 'consentAt', 'engine', 'hasApiKey', 'localModel', 'localModelInstalled', 'model']);
       assert.equal((await call('/api/moderation/ai-settings?accountId=acc2', 'GET')).body.hasApiKey, false);
       assert.deepEqual(await call('/api/moderation/ai-settings/test', 'POST', { accountId: 'acc1' }), { status: 200, body: { ok: true } });
       assert.deepEqual(await call('/api/moderation/ai-settings/test', 'POST', { accountId: 'acc2' }), { status: 409, body: { error: 'ai_disabled' } });
@@ -510,9 +512,11 @@ test('page: AI review panel between rules and flags, off by default, key link, d
   const flagsPanel = view.indexOf('Comentarios marcados <span');
   assert.ok(rules > 0 && ai > rules && flagsPanel > ai, 'AI panel sits between rules and flags');
   assert.match(page, /Revisar comentarios negativos/);
-  assert.match(page, /Active la revisión con IA para usar este botón\./);
+  assert.match(page, /aiReviewGate\(/);
+  assert.equal(labels.aiReviewGate({ savedEngine: 'off', localPicked: false, hasApiKey: false, localModelInstalled: false, running: false }).hint, 'Active la revisión con IA para usar este botón.');
   assert.match(page, /href="https:\/\/aistudio\.google\.com\/app\/apikey" target="_blank" rel="noreferrer"/);
-  assert.match(page, /Modelo local \(próximamente\)/);
+  assert.doesNotMatch(page, /próximamente/);
+  assert.match(page, /label: 'Modelo local'/);
   assert.match(page, /type="password"/);
   assert.match(page, /Probar key/);
   assert.match(page, /AI_PRIVACY_NOTICE/);
@@ -655,4 +659,264 @@ test('(c) the job scope filters the window and caps in SQL (never loads every co
     assert.ok(largest <= AI_MAX_COMMENTS, `largest .all() returned ${largest} rows`);
     assert.ok(!fake.batches.some((batch) => Object.values(batch).some((text) => text.startsWith('viejo'))));
   });
+});
+
+// ---------- PR 3: local model ----------
+
+function localService(fixture: Fixture, engine: ModerationAiEngine, installed: Set<string>, extra: Partial<ModerationAiOptions> = {}) {
+  const configs: unknown[] = [];
+  const sleeps: number[] = [];
+  const instance = new ModerationAiService(fixture.db, fixture.vault, {
+    engineFactory: (config) => { configs.push(config); return engine; },
+    sleep: async (ms) => { sleeps.push(ms); },
+    now: () => NOW,
+    localModels: { isInstalled: (id: string) => installed.has(id) },
+    ...extra,
+  });
+  return { instance, configs, sleeps };
+}
+
+test('schema v18: moderation_ai_settings gains local_model without touching existing rows', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    migrateDatabase(db, 17);
+    db.exec(`INSERT INTO connections(id, name, provider_code, login_kind, graph_version, status, created_at, updated_at)
+        VALUES ('conn1', 'conn1', 'META', 'instagram_login', 'v17.0', 'valid', '2026', '2026');
+      INSERT INTO social_accounts(account_id, connection_id, provider_account_id, username, normalized_username, status, created_at, updated_at)
+        VALUES ('acc1', 'conn1', 'ig1', 'u', 'u', 'valid', '2026', '2026');
+      INSERT INTO moderation_ai_settings(account_id, engine, model, updated_at) VALUES ('acc1', 'gemini', 'gemini-2.5-flash', '2026');`);
+    migrateDatabase(db);
+    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 18);
+    assert.deepEqual({ ...(db.prepare(`SELECT engine, model, local_model FROM moderation_ai_settings`).get() as object) },
+      { engine: 'gemini', model: 'gemini-2.5-flash', local_model: null });
+  } finally {
+    db.close();
+  }
+});
+
+test('local settings: needs the installed model (409 ai_model_missing), strict ids, no consent; switching keeps the Gemini key and model', async () => {
+  await withFixture((fixture) => {
+    const installed = new Set<string>();
+    const { instance } = localService(fixture, fakeEngine().engine, installed);
+    assert.equal(instance.getSettings('acc1').localModel, 'qwen2.5-1.5b');
+    assert.equal(instance.getSettings('acc1').localModelInstalled, false);
+    assert.throws(() => instance.updateSettings('acc1', { engine: 'local' }), (error: any) => error.code === 'ai_model_missing' && error.status === 409);
+    assert.throws(() => instance.updateSettings('acc1', { engine: 'local', model: 'qwen3-4b' }), (error: any) => error.code === 'ai_model_missing');
+    for (const model of ['qwen2.5-3b', 'gemini-2.5-flash', '../x', 7]) {
+      assert.throws(() => instance.updateSettings('acc1', { engine: 'local', model }), (error: any) => error.code === 'ai_model_invalid' && error.status === 400, String(model));
+    }
+    assert.equal(instance.getSettings('acc1').engine, 'off');
+    instance.updateSettings('acc1', { engine: 'gemini', apiKey: KEY, model: 'gemini-2.5-flash', confirmed: true });
+    installed.add('qwen3-4b');
+    // No consent dialog for local: nothing leaves the machine.
+    const local = instance.updateSettings('acc1', { engine: 'local', model: 'qwen3-4b' });
+    assert.equal(local.engine, 'local');
+    assert.equal(local.localModel, 'qwen3-4b');
+    assert.equal(local.localModelInstalled, true);
+    assert.equal(local.hasApiKey, true, 'the Gemini key survives the switch');
+    assert.equal(local.model, 'gemini-2.5-flash', 'and so does the Gemini model');
+    const back = instance.updateSettings('acc1', { engine: 'gemini' });
+    assert.equal(back.model, 'gemini-2.5-flash');
+    assert.equal(back.localModel, 'qwen3-4b');
+    assert.equal(back.hasApiKey, true);
+    // Without a local model manager (tests, old wiring) local stays unavailable.
+    const bare = new ModerationAiService(fixture.db, fixture.vault, { now: () => NOW });
+    assert.throws(() => bare.updateSettings('acc2', { engine: 'local' }), (error: any) => error.code === 'ai_engine_unavailable' && error.status === 409);
+  });
+});
+
+test('local job: engine chunk size (10) and no spacing; the config names the local model; key test stays Gemini-only', async () => {
+  await withFixture(async (fixture) => {
+    for (let index = 0; index < 25; index++) comment(fixture.db, `l${String(index).padStart(2, '0')}`, `insulto ${index}`);
+    const fake = fakeEngine();
+    const engine = { ...fake.engine, chunkSize: 10, spacingMs: 0 };
+    const installed = new Set(['qwen2.5-1.5b']);
+    const { instance, configs, sleeps } = localService(fixture, engine, installed);
+    instance.updateSettings('acc1', { engine: 'local' });
+    instance.start('acc1', '7d');
+    await instance.waitForIdle('acc1');
+    assert.deepEqual(configs, [{ engine: 'local', model: 'qwen2.5-1.5b' }]);
+    assert.deepEqual(fake.batches.map((batch) => Object.keys(batch).length), [10, 10, 5]);
+    assert.deepEqual(sleeps, [], 'local chunks are not spaced');
+    const status = instance.status('acc1') as any;
+    assert.equal(status.state, 'completed');
+    assert.equal(status.progress.chunksTotal, 3);
+    assert.equal(status.progress.flagged, 25);
+    await assert.rejects(instance.testKey('acc1'), (error: any) => error.code === 'ai_disabled');
+    // The model disappeared after the engine was chosen: start refuses with ai_model_missing.
+    installed.clear();
+    assert.throws(() => instance.start('acc1', '7d'), (error: any) => error.code === 'ai_model_missing' && error.status === 409);
+  });
+});
+
+test('local job: ai_local_unavailable (runtime or model cannot load) stops the job after the first chunk', async () => {
+  await withFixture(async (fixture) => {
+    for (let index = 0; index < 25; index++) comment(fixture.db, `u${index}`, `hola ${index}`);
+    const failing = fakeEngine(() => { throw new ModerationAiError('ai_local_unavailable'); });
+    const { instance } = localService(fixture, { ...failing.engine, chunkSize: 10, spacingMs: 0 }, new Set(['qwen2.5-1.5b']));
+    instance.updateSettings('acc1', { engine: 'local' });
+    instance.start('acc1', '7d');
+    await instance.waitForIdle('acc1');
+    const status = instance.status('acc1') as any;
+    assert.equal(status.state, 'failed');
+    assert.equal(status.errorCode, 'ai_local_unavailable');
+    assert.equal(failing.batches.length, 1);
+  });
+});
+
+test('local model delete: confirmed === true, refused while a local job uses that model, unloads the runtime first', async () => {
+  await withFixture(async (fixture) => {
+    for (let index = 0; index < 15; index++) comment(fixture.db, `d${index}`, `hola ${index}`);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fake = fakeEngine(async (batch, call) => {
+      if (call === 1) await gate;
+      return Object.fromEntries(Object.keys(batch).map((key) => [key, 'neutral']));
+    });
+    const deleted: Array<[unknown, unknown]> = [];
+    const events: string[] = [];
+    const { instance } = localService(fixture, { ...fake.engine, chunkSize: 10, spacingMs: 0 }, new Set(['qwen2.5-1.5b', 'qwen3-4b']), {
+      localModels: {
+        isInstalled: () => true,
+        delete: async (model: unknown, confirmed: unknown) => { events.push('delete'); deleted.push([model, confirmed]); return { models: [] }; },
+      },
+      localRuntime: { engine: () => fake.engine, unload: async () => { events.push('unload'); } },
+    });
+    instance.updateSettings('acc1', { engine: 'local' });
+    instance.start('acc1', '7d');
+    await assert.rejects(instance.deleteLocalModel('qwen2.5-1.5b', true), (error: any) => error.code === 'model_in_use' && error.status === 409);
+    await assert.rejects(instance.deleteLocalModel('qwen2.5-1.5b', 'true'), /confirmation_required/u);
+    await instance.deleteLocalModel('qwen3-4b', true);
+    release();
+    await instance.waitForIdle('acc1');
+    await instance.deleteLocalModel('qwen2.5-1.5b', true);
+    assert.deepEqual(deleted, [['qwen3-4b', true], ['qwen2.5-1.5b', true]]);
+    assert.deepEqual(events, ['unload', 'delete', 'unload', 'delete']);
+  });
+});
+
+test('API: local model status, download, cancel and delete (CSRF, safe codes, global to the installation)', async () => {
+  await withFixture(async (fixture) => {
+    const bytes = Buffer.from('tiny-gguf');
+    const { createHash } = await import('node:crypto');
+    const modelsDir = join(fixture.dir, 'models');
+    let hang = true;
+    const fetcher = (async (_url: string, init?: RequestInit) => {
+      if (hang) {
+        return new Promise<Response>((_resolve, reject) => {
+          if (init?.signal?.aborted) return reject(new Error('aborted'));
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+      }
+      return new Response(bytes, { status: 200 });
+    }) as typeof fetch;
+    const localModels = new LocalModelManager({
+      modelsDir, fetcher, statfs: async () => ({ bavail: 1e12, bsize: 1 }),
+      catalog: [{ id: 'qwen2.5-1.5b', label: 'Tiny', fileName: 'tiny.gguf', url: 'https://huggingface.co/Qwen/x/resolve/abc/tiny.gguf', sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }],
+    });
+    const { instance } = localService(fixture, fakeEngine().engine, new Set(), { localModels, localRuntime: { engine: () => fakeEngine().engine, unload: async () => undefined } });
+    await withApi(fixture, instance, {} as SocialProvider, async (call) => {
+      const initial = await call('/api/moderation/ai-local/status', 'GET');
+      assert.equal(initial.status, 200);
+      assert.deepEqual(initial.body, { models: [{ id: 'qwen2.5-1.5b', label: 'Tiny', sizeBytes: bytes.length, installed: false, partialBytes: 0 }] });
+      assert.equal((await call('/api/moderation/ai-local/download', 'POST', { model: 'qwen2.5-1.5b' }, { 'x-csrf-token': 'bad' })).status, 403);
+      assert.deepEqual(await call('/api/moderation/ai-local/download', 'POST', { model: 'nope' }), { status: 400, body: { error: 'invalid_request' } });
+      const started = await call('/api/moderation/ai-local/download', 'POST', { model: 'qwen2.5-1.5b' });
+      assert.equal(started.status, 202);
+      assert.equal(started.body.download.state, 'running');
+      assert.deepEqual(await call('/api/moderation/ai-local/download', 'POST', { model: 'qwen2.5-1.5b' }), { status: 409, body: { error: 'download_running' } });
+      assert.equal((await call('/api/moderation/ai-local/download/cancel', 'POST', {})).status, 200);
+      await localModels.waitForIdle();
+      assert.equal((await call('/api/moderation/ai-local/status', 'GET')).body.download.state, 'cancelled');
+      assert.deepEqual(await call('/api/moderation/ai-local/download/cancel', 'POST', {}), { status: 409, body: { error: 'download_not_running' } });
+      hang = false;
+      await call('/api/moderation/ai-local/download', 'POST', { model: 'qwen2.5-1.5b' });
+      await localModels.waitForIdle();
+      assert.equal((await call('/api/moderation/ai-local/status', 'GET')).body.models[0].installed, true);
+      assert.deepEqual(await call('/api/moderation/ai-local/delete', 'POST', { model: 'qwen2.5-1.5b' }), { status: 400, body: { error: 'confirmation_required' } });
+      const removed = await call('/api/moderation/ai-local/delete', 'POST', { model: 'qwen2.5-1.5b', confirmed: true });
+      assert.equal(removed.status, 200);
+      assert.equal(removed.body.models[0].installed, false);
+    }, { localModels });
+    await withApi(fixture, undefined, {} as SocialProvider, async (call) => {
+      assert.deepEqual(await call('/api/moderation/ai-local/status', 'GET'), { status: 503, body: { error: 'moderation_ai_unavailable' } });
+    });
+  });
+});
+
+test('server.ts keeps models under <data>/models, recovers an interrupted download and wires the local runtime', () => {
+  const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
+  assert.match(server, /new LocalModelManager\(\{ modelsDir: join\(config\.dataDir, 'models'\) \}\)/);
+  assert.match(server, /localModels\.recoverInterrupted\(\)/);
+  assert.match(server, /new LocalAiRuntime\(/);
+  assert.match(server, /new ModerationAiService\(database, vault, \{ localModels, localRuntime \}\)/);
+  const service = readFileSync(new URL('../src/services/moderation-ai-local.ts', import.meta.url), 'utf8');
+  assert.match(service, /await import\('node-llama-cpp'\)/, 'node-llama-cpp is loaded lazily');
+  assert.doesNotMatch(service, /^import .*node-llama-cpp/mu, 'never a static import');
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.match(manifest.dependencies['node-llama-cpp'], /^\d+\.\d+\.\d+$/u, 'pinned exactly, in dependencies');
+});
+
+test('labels: local model cards, download progress, local notes and error labels for every state', () => {
+  assert.equal(labels.AI_LOCAL_PRIVACY_NOTE, 'Todo se procesa en este equipo; ningún comentario sale de él.');
+  assert.match(labels.AI_LOCAL_RESOURCE_NOTE, /memoria|RAM/u);
+  assert.equal(labels.LOCAL_MODEL_INFO['qwen2.5-1.5b']!.detail, 'Rápido · ~1 GB · recomendado para 8 GB de RAM');
+  assert.match(labels.LOCAL_MODEL_INFO['qwen3-4b']!.detail, /^Más preciso · ~2,5 GB · 16 GB de RAM recomendados$/u);
+  assert.equal(labels.downloadProgressText({ receivedBytes: 500_000_000, totalBytes: 1_117_320_736 }), '500 MB de 1117 MB (44 %)');
+  assert.equal(labels.downloadProgressText({ receivedBytes: 0, totalBytes: 0 }), '0 MB de 0 MB (0 %)');
+  const entry = { id: 'qwen2.5-1.5b', installed: false, partialBytes: 0, sizeBytes: 1000 };
+  assert.deepEqual(labels.localModelCardState(entry, undefined), { kind: 'idle', canDownload: true, canCancel: false, canDelete: false, downloadLabel: 'Descargar' });
+  assert.deepEqual(labels.localModelCardState(entry, null), labels.localModelCardState(entry, undefined));
+  assert.equal(labels.localModelCardState({ ...entry, installed: true }, undefined).kind, 'installed');
+  assert.equal(labels.localModelCardState({ ...entry, installed: true }, undefined).canDelete, true);
+  const running = labels.localModelCardState(entry, { model: 'qwen2.5-1.5b', state: 'running', receivedBytes: 250, totalBytes: 1000 });
+  assert.equal(running.kind, 'downloading');
+  assert.equal(running.percent, 25);
+  assert.equal(running.canCancel, true);
+  assert.equal(running.canDownload, false);
+  const otherBusy = labels.localModelCardState(entry, { model: 'qwen3-4b', state: 'running', receivedBytes: 1, totalBytes: 9 });
+  assert.equal(otherBusy.kind, 'idle');
+  assert.equal(otherBusy.canDownload, false, 'one download at a time');
+  const failed = labels.localModelCardState(entry, { model: 'qwen2.5-1.5b', state: 'failed', receivedBytes: 0, totalBytes: 1000, errorCode: 'checksum_mismatch' });
+  assert.equal(failed.kind, 'failed');
+  assert.match(failed.message!, /no coincide/u);
+  const unknownError = labels.localModelCardState(entry, { model: 'qwen2.5-1.5b', state: 'failed', receivedBytes: 0, totalBytes: 1000, errorCode: 'weird' as never });
+  assert.ok(unknownError.message && unknownError.message.length > 0);
+  const resumable = labels.localModelCardState({ ...entry, partialBytes: 300 }, { model: 'qwen2.5-1.5b', state: 'cancelled', receivedBytes: 300, totalBytes: 1000 });
+  assert.equal(resumable.kind, 'cancelled');
+  assert.equal(resumable.downloadLabel, 'Reanudar descarga');
+  assert.equal(labels.localModelCardState({ ...entry, installed: true }, { model: 'qwen2.5-1.5b', state: 'completed', receivedBytes: 1000, totalBytes: 1000 }).kind, 'installed');
+  for (const code of ['ai_model_missing', 'ai_local_unavailable', 'model_in_use', 'download_running', 'insufficient_disk', 'checksum_mismatch',
+    'download_host_rejected', 'download_timeout', 'download_failed', 'download_http_error', 'download_write_failed', 'model_installed', 'download_not_running']) {
+    assert.ok(labels.AI_ERROR_LABELS[code], code);
+  }
+});
+
+test('page: local option enabled with model cards, download progress, cancel, delete confirmation and the local notes', () => {
+  const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /\/api\/moderation\/ai-local\/status/);
+  assert.match(page, /\/api\/moderation\/ai-local\/download\/cancel/);
+  assert.match(page, /\/api\/moderation\/ai-local\/delete', 'POST', \{ model: .*confirmed: true \}/u);
+  assert.match(page, /AI_LOCAL_PRIVACY_NOTE/);
+  assert.match(page, /AI_LOCAL_RESOURCE_NOTE/);
+  assert.match(page, /localModelCardState\(/);
+  assert.match(page, /aria-label="Progreso de la descarga"/);
+  assert.match(page, />Cancelar</);
+  assert.match(page, /Instalado/);
+  assert.match(page, /Borrar modelo/);
+  assert.match(page, /engine === 'local'/);
+  // The Gemini privacy notice only shows for Gemini (or off), never next to the local engine.
+  assert.match(page, /engine !== 'local' && <p className="ai-privacy"/);
+  assert.match(page, /aiReviewGate\(/);
+});
+
+test('review button gate: picking "Modelo local" without a saved local engine never runs the previously saved Gemini', () => {
+  const base = { savedEngine: 'gemini', localPicked: false, hasApiKey: true, localModelInstalled: false, running: false };
+  assert.deepEqual(labels.aiReviewGate(base), { canReview: true, hint: '' });
+  assert.deepEqual(labels.aiReviewGate({ ...base, localPicked: true }), { canReview: false, hint: 'Descargue un modelo y pulse «Usar este modelo» para revisar.' });
+  assert.deepEqual(labels.aiReviewGate({ ...base, hasApiKey: false }), { canReview: false, hint: 'Guarde una API key de Gemini antes de revisar.' });
+  assert.deepEqual(labels.aiReviewGate({ ...base, savedEngine: 'off' }), { canReview: false, hint: 'Active la revisión con IA para usar este botón.' });
+  assert.deepEqual(labels.aiReviewGate({ ...base, savedEngine: 'local', localModelInstalled: true }), { canReview: true, hint: '' });
+  assert.deepEqual(labels.aiReviewGate({ ...base, savedEngine: 'local' }), { canReview: false, hint: 'Descargue el modelo local antes de revisar.' });
+  assert.equal(labels.aiReviewGate({ ...base, running: true }).canReview, false);
 });

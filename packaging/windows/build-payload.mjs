@@ -151,12 +151,19 @@ function main() {
   // 3. Production dependencies (tsx is a runtime dependency: scripts/start.mjs loads server.ts through it).
   run(['ci', '--omit=dev', '--no-audit', '--no-fund'], appDir);
   const nodeModules = join(appDir, 'node_modules');
-  for (const required of ['next', 'react', 'react-dom', 'tsx', 'esbuild']) {
+  for (const required of ['next', 'react', 'react-dom', 'tsx', 'esbuild', 'node-llama-cpp']) {
     if (!existsSync(join(nodeModules, required, 'package.json'))) fail(`production node_modules is missing ${required}`);
   }
-  if (existsSync(join(nodeModules, 'typescript'))) fail('typescript was installed: dev dependencies leaked into the payload');
+  // typescript itself is expected here (devOptional: optional peer of node-llama-cpp) and pruned below; a dev-only
+  // package such as @types/node would mean dev dependencies leaked.
+  if (existsSync(join(nodeModules, '@types', 'node'))) fail('@types/node was installed: dev dependencies leaked into the payload');
   const pruned = pruneNodeModules(nodeModules);
   log(`pruned ${pruned.removedEntries} node_modules entries (${mb(pruned.removedBytes)})`);
+  if (existsSync(join(nodeModules, 'typescript'))) fail('typescript survived the pruning');
+  // Local AI: the CPU prebuilt for win-x64 must be present (it is an optional dependency: npm skips it silently).
+  if (process.platform === 'win32' && !existsSync(join(nodeModules, '@node-llama-cpp', 'win-x64', 'package.json'))) {
+    fail('@node-llama-cpp/win-x64 is missing: the local AI model would not load');
+  }
 
   // 4. Launcher (+ generated icon), manual and version stamp.
   cpSync(join(packagingDir, 'launcher'), join(payloadDir, 'launcher'), { recursive: true });

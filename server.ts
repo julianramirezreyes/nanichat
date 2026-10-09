@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import next from 'next';
 import { acquireApplicationLock } from './src/core/application-lock.ts';
 import { loadConfig } from './src/core/config.ts';
@@ -15,6 +16,8 @@ import { ConnectionService } from './src/services/connections.ts';
 import { AutomationService } from './src/services/automations.ts';
 import { BacklogService } from './src/services/backlog.ts';
 import { ModerationAiService } from './src/services/moderation-ai.ts';
+import { LocalModelManager } from './src/services/moderation-ai-local-model.ts';
+import { LocalAiRuntime } from './src/services/moderation-ai-local.ts';
 import { FollowGateService } from './src/services/follow-gate.ts';
 import { createApiHandler } from './src/http/router.ts';
 import { legacyInterlockFromConfig } from './src/services/legacy-interlock.ts';
@@ -39,17 +42,22 @@ const scheduler = createScheduler(database, scanner, queue, { provider, mediaRef
 const automations = new AutomationService(database);
 const backlog = new BacklogService(database, scanner, queue);
 // AI comment review (off by default): only creates flags, never calls Meta. A job cannot survive a restart.
-const moderationAi = new ModerationAiService(database, vault);
+// Local model files live in <data>/models (they survive a reinstall); an interrupted download becomes 'cancelled'.
+// node-llama-cpp is imported only when the local engine first classifies, so a broken native binary never blocks startup.
+const localModels = new LocalModelManager({ modelsDir: join(config.dataDir, 'models') });
+localModels.recoverInterrupted();
+const localRuntime = new LocalAiRuntime({ resolveModelPath: (modelId) => localModels.modelPath(modelId) });
+const moderationAi = new ModerationAiService(database, vault, { localModels, localRuntime });
 moderationAi.recoverInterrupted();
 // Opt-in (SOCIAL_DESK_IMPORT_ENV_PATH): without it the explicit .env import endpoint is unavailable.
 const importEnvPath = config.importEnvPath;
-const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue, moderationAi,
+const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue, moderationAi, localModels,
   // EXPERIMENTAL read-only conversation/profile diagnostics (GET requests only; never sends).
   provider: provider,
   diagnostics: provider,
   ...(legacyInterlock ? { legacy: legacyInterlock } : {}),
   ...(importEnvPath ? { importEnvironment: async () => readImportedEnvironment(importEnvPath) } : {}) });
-export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog, followGate, moderationAi };
+export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog, followGate, moderationAi, localModels };
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const app = next({ dev: isDevelopment, hostname: config.host, port: config.port });

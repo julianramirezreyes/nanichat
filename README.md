@@ -73,9 +73,14 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 
 ### Revisión con IA
 
-- **Desactivada por defecto.** En la pestaña «Moderación», el panel «Revisión con IA» permite elegir **Gemini** con tu propia API key gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey). El «Modelo local» llegará más adelante.
-- **Aviso de privacidad:** con la API gratuita, Google puede usar el contenido enviado para mejorar sus productos, y los comentarios de tus clientes salen de este equipo. Por eso activarla pide confirmación. Para que nada salga del equipo habrá que usar el modelo local.
-- **Cómo se usa:** «Revisar comentarios negativos» envía a Gemini los comentarios de la ventana elegida (de 24 horas a 30 días) que aún no tienen marca, en lotes pequeños y espaciados, y marca insultos, odio, spam y quejas. **Solo marca:** después tú ocultas, borras o descartas con las mismas herramientas. Las quejas legítimas llevan el aviso «conviene responder, no ocultar» y nunca se ocultan solas.
+- **Desactivada por defecto.** En la pestaña «Moderación», el panel «Revisión con IA» permite elegir **Gemini** con tu propia API key gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey) o el **Modelo local**.
+- **Aviso de privacidad:** con la API gratuita, Google puede usar el contenido enviado para mejorar sus productos, y los comentarios de tus clientes salen de este equipo. Por eso activarla pide confirmación. Para que nada salga del equipo usa el modelo local.
+- **Modelo local: gratis y 100 % privado.** Corre dentro de la propia aplicación: ningún comentario sale del equipo y no necesita cuenta ni key. Se descarga **una vez** desde el panel (barra de progreso, «Cancelar» y reanudar donde quedó) y se verifica con su huella SHA-256:
+  - **Qwen2.5 1.5B** (recomendado): «Rápido», ~1,1 GB de descarga, pensado para equipos con **8 GB de RAM**.
+  - **Qwen3 4B**: «Más preciso», ~2,5 GB de descarga, **16 GB de RAM** recomendados.
+
+  Se guarda en la carpeta de datos (`models/`), así que no se pierde al reinstalar; «Borrar modelo» libera el espacio. Mientras revisa usa memoria y cerca de la mitad de los núcleos del procesador: el equipo puede ir más lento. Hace falta el tamaño del modelo más 500 MB libres en el disco. Es menos preciso que Gemini y puede equivocarse: revisa las marcas antes de ocultar.
+- **Cómo se usa:** «Revisar comentarios negativos» clasifica los comentarios de la ventana elegida (de 24 horas a 30 días) que aún no tienen marca, en lotes pequeños (con Gemini, espaciados para respetar el límite gratuito), y marca insultos, odio, spam y quejas. **Solo marca:** después tú ocultas, borras o descartas con las mismas herramientas. Las quejas legítimas llevan el aviso «conviene responder, no ocultar» y nunca se ocultan solas.
 - **La key se guarda cifrada** en este equipo y nunca se muestra completa. «Probar key» envía un único comentario de prueba.
 - **Apagar la IA o borrar la key detiene la revisión en curso.** Mientras una revisión corre, el selector de motor queda bloqueado: primero «Detener».
 - Detalles técnicos en [REFERENCIA-TECNICA.md](docs/REFERENCIA-TECNICA.md#revisión-con-ia).

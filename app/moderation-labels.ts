@@ -36,7 +36,20 @@ export const AI_ERROR_LABELS: Record<string, string> = {
   ai_key_missing: 'Guarde una API key de Gemini antes de revisar.',
   ai_key_invalid: 'La API key no tiene un formato válido.',
   ai_model_invalid: 'Ese modelo no está disponible.',
-  ai_engine_unavailable: 'El modelo local todavía no está disponible.',
+  ai_engine_unavailable: 'El modelo local no está disponible en esta instalación.',
+  ai_model_missing: 'Descargue el modelo local antes de usarlo.',
+  ai_local_unavailable: 'El modelo local no pudo cargarse en este equipo (memoria insuficiente o archivo dañado). Pruebe con el modelo más pequeño o vuelva a descargarlo.',
+  model_in_use: 'Ese modelo se está usando en una revisión. Deténgala antes de borrarlo.',
+  model_installed: 'Ese modelo ya está instalado.',
+  download_running: 'Ya hay una descarga en curso. Espere a que termine o cancélela.',
+  download_not_running: 'No hay ninguna descarga en curso.',
+  insufficient_disk: 'No hay espacio suficiente en el disco: se necesita el tamaño del modelo más 500 MB libres.',
+  checksum_mismatch: 'El archivo descargado no coincide con el original y se borró. Vuelva a descargarlo.',
+  download_host_rejected: 'La descarga intentó ir a un servidor no permitido y se detuvo.',
+  download_timeout: 'La descarga dejó de avanzar. Vuelva a intentarlo: continuará donde quedó.',
+  download_failed: 'No se pudo conectar para descargar el modelo. Revise la conexión a internet.',
+  download_http_error: 'El servidor de descarga respondió con un error. Inténtelo más tarde.',
+  download_write_failed: 'No se pudo guardar el archivo en el disco.',
   ai_job_running: 'Ya hay una revisión en curso para esta cuenta.',
   ai_job_not_running: 'No hay ninguna revisión en curso.',
   ai_rate_limited: 'Gemini alcanzó el límite de uso gratuito. Espere unos minutos y vuelva a intentarlo.',
@@ -165,4 +178,88 @@ export function bulkSummary(results: readonly BulkResultView[]): string {
     .filter(([key]) => counts.has(key))
     .map(([key, one, many]) => `${counts.get(key)} ${counts.get(key) === 1 ? one : many}`);
   return parts.length ? parts.join(', ') : 'Sin cambios';
+}
+
+// ---------- Local model (moderation PR 3) ----------
+
+export const AI_LOCAL_PRIVACY_NOTE = 'Todo se procesa en este equipo; ningún comentario sale de él.';
+export const AI_LOCAL_RESOURCE_NOTE = 'Mientras revisa, el modelo local usa memoria (RAM) y procesador: el equipo puede ir más lento durante la revisión.';
+
+/** Card text per local model id (src/services/moderation-ai-local-model.ts LOCAL_MODELS). */
+export const LOCAL_MODEL_INFO: Record<string, { title: string; detail: string }> = {
+  'qwen2.5-1.5b': { title: 'Qwen2.5 1.5B', detail: 'Rápido · ~1 GB · recomendado para 8 GB de RAM' },
+  'qwen3-4b': { title: 'Qwen3 4B', detail: 'Más preciso · ~2,5 GB · 16 GB de RAM recomendados' },
+};
+
+export type LocalModelEntryView = { id: string; installed: boolean; partialBytes: number; sizeBytes: number };
+export type DownloadView = { model: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; receivedBytes: number; totalBytes: number; errorCode?: string };
+export type LocalModelCardState = {
+  kind: 'installed' | 'downloading' | 'idle' | 'failed' | 'cancelled';
+  canDownload: boolean;
+  canCancel: boolean;
+  canDelete: boolean;
+  downloadLabel: 'Descargar' | 'Reanudar descarga';
+  percent?: number;
+  progressText?: string;
+  message?: string;
+};
+
+const MB = 1_000_000;
+
+function percentOf(received: number, total: number): number {
+  if (!(total > 0) || !(received > 0)) return 0;
+  return Math.min(100, Math.floor((received / total) * 100));
+}
+
+/** "500 MB de 1117 MB (44 %)" */
+export function downloadProgressText(progress: { receivedBytes: number; totalBytes: number }): string {
+  const received = Math.floor((progress.receivedBytes || 0) / MB);
+  const total = Math.round((progress.totalBytes || 0) / MB);
+  return `${received} MB de ${total} MB (${percentOf(progress.receivedBytes, progress.totalBytes)} %)`;
+}
+
+/**
+ * What a model card shows. Never throws: a missing download (null/undefined), a download of another model, unknown
+ * states or error codes all map to a safe card. Only one download runs at a time, so a card cannot start while
+ * another model downloads.
+ */
+export function localModelCardState(entry: LocalModelEntryView, download: DownloadView | null | undefined): LocalModelCardState {
+  const busy = download?.state === 'running';
+  const own = download && download.model === entry.id ? download : undefined;
+  const downloadLabel = entry.partialBytes > 0 ? 'Reanudar descarga' : 'Descargar';
+  if (own?.state === 'running') {
+    return {
+      kind: 'downloading', canDownload: false, canCancel: true, canDelete: false, downloadLabel,
+      percent: percentOf(own.receivedBytes, own.totalBytes), progressText: downloadProgressText(own),
+    };
+  }
+  if (entry.installed) return { kind: 'installed', canDownload: false, canCancel: false, canDelete: true, downloadLabel };
+  if (own?.state === 'failed') {
+    return {
+      kind: 'failed', canDownload: !busy, canCancel: false, canDelete: entry.partialBytes > 0, downloadLabel,
+      message: (own.errorCode && AI_ERROR_LABELS[own.errorCode]) || 'La descarga falló. Vuelva a intentarlo.',
+    };
+  }
+  if (own?.state === 'cancelled') {
+    return {
+      kind: 'cancelled', canDownload: !busy, canCancel: false, canDelete: entry.partialBytes > 0, downloadLabel,
+      message: entry.partialBytes > 0 ? `Descarga cancelada: ${downloadProgressText({ receivedBytes: entry.partialBytes, totalBytes: entry.sizeBytes })}.` : 'Descarga cancelada.',
+    };
+  }
+  return { kind: 'idle', canDownload: !busy, canCancel: false, canDelete: false, downloadLabel };
+}
+
+/**
+ * Whether "Revisar comentarios negativos" can run, and the hint shown when it cannot. While "Modelo local" is only
+ * picked (no local model saved yet), the saved engine (maybe Gemini) must never run from this button.
+ */
+export function aiReviewGate(input: { savedEngine: string; localPicked: boolean; hasApiKey: boolean; localModelInstalled: boolean; running: boolean }): { canReview: boolean; hint: string } {
+  if (input.localPicked) return { canReview: false, hint: 'Descargue un modelo y pulse «Usar este modelo» para revisar.' };
+  if (input.savedEngine === 'local') {
+    return input.localModelInstalled ? { canReview: !input.running, hint: '' } : { canReview: false, hint: 'Descargue el modelo local antes de revisar.' };
+  }
+  if (input.savedEngine === 'gemini') {
+    return input.hasApiKey ? { canReview: !input.running, hint: '' } : { canReview: false, hint: 'Guarde una API key de Gemini antes de revisar.' };
+  }
+  return { canReview: false, hint: 'Active la revisión con IA para usar este botón.' };
 }

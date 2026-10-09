@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-const VERSION = 17;
+const VERSION = 18;
 
 const INITIAL_SCHEMA = `
 CREATE TABLE connections (
@@ -179,6 +179,7 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
     if (current < 15 && target >= 15) migrateMediaThumbnail(database);
     if (current < 16 && target >= 16) migrateCommentModeration(database);
     if (current < 17 && target >= 17) migrateModerationAi(database);
+    if (current < 18 && target >= 18) migrateLocalAiModel(database);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -611,5 +612,13 @@ function migrateModerationAi(database: DatabaseSync): void {
     CREATE INDEX moderation_ai_jobs_account_started ON moderation_ai_jobs(account_id, started_at);
 
     PRAGMA user_version = 17;
+  `);
+}
+
+/** v18 (local AI model): the local model choice gets its own column so switching engines keeps the Gemini model. */
+function migrateLocalAiModel(database: DatabaseSync): void {
+  database.exec(`
+    ALTER TABLE moderation_ai_settings ADD COLUMN local_model TEXT;
+    PRAGMA user_version = 18;
   `);
 }

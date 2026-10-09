@@ -16,6 +16,7 @@
   "dependencies": {
     "lucide-react": "1.47.0",
     "next": "16.3.8",
+    "node-llama-cpp": "3.21.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tsx": "4.23.15"

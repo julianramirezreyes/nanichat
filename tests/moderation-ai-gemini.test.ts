@@ -187,3 +187,12 @@ test('(a) a 400 that is not about the key maps to ai_request_rejected (no retry)
     assert.deepEqual(sleeps, []);
   }
 });
+
+test('Gemini engine declares its own chunk size (40) and free-tier spacing (>= 4 s) between chunks', async () => {
+  const { GEMINI_CHUNK_SIZE, GEMINI_CHUNK_SPACING_MS } = await import('../src/services/moderation-ai-gemini.ts');
+  const engine = createGeminiEngine({ apiKey: KEY, model: 'gemini-2.5-flash-lite', fetcher: (async () => ok({})) as typeof fetch });
+  assert.equal(GEMINI_CHUNK_SIZE, 40);
+  assert.ok(GEMINI_CHUNK_SPACING_MS >= 4000);
+  assert.equal(engine.chunkSize, GEMINI_CHUNK_SIZE);
+  assert.equal(engine.spacingMs, GEMINI_CHUNK_SPACING_MS);
+});
