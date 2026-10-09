@@ -10,6 +10,7 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 
 - [Qué hace y qué no hace](#qué-hace-y-qué-no-hace)
 - [Estado y límites](#estado-y-límites)
+- [Funciones probadas y retiradas](#funciones-probadas-y-retiradas)
 - [Requisitos](#requisitos)
 - [Inicio rápido](#inicio-rápido)
 - [Instalar con una IA](#instalar-con-una-ia)
@@ -34,8 +35,7 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - **Revisión pendiente**: analiza comentarios anteriores (últimas 2 h, 24 h, 3 días, 7 días o un rango propio) **sin enviar nada**, para que tú elijas cuáles procesar.
 - **Cola e historial**: muestra cada respuesta (simulada, enviada, fallida, expirada o con resultado desconocido) y su historial de intentos.
 - Respuesta pública opcional bajo el comentario, con variantes que rotan para no repetir siempre el mismo texto.
-- **Pedir que te sigan antes de entregar el recurso** (opcional, apagado por defecto): el primer mensaje privado lleva un botón (por defecto «Ya te sigo»); cuando la persona lo toca, la aplicación lo detecta leyendo la conversación y le envía el recurso (tu «Respuesta» con sus «Botones»). Es un **sistema de confianza**: Meta no permite comprobar si la persona te sigue, así que el recurso se entrega al tocar el botón aunque no te siga.
-  - **Adjunto opcional del recurso:** con esa opción activa puedes añadir una imagen, un audio, un video o un PDF mediante un **enlace HTTPS público y directo** al archivo (Meta lo descarga; la aplicación no aloja archivos). Al tocar el botón, la persona recibe dos mensajes: primero el adjunto y, al menos 1 segundo después, el texto con los botones. Si Meta rechaza el adjunto, igual se envía el texto; si el resultado del adjunto es dudoso, no se envía nada más (nunca se duplica). Formatos según Meta: imagen png/jpeg (8 MB); audio aac, m4a, wav o mp4; video mp4, ogg, avi, mov o webm; PDF (25 MB). El mp3 no está documentado por Meta. Los enlaces para compartir de Drive o Dropbox no sirven.
+- Para entregar un audio o un video: ponlo en tu página y enlázalo con un botón de enlace.
 
 **No hace:**
 
@@ -53,10 +53,20 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
   - Solo se responde a comentarios principales (no a respuestas dentro de un hilo).
 - **Cuentas de otras personas:** usar la aplicación con cuentas que no son tuyas (o que no administras dentro de tu app de Meta) requiere que tu app de Meta pase la **App Review** y obtenga los permisos avanzados correspondientes. Sin eso, Meta rechazará las llamadas.
 - **Botones interactivos experimentales retirados:** la sección «Botones interactivos (experimental)» ya no existe (sus botones no hacían nada al tocarlos); la API la rechaza con `interactive_mode_retired` y una automatización antigua con ese modo vuelve a enviar su mensaje normal. «Inspeccionar conversación» sigue disponible (solo lectura).
-- **«Pedir que me sigan» no comprueba nada:** Meta responde `User consent is required` (error 230) a la consulta de seguimiento en las conversaciones que probamos, así que la aplicación **no puede verificar** si la persona te sigue. El botón solo confirma que la persona lo tocó. El toque se detecta leyendo la conversación (tarda de 30 segundos a unos minutos) y el recurso solo puede enviarse dentro de las 24 horas posteriores al toque; si nadie toca el botón en 7 días, se da por vencido.
+- **«Pedir que me sigan» y el adjunto del recurso: probados y retirados.** Ver [Funciones probadas y retiradas](#funciones-probadas-y-retiradas).
 - **Permisos de comentarios:** no sabrás si tu token tiene permiso para responder públicamente hasta el primer intento real. Si falta, verás `public_reply_permission_denied` y la respuesta privada no se ve afectada.
 - **Sistema operativo:** el código es multiplataforma (Linux, macOS y Windows nativo, además de Windows con WSL2), pero solo **Linux** se verificó en una ejecución real. macOS y Windows nativo están **verificados solo por pruebas automáticas con una sonda de plataforma simulada; no se probaron en un equipo real**. Detalles en [Sistemas operativos](docs/INSTALACION-CON-IA.md#sistemas-operativos).
 - **Proyecto en evolución:** el comportamiento real de Meta (permisos, cómo se ven los botones, límites de volumen) debe comprobarse con un comentario de prueba controlado antes de usarlo en serio.
+
+## Funciones probadas y retiradas
+
+**«Pedir primero que me sigan (sin comprobación)»** y **«Adjunto del recurso»** existieron y se retiraron el 2026-10-09. No aparecen en la interfaz y la API las rechaza (`follow_gate_retired`, `attachment_retired`).
+
+- **Qué se probó:** el primer mensaje privado llevaba un botón («Ya te sigo»). La aplicación detectaba el toque leyendo la conversación (sondeo) y luego enviaba el recurso (el texto con sus botones y, opcionalmente, una imagen, un audio, un video o un PDF por URL) con `POST /<IG_ID>/messages` y `recipient.id`.
+- **Qué pasó en la prueba real:** 41 segundos después de un toque detectado, Meta rechazó el envío del recurso con HTTP 403, código **10**, subcódigo **2534022** («This message is sent outside of allowed window»; ver la [tabla de errores de Meta](https://developers.facebook.com/documentation/business-messaging/messenger-platform/error-codes)). La consulta de seguimiento del perfil respondió además código **230** («User consent required»).
+- **Por qué se retiró:** Meta no cuenta ese toque (en un hilo iniciado por la cuenta con una respuesta privada, visto por una aplicación que solo sondea) como un mensaje de la persona que abra la ventana de 24 horas. Resultado: quien tocaba el botón **no recibía nada**. Activa, la función hacía daño.
+- **Qué queda:** el código está inactivo detrás de un único interruptor (`FOLLOW_GATE_AVAILABLE = false` en `src/services/follow-gate-rules.ts`). Una automatización antigua con estas opciones envía su mensaje normal; los elementos en cola con el botón quedan `SKIPPED` (`follow_gate_retired`); los seguimientos que esperaban un toque quedan `CANCELLED` sin llamar a Meta; el historial de las pruebas sigue visible en «Cola e historial».
+- **Qué haría falta para una versión futura:** recibir el toque por **webhooks** (evento `messaging_postbacks`) en un servidor accesible desde internet, comprobar en vivo que así Meta sí abre la ventana de mensajería y, solo entonces, cambiar el interruptor. Que los webhooks lo resuelvan es una **hipótesis no verificada**.
 
 ## Requisitos
 

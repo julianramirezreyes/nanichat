@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { ResourceAttachment } from '../core/domain.ts';
 import { claimsMediaSql, hasOwnerReply, isPastPrivateReplyWindow, renderReply, storedFollowGateConfig } from './automations.ts';
 import { storedResourceAttachment } from './resource-attachment.ts';
+import { followGateAvailable } from './follow-gate-rules.ts';
 
 export const COMMENT_PREVIEW_LIMIT = 280;
 // Must stay identical to the provenance rule in BacklogService.processEligible.
@@ -43,7 +44,10 @@ function parseList<T>(value: string, fallback: T[]): T[] {
  * backlog/catch_up scan (exactly what processEligible accepts), not yet queued, not past the private-reply window,
  * and belonging to an enabled, non-archived automation. Read-only; never calls a provider.
  */
-export function listPendingReview(database: DatabaseSync, accountId: string, options: { limit: number; offset: number; now: number }) {
+export function listPendingReview(database: DatabaseSync, accountId: string,
+  options: { limit: number; offset: number; now: number; /** TEST-ONLY override of FOLLOW_GATE_AVAILABLE. */ followGateAvailable?: boolean }) {
+  // Retired follow gate: a stored gate/attachment is ignored, so the preview is the single message enqueue would send.
+  const gateAvailable = followGateAvailable(options.followGateAvailable);
   const kinds = REVIEWABLE_SCAN_KINDS.map(() => '?').join(',');
   // Only automations that currently claim the comment's publication are listed (a general automation yields to an
   // enabled media-specific one), so a comment appears once per claiming automation, exactly as enqueue accepts it.
@@ -69,7 +73,8 @@ export function listPendingReview(database: DatabaseSync, accountId: string, opt
     const buttons = parseList<{ title: string; url: string }>(row.buttons_json, []);
     let previewText: string | null = null; let previewButtons: Array<{ title: string; url: string }> = [];
     let gatePreview: PendingReviewItem['gatePreview'] = null;
-    const gate = storedFollowGateConfig(row.follow_gate_enabled, row.follow_gate_message, row.follow_gate_button_title);
+    const stored = storedFollowGateConfig(row.follow_gate_enabled, row.follow_gate_message, row.follow_gate_button_title);
+    const gate = { ...stored, enabled: stored.enabled && gateAvailable };
     const variables = {
       username: row.author ?? '', comment: row.text ?? '', keyword: matchedKeywords[0] ?? '', account: account?.username ?? '',
       media: (row.permalink || row.media_id).slice(0, 100),

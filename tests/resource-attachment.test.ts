@@ -23,6 +23,11 @@ import {
 } from '../app/resource-attachment.ts';
 
 type Db = ReturnType<typeof openDatabase>;
+/**
+ * The follow gate and its attachment are RETIRED (FOLLOW_GATE_AVAILABLE = false). These tests cover the dormant code,
+ * so they enable it explicitly through the test-only override; tests/retire-follow-gate.test.ts covers the retirement.
+ */
+const DORMANT = { followGateAvailable: true } as const;
 const one = (db: Db, sql: string, ...params: unknown[]) => ({ ...(db.prepare(sql).get(...params as never[]) as Record<string, any>) });
 const all = (db: Db, sql: string, ...params: unknown[]) => (db.prepare(sql).all(...params as never[]) as Array<Record<string, any>>).map((row) => ({ ...row }));
 const MINUTE = 60_000;
@@ -49,7 +54,7 @@ function seed(db: Db, suffix = ''): AccountRef & { mediaId: string } {
 }
 
 function gateAutomation(db: Db, ctx: { accountId: string; mediaId: string }, extra: Record<string, unknown> = {}): string {
-  const service = new AutomationService(db);
+  const service = new AutomationService(db, DORMANT);
   const id = service.create({ accountId: ctx.accountId, mediaId: ctx.mediaId, name: 'Gate', replyText: 'Aquí tienes {{keyword}}, {{username}}',
     buttons: [{ title: 'Guía', url: 'https://example.com/guia' }], followGateEnabled: true, followGateMessage: GATE_MESSAGE,
     followGateButtonTitle: 'Ya te sigo', resourceAttachmentKind: 'audio', resourceAttachmentUrl: AUDIO, ...extra } as never);
@@ -76,7 +81,7 @@ async function sendGate(db: Db, ctx: AccountRef & { mediaId: string }, options: 
   createComment(db, { accountId: ctx.accountId, mediaId: ctx.mediaId, commentId: 'c1', text: 'quiero la guide', username: 'customer',
     createdAt: new Date(Date.now() - 60_000).toISOString() });
   const provider = sendingProvider({ outcome: 'accepted', messageId: 'mid.c1', recipientId: '5544332211' });
-  const queue = new QueueService(db, provider as never, { sendSpacingMs: 0 });
+  const queue = new QueueService(db, provider as never, { sendSpacingMs: 0, ...DORMANT });
   if (!options.dryRun) queue.setDryRun(false, true);
   await queue.enqueueReviewed(ctx.accountId, automationId, ['c1']);
   await queue.processOne(ctx.accountId);
@@ -104,7 +109,7 @@ function fakeGate(clock: () => number): FakeGate {
 /** Engine with an injectable clock; by default the injected sleep advances that clock (like real time would). */
 function engine(db: Db, gate: FakeGate, state: { now: number }, options: { advance?: boolean } = {}) {
   const sleeps: number[] = [];
-  const service = new FollowGateService(db, gate as never, { clock: () => state.now,
+  const service = new FollowGateService(db, gate as never, { ...DORMANT, clock: () => state.now,
     sleep: async (ms: number) => { sleeps.push(ms); if (options.advance !== false) state.now += ms; } });
   return { service, sleeps };
 }
@@ -259,7 +264,7 @@ test('validateResourceAttachment: kinds, URL, follow gate requirement, keep-when
 test('automations API: attachment stored and listed; strict 400 codes; omitted keeps; empty kind clears', async () => {
   await withDb(async (db) => {
     const ctx = seed(db);
-    const handler = createApiHandler({ database: db, csrfToken: 'csrf', automations: new AutomationService(db) } as never);
+    const handler = createApiHandler({ database: db, csrfToken: 'csrf', ...DORMANT, automations: new AutomationService(db, DORMANT) } as never);
     const { server, origin } = await listen(handler);
     const headers = { origin, 'content-type': 'application/json', 'x-csrf-token': 'csrf' };
     const gate = { followGateEnabled: true, followGateMessage: GATE_MESSAGE, followGateButtonTitle: 'Ya te sigo' };
@@ -386,7 +391,7 @@ test('real send: the attachment snapshot is frozen on the session; the resource 
     assert.ok(session);
     assert.deepEqual([session.state, session.resource_attachment_kind, session.resource_attachment_url], ['AWAITING_TAP', 'audio', AUDIO]);
     assert.equal(session.resource_payload_json, '{"text":"Aquí tienes guide, customer","buttons":[{"title":"Guía","url":"https://example.com/guia"}]}');
-    new AutomationService(db).update(ctx.accountId, automationId, { name: 'Gate', mediaId: ctx.mediaId, replyText: 'OTRO', matchMode: 'contains',
+    new AutomationService(db, DORMANT).update(ctx.accountId, automationId, { name: 'Gate', mediaId: ctx.mediaId, replyText: 'OTRO', matchMode: 'contains',
       buttons: [], keywords: ['guide'], resourceAttachmentKind: 'file', resourceAttachmentUrl: 'https://example.com/otro.pdf' } as never);
     const state = { now: Date.parse(session.gate_sent_at) + MINUTE };
     const gate = fakeGate(() => state.now);
@@ -411,7 +416,7 @@ test('sessions without an attachment are byte-for-byte unchanged: no part events
     const gate = fakeGate(() => state.now);
     gate.tap = { found: true, tapMessageId: 'tap.1', tapAt: new Date(state.now - 1000).toISOString() };
     const { sleeps } = { sleeps: [] as number[] };
-    const service = new FollowGateService(db, gate as never, { clock: () => state.now, sleep: async (ms) => { sleeps.push(ms); } });
+    const service = new FollowGateService(db, gate as never, { ...DORMANT, clock: () => state.now, sleep: async (ms) => { sleeps.push(ms); } });
     await service.processDue();
     assert.deepEqual(sleeps, [500]);
     assert.deepEqual(gate.sends.map((send) => send.payload), [{ text: 'Aquí tienes guide, customer', buttons: [{ title: 'Guía', url: 'https://example.com/guia' }] }]);
@@ -624,7 +629,7 @@ test('startup recovery: a part left with an intent and no outcome becomes ambigu
       if (pending === 'text') { add('attachment', 'accepted'); add('text', 'intent_recorded'); }
       const state = { now: Date.now() };
       const gate = fakeGate(() => state.now);
-      const service = new FollowGateService(db, gate as never, { sleep: async () => undefined });
+      const service = new FollowGateService(db, gate as never, { ...DORMANT, sleep: async () => undefined });
       assert.equal(service.recoverInterrupted(), 1);
       assert.deepEqual(one(db, `SELECT state, last_error_code FROM gate_sessions WHERE gate_session_id=?`, id), { state: 'UNKNOWN_OUTCOME', last_error_code: 'process_interrupted_after_intent' });
       const last = partEvents(db, id).at(-1)!;
@@ -731,10 +736,10 @@ test('pending review shows the attachment step in the gate preview (only when co
     db.exec(`INSERT INTO scan_runs(scan_id, account_id, media_id, scan_kind, status, started_at, finished_at) VALUES ('s1','acc','m','backlog','complete','2026','2026');
       INSERT INTO comment_classifications(account_id, comment_id, automation_id, result, reason, matched_keywords_json, observed_at, scan_id)
         VALUES ('acc','c1','${automationId}','eligible','eligible','["guide"]','2026','s1');`);
-    const item = listPendingReview(db, ctx.accountId, { limit: 10, offset: 0, now: Date.now() }).items[0]!;
+    const item = listPendingReview(db, ctx.accountId, { limit: 10, offset: 0, now: Date.now(), ...DORMANT }).items[0]!;
     assert.deepEqual(item.gatePreview, { text: '¡Hola customer! Sígueme y toca el botón 👇', buttonTitle: 'Ya te sigo', attachment: { kind: 'audio', url: AUDIO } });
     db.exec(`UPDATE automations SET resource_attachment_kind='', resource_attachment_url=''`);
-    assert.deepEqual(listPendingReview(db, ctx.accountId, { limit: 10, offset: 0, now: Date.now() }).items[0]!.gatePreview,
+    assert.deepEqual(listPendingReview(db, ctx.accountId, { limit: 10, offset: 0, now: Date.now(), ...DORMANT }).items[0]!.gatePreview,
       { text: '¡Hola customer! Sígueme y toca el botón 👇', buttonTitle: 'Ya te sigo' });
   });
 });

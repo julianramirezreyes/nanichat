@@ -46,7 +46,7 @@
     <li><a href="#cap8"><span class="toc-num">8</span>Crear la conexión</a></li>
     <li><a href="#cap9"><span class="toc-num">9</span>Publicaciones</a></li>
     <li><a href="#cap10"><span class="toc-num">10</span>Automatizaciones</a>
-      <ol><li><a href="#cap10-tipos">Específica o general</a></li><li><a href="#cap10-palabras">Palabras clave</a></li><li><a href="#cap10-plantilla">Plantilla y variables</a></li><li><a href="#cap10-botones">Botones</a></li><li><a href="#cap10-publica">Respuesta pública</a></li><li><a href="#cap10-seguir">Pedir que te sigan</a></li><li><a href="#cap10-adjunto">Adjunto del recurso</a></li><li><a href="#cap10-gestionar">Activar, editar, pausar, archivar</a></li></ol></li>
+      <ol><li><a href="#cap10-tipos">Específica o general</a></li><li><a href="#cap10-palabras">Palabras clave</a></li><li><a href="#cap10-plantilla">Plantilla y variables</a></li><li><a href="#cap10-botones">Botones</a></li><li><a href="#cap10-publica">Respuesta pública</a></li><li><a href="#cap10-no-disponible">Funciones que no están disponibles</a></li><li><a href="#cap10-gestionar">Activar, editar, pausar, archivar</a></li></ol></li>
     <li><a href="#cap11"><span class="toc-num">11</span>Revisión pendiente</a></li>
     <li><a href="#cap12"><span class="toc-num">12</span>Monitoreo</a></li>
     <li><a href="#cap13"><span class="toc-num">13</span>Cola e historial</a></li>
@@ -950,6 +950,10 @@
     <li>La dirección debe empezar por <code>https://</code>. No se aceptan direcciones <code>http://</code> ni con usuario y contraseña.</li>
     <li>Los botones <strong>no se pueden cambiar al editar</strong>: la ventana de edición conserva los existentes. Para cambiarlos, crea una automatización nueva y archiva la anterior.</li>
   </ul>
+  <div class="callout consejo">
+    <span class="callout-title">Consejo — audios y videos</span>
+    <p>Para entregar un audio o un video, ponlo en tu página y enlázalo con un botón de enlace.</p>
+  </div>
   <div class="callout importante">
     <span class="callout-title">Importante</span>
     <p>Cómo se ven los botones en Instagram depende de Meta y puede variar según la versión de la app del destinatario. Pruébalo con un comentario controlado (capítulo 14).</p>
@@ -984,48 +988,23 @@
     <p>No sabrás si tu token tiene permiso para responder comentarios hasta el primer intento real. Si no lo tiene, verás en la cola «Falta el permiso para responder comentarios en esta conexión». El mensaje privado no se ve afectado. Revisa los permisos de los capítulos 4 o 5.</p>
   </div>
 
-  <h2 id="cap10-seguir">Pedir que te sigan antes de entregar el recurso</h2>
-  <p>Opcionalmente, el primer mensaje privado puede pedirle a la persona que te siga y que toque un botón. Cuando lo toca, la app le envía el recurso: tu <span class="ui">Respuesta</span> con sus <span class="ui">Botones</span>. La opción viene <strong>apagada</strong>.</p>
-  <div class="callout importante">
-    <span class="callout-title">Importante — no se comprueba si te sigue</span>
-    <p>Meta <strong>no permite</strong> comprobar si una persona sigue tu cuenta. El botón entrega el recurso al tocarlo, <strong>aunque la persona no te siga</strong>. Es un sistema de confianza: la app solo sabe que la persona tocó el botón.</p>
+  <h2 id="cap10-no-disponible">Funciones que no están disponibles y por qué</h2>
+  <p>Probamos dos funciones que ya <strong>no aparecen</strong> en el formulario porque, con esta aplicación, Meta no deja entregar lo que prometen:</p>
+  <ul>
+    <li><strong>«Pedir primero que me sigan»</strong>: el primer mensaje pedía seguir la cuenta y tocar un botón; al tocarlo, la app enviaba el recurso.</li>
+    <li><strong>«Adjunto del recurso»</strong>: una imagen, un audio, un video o un PDF que se enviaba después de ese toque.</li>
+  </ul>
+  <p>En pruebas reales, después de que la persona tocó el botón, Meta <strong>rechazó</strong> el envío del recurso con el error «el mensaje está fuera de la ventana permitida». Es decir: quien tocaba el botón <strong>no recibía nada</strong>. Por eso ambas funciones están retiradas. Además, Meta tampoco permite comprobar si una persona te sigue.</p>
+  <ul>
+    <li>Las automatizaciones envían siempre el mensaje normal: tu <span class="ui">Respuesta</span> con sus <span class="ui">Botones</span>.</li>
+    <li>Si una automatización tenía activada alguna de estas opciones, se ignora: envía el mensaje normal. Al guardarla en <span class="ui">Editar</span>, la opción se borra.</li>
+    <li>Los elementos que ya estaban en cola con el botón para seguir quedan <span class="state">Omitido</span> (código <code>follow_gate_retired</code>) y no se envían.</li>
+    <li>Las pruebas anteriores siguen visibles en <span class="ui">Cola e historial</span> → <span class="ui">Ver</span>, en el bloque <span class="ui">Seguimiento (función retirada · historial)</span>. Las que esperaban un toque quedan <span class="state">Cancelado</span>.</li>
+  </ul>
+  <div class="callout consejo">
+    <span class="callout-title">Consejo</span>
+    <p>Para entregar un audio o un video, ponlo en tu página y enlázalo con un botón de enlace.</p>
   </div>
-  <ol class="steps">
-    <li>En el formulario de la automatización (o en <span class="ui">Editar</span>), marca <span class="ui">Pedir primero que me sigan (sin comprobación)</span>.</li>
-    <li>Escribe el <span class="ui">Mensaje previo</span> (máximo 640 caracteres; admite las mismas variables que la respuesta). Viene con un texto de ejemplo: «¡Hola {{username}}! Antes de enviarte el recurso, sígueme y luego toca el botón 👇».</li>
-    <li>Escribe el <span class="ui">Título del botón</span> (máximo 20 caracteres, sin enlaces). Por defecto: «Ya te sigo».</li>
-    <li>Revisa la vista previa de los dos mensajes: <em>Mensaje 1 con botón → Mensaje 2 con el recurso</em>. El recurso es lo que escribiste en <span class="ui">Respuesta</span> y <span class="ui">Botones</span>.</li>
-  </ol>
-  <h3>Cómo se comporta</h3>
-  <ul>
-    <li>La app detecta el toque <strong>leyendo la conversación</strong> mientras el monitoreo está encendido. Meta tarda unos 30 segundos en mostrarlo y la app revisa una vez por minuto, así que el recurso suele llegar entre 30 segundos y 2 minutos después del toque.</li>
-    <li>Cuenta solo el <strong>primer</strong> toque; el recurso se envía <strong>una sola vez</strong>. Escribir a mano el mismo texto del botón cuenta igual que tocarlo.</li>
-    <li>Si la persona no toca el botón en <strong>7 días</strong>, queda <span class="state">Expirado</span> y no se envía nada.</li>
-    <li>Meta solo deja enviar el recurso dentro de las <strong>24 horas</strong> siguientes al toque.</li>
-    <li>Si pausas, archivas o le quitas el permiso real a la automatización antes del envío, queda <span class="state">Cancelado</span>. Cambiar o apagar la opción solo afecta a los comentarios nuevos.</li>
-    <li>Si no se sabe si Meta recibió el recurso, queda <span class="state">Resultado desconocido</span> y <strong>nunca</strong> se reintenta: revísalo en Instagram.</li>
-    <li>La antigua sección <span class="ui">Botones interactivos (experimental)</span> fue retirada: sus botones no hacían nada al tocarlos. Una automatización que la usaba vuelve a enviar su mensaje normal.</li>
-    <li>En modo prueba no se envía nada: en la cola verás los dos mensajes como vista previa.</li>
-  </ul>
-  <p>En <span class="ui">Cola e historial</span>, el botón <span class="ui">Ver</span> muestra el bloque <span class="ui">Seguimiento</span>: estado (<span class="state">Esperando toque</span>, <span class="state">Recurso enviado</span>, <span class="state">Expirado</span>, <span class="state">Cancelado</span>, <span class="state">Falló</span> o <span class="state">Resultado desconocido</span>), fechas y la lista de eventos.</p>
-
-  <h3 id="cap10-adjunto">Adjunto del recurso (opcional)</h3>
-  <p>Con <span class="ui">Pedir primero que me sigan</span> activo puedes añadir <strong>una</strong> imagen, un audio, un video o un PDF al recurso. Cuando la persona toca el botón recibe <strong>dos mensajes</strong>: primero el adjunto y, al menos un segundo después, el texto de tu <span class="ui">Respuesta</span> con sus botones. Instagram no permite poner un archivo y botones en el mismo mensaje.</p>
-  <ol class="steps">
-    <li>En <span class="ui">Adjunto del recurso (opcional)</span> elige <span class="ui">Imagen</span>, <span class="ui">Audio</span>, <span class="ui">Video</span> o <span class="ui">PDF</span>.</li>
-    <li>Pega la <strong>URL HTTPS pública y directa</strong> del archivo: al abrirla en el navegador debe descargarse o verse el archivo, no una página. Los enlaces para compartir de Google Drive o Dropbox no sirven; usa un enlace de descarga directa (por ejemplo, el de tu hosting o almacenamiento público).</li>
-    <li>Revisa la vista previa: <em>Mensaje 1: se enviaría un audio (servidor · archivo)</em> → <em>Mensaje 2 · texto + botones</em>.</li>
-  </ol>
-  <ul>
-    <li>Meta descarga el archivo desde sus servidores; la app <strong>no</strong> lo aloja, no lo descarga y no comprueba su formato ni su tamaño. Formatos según Meta: imagen png o jpeg (8 MB); audio aac, m4a, wav o mp4; video mp4, ogg, avi, mov o webm; PDF (25 MB). El mp3 no está documentado por Meta: la app lo permite, pero te avisa.</li>
-    <li>No se aceptan direcciones locales: <code>localhost</code>, direcciones IP ni nombres de red local (<code>.local</code>, <code>.lan</code>…); tampoco <code>http://</code> ni enlaces con usuario y contraseña.</li>
-    <li>Consejo: el botón también sirve simplemente como «Toca para recibir tu audio/PDF». Escribe el <span class="ui">Mensaje previo</span> y el título del botón en ese sentido.</li>
-    <li>Si Meta rechaza el adjunto (URL inválida, formato, tamaño o permiso), se envía igual el texto con los botones y el <span class="ui">Seguimiento</span> lo indica: «Meta rechazó el adjunto; se envió solo el texto».</li>
-    <li>Si no se sabe si el adjunto llegó (tiempo agotado, error de Meta), queda <span class="state">Resultado desconocido</span> y el texto <strong>no</strong> se envía, para no duplicar nada. Revisa en Instagram.</li>
-    <li>Cada parte se envía <strong>una sola vez</strong>: si el texto falla después de un adjunto aceptado, el adjunto nunca se repite.</li>
-    <li>La tarjeta de la automatización muestra la etiqueta <span class="ui">Adjunto: audio</span> (o imagen, video, PDF). En <span class="ui">Cola e historial</span> → <span class="ui">Ver</span>, el bloque <span class="ui">Seguimiento</span> muestra el estado del <span class="ui">Adjunto</span> y del <span class="ui">Texto</span> por separado.</li>
-    <li>No verificado con Meta en vivo: cómo se ve un audio (reproductor o nota de voz), si acepta mp3, y que los dos mensajes lleguen siempre en orden.</li>
-  </ul>
 
   <h2 id="cap10-gestionar">Activar, editar, pausar, autorizar y archivar</h2>
   <figure>
@@ -1038,7 +1017,6 @@
     <li><span class="ui">Solo prueba</span> o <span class="ui">Real autorizado</span>: si tiene permiso para enviar de verdad.</li>
     <li><span class="ui">General</span>: si aplica a todas las publicaciones.</li>
     <li><span class="ui">Respuesta pública · N variantes</span>: si responde también en público.</li>
-    <li><span class="ui">Pide seguir (sin comprobar)</span>: si el primer mensaje pide seguir la cuenta y tocar un botón (ver arriba).</li>
   </ul>
 
   <table>
@@ -1450,9 +1428,7 @@
       <tr><td>«La cuenta indicada no existe.» / «La conexión indicada no existe.»</td><td>La cuenta o conexión ya no está disponible. Pulsa <span class="ui">Actualizar</span>.</td></tr>
       <tr><td>«No se pudo completar el análisis para una cuenta.»</td><td>Meta devolvió un error durante el análisis. Revisa el token y repite.</td></tr>
       <tr><td>«Los botones interactivos experimentales fueron retirados…»</td><td>Una herramienta o una pestaña antigua intentó guardar la sección retirada. Recarga la página y guarda de nuevo.</td></tr>
-      <tr><td>«La URL del adjunto debe ser un enlace HTTPS público y directo…»</td><td>La URL usa <code>http://</code>, lleva usuario y contraseña, apunta a <code>localhost</code>, a una IP o a un nombre de red local, o es demasiado larga.</td></tr>
-      <tr><td>«El adjunto solo se envía después del botón…» / «Revise el “Adjunto del recurso”…»</td><td>El adjunto exige «Pedir primero que me sigan» activo, y una URL sin tipo (o un tipo sin URL) no es válida.</td></tr>
-      <tr><td>«Revise el “Mensaje previo”…» / «Revise el “Título del botón”…»</td><td>Con «Pedir primero que me sigan» activo, el mensaje previo es obligatorio (hasta 640 caracteres) y el título del botón debe tener de 1 a 20 caracteres, sin enlaces.</td></tr>
+      <tr><td>«Esta opción está desactivada: Meta no permite entregar el recurso (o el adjunto) después del toque del botón…»</td><td>Se intentó guardar una automatización con «Pedir primero que me sigan» o con un adjunto, por ejemplo desde una pestaña abierta antes de actualizar la app.</td></tr>
       <tr><td>«Revise el estado de la cuenta y vuelva a intentarlo.»</td><td>Error genérico: casi siempre la cuenta o la conexión no está validada.</td></tr>
       <tr><td>«Cargando datos locales…» no desaparece</td><td>La app se detuvo. Revisa la terminal y vuelve a ejecutar <code>npm start</code>.</td></tr>
     </tbody>
@@ -1471,10 +1447,7 @@
       <tr><td>La conexión dice «Token inválido»</td><td>Token vencido (60 días), incompleto, revocado o sin permisos.</td><td>Genera un token nuevo y pégalo con <span class="ui">Editar</span>. Luego <span class="ui">Probar y descubrir</span> y vuelve a encender el monitoreo.</td></tr>
       <tr><td>Antes funcionaba y de repente nada se envía</td><td>Token vencido o cambiado; el monitoreo queda pausado hasta revalidar.</td><td>Valida de nuevo en Conexiones y enciende el monitoreo.</td></tr>
       <tr><td>Respuesta pública «Falló» con «Falta el permiso para responder comentarios en esta conexión»</td><td>El token no tiene el permiso de comentarios.</td><td>Genera un token con <code>instagram_business_manage_comments</code> (o <code>instagram_manage_comments</code>). Luego usa <span class="ui">Reintentar respuesta pública</span> dentro de las 24 horas.</td></tr>
-      <tr><td>Con «Pide seguir», la persona tocó el botón pero no recibió el recurso</td><td>El monitoreo está apagado, el modo prueba está activo, Meta aún no muestra el toque o pasaron más de 24 horas.</td><td>Enciende el monitoreo y espera un par de minutos. Revisa el bloque «Seguimiento» en <span class="ui">Ver</span>. Si dice «Expirado» o «Resultado desconocido», escríbele a mano desde Instagram.</td></tr>
-      <tr><td>«Meta rechazó el adjunto; se envió solo el texto»</td><td>La URL no es de descarga directa, no es pública, el formato no está documentado (por ejemplo mp3) o el archivo es muy grande.</td><td>Abre la URL en una ventana privada: debe descargarse el archivo. Prueba con m4a, jpg o pdf de menos de 8/25 MB. Solo afecta a comentarios nuevos.</td></tr>
-      <tr><td>Con adjunto, quedó «Resultado desconocido» y no llegó el texto</td><td>Meta no respondió a tiempo al enviar el adjunto (por ejemplo, un archivo lento de descargar).</td><td>Es a propósito: el texto no se envía para no duplicar. Revisa en Instagram si llegó el adjunto y, si hace falta, escribe a la persona a mano. Usa un servidor de archivos rápido.</td></tr>
-      <tr><td>«Pide seguir» entregó el recurso a alguien que no me sigue</td><td>Es el comportamiento esperado: Meta no permite comprobar el seguimiento.</td><td>No hay solución técnica hoy. El botón es un sistema de confianza.</td></tr>
+      <tr><td>Una persona tocó el botón «Ya te sigo» de una prueba anterior y no recibió nada</td><td>Con esta aplicación, Meta rechaza el envío después del toque («fuera de la ventana permitida»). Por eso la función está retirada.</td><td>Escríbele a mano desde Instagram. Las automatizaciones ahora envían el mensaje normal con sus botones de enlace (capítulo 10).</td></tr>
       <tr><td>Estado «Resultado desconocido»</td><td>Se perdió la respuesta de Meta (red, tiempo agotado, reinicio durante el envío).</td><td>No se reintenta nunca. Revisa en Instagram si llegó (capítulo 13).</td></tr>
       <tr><td>«Lectura confirmada, pero el contenido leído no coincide»</td><td>Meta devolvió el mensaje con otro formato o los botones no se leyeron igual.</td><td>No se reenvía nada. Revisa en Instagram cómo se ve. Si el texto se ve bien, puedes ignorarlo.</td></tr>
       <tr><td>«No se pudo leer: … (El remitente no coincide con la cuenta)»</td><td>La lectura de Meta no coincide con tu cuenta.</td><td>Verifica que la conexión apunte a la cuenta correcta y revisa en Instagram.</td></tr>

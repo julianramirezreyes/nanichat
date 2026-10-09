@@ -139,9 +139,9 @@ test('service rejects interactive modes with code interactive_mode_retired and r
     service.update(ctx.accountId, id, base);
     assert.deepEqual(one(db, `SELECT interactive_mode, interactive_titles_json FROM automations WHERE automation_id=?`, id),
       { interactive_mode: 'none', interactive_titles_json: '[]' });
-    // A legacy mode no longer blocks the follow gate.
+    // A legacy mode no longer blocks the follow gate (dormant code: the gate itself is retired, enabled here explicitly).
     db.prepare(`UPDATE automations SET interactive_mode='quick_reply', interactive_titles_json='["Ok"]' WHERE automation_id=?`).run(id);
-    service.update(ctx.accountId, id, { ...base, followGateEnabled: true, followGateMessage: 'Sígueme', followGateButtonTitle: 'Ya te sigo' } as never);
+    new AutomationService(db, { followGateAvailable: true }).update(ctx.accountId, id, { ...base, followGateEnabled: true, followGateMessage: 'Sígueme', followGateButtonTitle: 'Ya te sigo' } as never);
     assert.equal(one(db, `SELECT follow_gate_enabled FROM automations WHERE automation_id=?`, id).follow_gate_enabled, 1);
   });
 });

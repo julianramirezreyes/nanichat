@@ -20,8 +20,8 @@ Documento de referencia para quien mantiene o audita Social Desk. Describe la ar
 14. [Límites de volumen](#14-límites-de-volumen)
 15. [Limitaciones conocidas](#15-limitaciones-conocidas)
 16. [Fase 0 del follow gate (experimental)](#16-fase-0-del-follow-gate-experimental)
-17. [Pedir que me sigan (follow gate de confianza)](#17-pedir-que-me-sigan-follow-gate-de-confianza)
-18. [Adjunto del recurso por URL](#18-adjunto-del-recurso-por-url)
+17. [Pedir que me sigan (follow gate de confianza) — RETIRADA](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo)
+18. [Adjunto del recurso por URL — RETIRADA](#18-adjunto-del-recurso-por-url--retirada-código-inactivo)
 
 ## 1. Arquitectura
 
@@ -114,8 +114,8 @@ Respalda siempre la carpeta completa (base **y** llave) con la aplicación deten
 | v10 | Reconstrucción de `automations` para añadir `scope` y permitir `media_id` nulo, con `CHECK ((scope='media' AND media_id IS NOT NULL) OR (scope='account' AND media_id IS NULL))`. Se hace con las foreign keys desactivadas temporalmente (para que el `ON DELETE CASCADE` de las palabras clave no se dispare), se verifica `PRAGMA foreign_key_check` antes de confirmar y se restauran. Las filas existentes pasan a `scope='media'` sin cambiar IDs. |
 | v11 | Respuesta pública (solo aditiva): `automations.public_reply_enabled`, `public_reply_variants_json`; en `queue_items`: `public_reply_state`, `public_reply_text`, `public_reply_attempts`, `public_reply_next_at`, `public_reply_variant`, `public_reply_selected_at`; tabla de solo inserción `public_reply_attempts` con índice único que permite como máximo un evento `accepted` por elemento. |
 | v12 | Fase 0 del follow gate (experimental, solo aditiva): `comments.author_igsid` (anulable; ID opaco del autor tomado de `from.id`), `automations.interactive_mode` (`'none'` por defecto, `CHECK` en `none`/`quick_reply`/`postback`) e `automations.interactive_titles_json` (`'[]'` por defecto). No reconstruye tablas. Ver [sección 16](#16-fase-0-del-follow-gate-experimental). |
-| v13 | «Pedir que me sigan» (solo aditiva): `automations.follow_gate_enabled` (`0` por defecto, `CHECK` 0/1), `follow_gate_message` (`''`), `follow_gate_button_title` (`'Ya te sigo'`); tablas `gate_sessions` y `gate_events` (solo inserción, a lo sumo un `tap_detected` y un `resource_accepted` por sesión). Las automatizaciones existentes quedan con la opción apagada. Ver [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza). |
-| v14 | Adjunto del recurso (solo aditiva): `automations.resource_attachment_kind` y `gate_sessions.resource_attachment_kind` (`''` por defecto, `CHECK` en `''`/`image`/`audio`/`video`/`file`), `automations.resource_attachment_url` y `gate_sessions.resource_attachment_url` (`''`); tabla `gate_part_events` (solo inserción, a lo sumo un `accepted` por sesión y parte). Filas existentes: sin adjunto, sin cambios. Ver [sección 18](#18-adjunto-del-recurso-por-url). |
+| v13 | «Pedir que me sigan» (solo aditiva): `automations.follow_gate_enabled` (`0` por defecto, `CHECK` 0/1), `follow_gate_message` (`''`), `follow_gate_button_title` (`'Ya te sigo'`); tablas `gate_sessions` y `gate_events` (solo inserción, a lo sumo un `tap_detected` y un `resource_accepted` por sesión). Las automatizaciones existentes quedan con la opción apagada. Ver [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo). |
+| v14 | Adjunto del recurso (solo aditiva): `automations.resource_attachment_kind` y `gate_sessions.resource_attachment_kind` (`''` por defecto, `CHECK` en `''`/`image`/`audio`/`video`/`file`), `automations.resource_attachment_url` y `gate_sessions.resource_attachment_url` (`''`); tabla `gate_part_events` (solo inserción, a lo sumo un `accepted` por sesión y parte). Filas existentes: sin adjunto, sin cambios. Ver [sección 18](#18-adjunto-del-recurso-por-url--retirada-código-inactivo). |
 
 > **Importante:** respalda la carpeta de datos antes del primer arranque de cada versión que traiga migraciones.
 
@@ -206,7 +206,7 @@ Estados de `queue_items` (respuesta privada):
 | `FAILED_RETRYABLE` | Límite de volumen del proveedor (HTTP 429) o fallo al releer el comentario. Se reintenta con espera creciente (10 s, 20 s, 40 s…, máximo 15 min locales), nunca antes de un `Retry-After` del proveedor. Tras 5 intentos pasa a `FAILED_PERMANENT`. |
 | `FAILED_PERMANENT` | Rechazo definitivo del proveedor o reintentos agotados. |
 | `UNKNOWN_OUTCOME` | Resultado ambiguo (timeout, respuesta malformada o error del servidor después del envío, aceptado sin ID de mensaje, o reinicio después de la intención). **Nunca se reintenta automáticamente.** |
-| `SKIPPED` | La revalidación previa al envío encontró que ya no está permitido. |
+| `SKIPPED` | La revalidación previa al envío encontró que ya no está permitido. El motivo, si existe, va en `state_reason_code` y aparece como `safeErrorCode` en `GET /api/queue` (por ejemplo `owner_replied`, `yielded_to_media_automation`, `interactive_mode_retired` o `follow_gate_retired`). |
 | `EXPIRED` | El comentario alcanzó la ventana de 7 días. Ver abajo. |
 
 Existen además `DISCOVERED` y `MATCHED` en el `CHECK` del esquema, sin uso en el flujo actual.
@@ -307,12 +307,11 @@ Los valores por defecto son prudentes y locales, no una garantía de que Meta ac
 - La detección de «ya respondido» depende de las respuestas guardadas por escaneos anteriores; no hay comprobación en vivo al enviar.
 - El comportamiento de las respuestas privadas (permisos, reglas de 24 h/7 días, cómo se ven los botones) depende de Meta y debe comprobarse con un comentario real controlado antes de un uso amplio.
 - La retención heredada solo conoce el formato de carpetas descrito en la sección 12 (`run.lock` y los nombres de contador listados).
-- «Pedir que me sigan» no verifica el seguimiento (Meta no lo permite) y su detección del toque depende de leer la conversación; ver la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza).
-- El adjunto del recurso se envía por URL pública HTTPS: la aplicación no aloja archivos ni comprueba formato o tamaño; ver la [sección 18](#18-adjunto-del-recurso-por-url).
+- «Pedir que me sigan» y el adjunto del recurso están **retirados** (código inactivo): con una aplicación que solo sondea, Meta rechaza el envío posterior al toque; ver la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo).
 
 ## 16. Fase 0 del follow gate (experimental)
 
-Objetivo: permitir **un experimento controlado** para saber qué acepta Meta antes de construir un «follow gate» (comentario → respuesta privada con botón → comprobar si la persona sigue la cuenta → enviar el recurso). **No** es el follow gate: el toque de un botón **no se procesa** y no se envía nada adicional. El flujo completo de confianza (sin verificación) está en la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza).
+Objetivo: permitir **un experimento controlado** para saber qué acepta Meta antes de construir un «follow gate» (comentario → respuesta privada con botón → comprobar si la persona sigue la cuenta → enviar el recurso). **No** es el follow gate: el toque de un botón **no se procesa** y no se envía nada adicional. El flujo completo de confianza (sin verificación) está en la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo).
 
 ### Qué hace
 
@@ -335,10 +334,25 @@ Si Meta rechaza explícitamente el mensaje con botones (HTTP 400 que no sea de t
 
 ### El experimento
 
-Ya se hizo: la respuesta privada acepta el botón postback y el toque aparece al leer la conversación (ver la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza)). La sección «Botones interactivos (experimental)» se retiró de la interfaz; «Inspeccionar conversación (experimental)» se mantiene como herramienta de solo lectura.
+Ya se hizo: la respuesta privada acepta el botón postback y el toque aparece al leer la conversación (ver la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo)). La sección «Botones interactivos (experimental)» se retiró de la interfaz; «Inspeccionar conversación (experimental)» se mantiene como herramienta de solo lectura.
 
 
-## 17. Pedir que me sigan (follow gate de confianza)
+## 17. Pedir que me sigan (follow gate de confianza) — RETIRADA, código inactivo
+
+> **RETIRADA el 2026-10-09.** El resto de esta sección y la [sección 18](#18-adjunto-del-recurso-por-url--retirada-código-inactivo) describen el código **inactivo**, que se conserva para una posible versión futura basada en webhooks.
+>
+> **Evidencia (en vivo, 2026-10-09).** 41 s después de un toque detectado, el envío del recurso (`POST /<IG_ID>/messages` con `recipient.id`) fue rechazado con HTTP 403, código `10`, subcódigo `2534022` («This message is sent outside of allowed window»; [tabla de errores de Meta](https://developers.facebook.com/documentation/business-messaging/messenger-platform/error-codes)). La consulta de seguimiento del perfil respondió código `230` («User consent required»). Ambas indican que Meta **no** cuenta el toque de un botón (en un hilo iniciado por la cuenta con una respuesta privada, visto por una aplicación que solo sondea) como un mensaje de la persona que abra la ventana de 24 h. Consecuencia: quien toca el botón **no recibe nada**. Hipótesis **no verificada**: recibir el toque por webhooks (`messaging_postbacks`) lo cambiaría.
+>
+> **Qué hace el código hoy** (interruptor `FOLLOW_GATE_AVAILABLE = false` en `src/services/follow-gate-rules.ts`; los servicios aceptan la opción `followGateAvailable` **solo en pruebas**, nunca por variable de entorno):
+>
+> - API: `POST`/`PUT /api/automations` con `followGateEnabled` distinto de `false`, un `followGateMessage` no vacío o un `followGateButtonTitle` distinto de vacío o «Ya te sigo» → `400 follow_gate_retired`; `resourceAttachmentKind` o `resourceAttachmentUrl` no vacíos → `400 attachment_retired`. Un `PUT` válido **limpia** la configuración guardada (`follow_gate_enabled=0`, mensaje vacío, título «Ya te sigo», sin adjunto). `GET /api/automations` mantiene los campos, siempre como desactivados y vacíos.
+> - Encolado: una fila que aún tenga la opción o un adjunto se trata como apagada: el primer mensaje es el normal (texto + botones URL), sin sesión ni botón postback. La Revisión pendiente y las vistas previas de Dry Run muestran ese único mensaje (sin `gatePreview`).
+> - Cola: un elemento `QUEUED`/`FAILED_RETRYABLE` congelado con `payload.followGate` pasa a `SKIPPED` con `state_reason_code = follow_gate_retired` **antes** de cualquier llamada al proveedor (mismo patrón que `interactive_mode_retired`). El DTO de la cola muestra ese código en `safeErrorCode` (también para los demás `SKIPPED` con motivo).
+> - Motor: en cada tick, las sesiones `AWAITING_TAP` (con o sin toque) pasan a `CANCELLED` con `follow_gate_retired` y un evento `cancelled`, sin llamar a Meta. `COMPLETED`, `FAILED`, `EXPIRED`, `CANCELLED` y `UNKNOWN_OUTCOME` no se tocan (historial). Una sesión `RESOURCE_SENDING` no se cancela: la recuperación de arranque la deja `UNKNOWN_OUTCOME` (`process_interrupted_after_intent`), como siempre.
+> - Interfaz: sin casilla, sin adjunto y sin insignias; en «Cola e historial» el bloque «Seguimiento (función retirada · historial)» aparece solo si existe una sesión. Junto a los botones URL: «Para entregar un audio o un video, ponlo en tu página y enlázalo con un botón de enlace.»
+> - Esquema: sigue en v14, sin migración; las tablas y columnas se conservan.
+>
+> **Cómo reactivarla:** implementar la detección del toque por webhooks (servidor accesible desde internet, suscripción a `messaging_postbacks`), verificar en vivo que el envío posterior al toque es aceptado, cambiar `FOLLOW_GATE_AVAILABLE` a `true`, restaurar la interfaz y actualizar esta documentación con la evidencia. No basta con cambiar el interruptor.
 
 Opción normal por automatización, **apagada por defecto**: «Pedir primero que me sigan (sin comprobación)». Es un **sistema de confianza**. Meta no permite comprobar si la persona sigue la cuenta: la consulta de perfil (`is_user_follow_business`) respondió `User consent is required` (código 230) en todas las conversaciones probadas en vivo. La aplicación **no verifica** el seguimiento y nunca dice que lo hizo: solo detecta que la persona tocó el botón.
 
@@ -416,9 +430,11 @@ Documentación de Meta: [Instagram Messaging API (Send API)](https://developers.
 - El sondeo de conversaciones a escala (muchas sesiones simultáneas, límites de uso reales de Meta) no se midió. Si la persona escribe más de 5 mensajes después de tocar el botón antes del siguiente sondeo, el toque puede quedar fuera de los 5 detalles leídos y no detectarse.
 - Que `from.id` del comentario sea el mismo IGSID que `recipient_id` no está confirmado; por eso se prefiere `recipient_id`.
 
-## 18. Adjunto del recurso por URL
+## 18. Adjunto del recurso por URL — RETIRADA, código inactivo
 
-Opcional, solo con «Pedir primero que me sigan» activo: un medio (imagen, audio, video o PDF) que se envía **como mensaje aparte, antes** del texto del recurso. Sin adjunto, todo funciona exactamente como en la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza) (mismo payload, mismos eventos; no se escriben `gate_part_events`).
+> **RETIRADA el 2026-10-09** junto con la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo): el adjunto solo se enviaba después del toque, y ese envío es el que Meta rechaza (código 10, subcódigo 2534022). La API responde `400 attachment_retired` y una fila con adjunto guardado se trata como «sin adjunto». Lo que sigue describe el código inactivo.
+
+Opcional, solo con «Pedir primero que me sigan» activo: un medio (imagen, audio, video o PDF) que se envía **como mensaje aparte, antes** del texto del recurso. Sin adjunto, todo funciona exactamente como en la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo) (mismo payload, mismos eventos; no se escriben `gate_part_events`).
 
 ### Por qué dos mensajes y por qué una URL
 

@@ -13,9 +13,18 @@ export const ATTACHMENT_URL_MAX = 2048;
 const PRIVATE_SUFFIXES = ['localhost', 'local', 'lan', 'home', 'internal', 'intranet', 'corp', 'arpa', 'test', 'invalid'];
 
 export class ResourceAttachmentError extends TypeError {
-  constructor(readonly code: 'attachment_invalid' | 'attachment_url_invalid' | 'attachment_requires_follow_gate', message: string) {
+  constructor(readonly code: 'attachment_invalid' | 'attachment_url_invalid' | 'attachment_requires_follow_gate' | 'attachment_retired', message: string) {
     super(message);
   }
+}
+
+/**
+ * Retired attachment (see FOLLOW_GATE_AVAILABLE): only omitted, null or empty fields are accepted; anything else is
+ * rejected with `attachment_retired` before any other validation.
+ */
+export function assertAttachmentRetired(kind: unknown, url: unknown): void {
+  const empty = (value: unknown) => value === undefined || value === null || value === '';
+  if (!empty(kind) || !empty(url)) throw new ResourceAttachmentError('attachment_retired', 'The resource attachment was retired');
 }
 
 export function isAttachmentKind(value: unknown): value is AttachmentKind {

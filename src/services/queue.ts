@@ -6,7 +6,7 @@ import {
   renderReply, storedFollowGateConfig,
 } from './automations.ts';
 import { storedResourceAttachment } from './resource-attachment.ts';
-import { GATE_FIRST_POLL_MS, safeIgsid } from './follow-gate-rules.ts';
+import { FOLLOW_GATE_RETIRED_CODE, GATE_FIRST_POLL_MS, followGateAvailable, safeIgsid } from './follow-gate-rules.ts';
 import {
   PUBLIC_REPLY_MAX_ATTEMPTS, PUBLIC_REPLY_RECENT_WINDOW, PUBLIC_REPLY_SPACING_MS, PUBLIC_REPLY_WINDOW_MS,
   renderPublicReply, selectPublicReplyVariant, storedPublicReplyVariants,
@@ -87,6 +87,8 @@ export class QueueService {
       publicReplySpacingMs?: number;
       /** Randomness for variant rotation, in [0, 1); injectable for deterministic tests. */
       rng?: () => number;
+      /** TEST-ONLY override of FOLLOW_GATE_AVAILABLE (the retired follow gate); production never passes it. */
+      followGateAvailable?: boolean;
     } = {},
   ) {}
 
@@ -161,7 +163,8 @@ export class QueueService {
       // Follow gate: the first message is the gate (one postback button); the resource (reply text + URL buttons, plus the
       // optional attachment) is rendered now and frozen in the payload, so later edits never alter it. Without the gate
       // the payload is the historic one. A legacy interactive_mode (retired experiment) is ignored: no dead button is sent.
-      const payload = followGate.enabled
+      // While the follow gate is retired (FOLLOW_GATE_AVAILABLE), a stored gate/attachment is ignored the same way.
+      const payload = followGate.enabled && this.followGateAvailable()
         ? renderFollowGatePayload(followGate, variables, { replyText: automation.reply_text, buttons: urlButtons }, automationId,
           storedResourceAttachment(automation.resource_attachment_kind, automation.resource_attachment_url))
         : renderReply(automation.reply_text, variables, urlButtons);
@@ -214,6 +217,14 @@ export class QueueService {
       this.database.prepare(`UPDATE queue_items SET state='SKIPPED', state_reason_code='interactive_mode_retired', updated_at=?
         WHERE queue_item_id=? AND state IN ('QUEUED','FAILED_RETRYABLE')`)
         .run(new Date().toISOString(), row.queue_item_id);
+      return row.queue_item_id;
+    }
+    // Retired follow gate: a payload frozen with a gate would send a button whose follow-up Meta then rejects (outside
+    // the allowed window), so the person would receive nothing. Skip it before any provider call, intent or POST.
+    if (!this.followGateAvailable() && frozenFollowGatePayload(row.payload_json)) {
+      this.database.prepare(`UPDATE queue_items SET state='SKIPPED', state_reason_code=?, updated_at=?
+        WHERE queue_item_id=? AND state IN ('QUEUED','FAILED_RETRYABLE')`)
+        .run(FOLLOW_GATE_RETIRED_CODE, new Date().toISOString(), row.queue_item_id);
       return row.queue_item_id;
     }
     let freshComment;
@@ -696,6 +707,8 @@ export class QueueService {
    * as FAILED (igsid_unknown) and the private item stays SENT (it is never resent).
    */
   private createGateSession(row: QueueRow, recipientId: string | undefined): void {
+    // Defensive: with the gate retired a gate payload is skipped before sending, so no session can ever start.
+    if (!this.followGateAvailable()) return;
     let snapshot: { buttonTitle?: unknown; resource?: { text?: unknown; buttons?: unknown }; attachment?: { kind?: unknown; url?: unknown } } | undefined;
     try {
       snapshot = (JSON.parse(row.payload_json) as { followGate?: typeof snapshot }).followGate;
@@ -744,6 +757,10 @@ export class QueueService {
   private readDryRun(): boolean {
     const row = this.database.prepare(`SELECT state_value FROM app_state WHERE state_key='dry_run'`).get() as { state_value: string } | undefined;
     return row?.state_value !== 'false';
+  }
+
+  private followGateAvailable(): boolean {
+    return followGateAvailable(this.options.followGateAvailable);
   }
 
   private legacyAcknowledged(row: QueueRow, ownLockHeld = false): boolean {
@@ -924,6 +941,16 @@ function retiredInteractivePayload(payloadJson: string): boolean {
   try {
     const payload = JSON.parse(payloadJson) as { quickReplies?: unknown; postbackButtons?: unknown; followGate?: unknown };
     return payload.quickReplies !== undefined || (payload.postbackButtons !== undefined && !payload.followGate);
+  } catch {
+    return false;
+  }
+}
+
+/** True for a frozen payload carrying a follow gate snapshot (first message with the gate button). */
+function frozenFollowGatePayload(payloadJson: string): boolean {
+  try {
+    const payload = JSON.parse(payloadJson) as { followGate?: unknown };
+    return payload.followGate !== undefined && payload.followGate !== null;
   } catch {
     return false;
   }

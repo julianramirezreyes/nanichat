@@ -90,8 +90,13 @@ export function attachmentErrorHint(code: string | null | undefined): string | n
   return code ? ERROR_HINTS[code] ?? null : null;
 }
 
+/** Spanish label of the API code `attachment_retired` (the attachment is retired together with the follow gate). */
+export const ATTACHMENT_RETIRED_LABEL = 'Esta opción está desactivada: Meta no permite entregar el adjunto después del toque del botón con esta aplicación. '
+  + 'Para entregar un audio o un video, ponlo en tu página y enlázalo con un botón de enlace.';
+
 /** Spanish labels of the API validation codes. */
 export const ATTACHMENT_ERROR_LABELS: Record<string, string> = {
+  attachment_retired: ATTACHMENT_RETIRED_LABEL,
   attachment_invalid: 'Revise el «Adjunto del recurso»: elija Imagen, Audio, Video o PDF (o «Sin adjunto» con la URL vacía).',
   attachment_url_invalid: 'La URL del adjunto debe ser un enlace HTTPS público y directo (sin usuario ni contraseña, sin localhost, direcciones IP ni nombres de red local), de hasta 2048 caracteres.',
   attachment_requires_follow_gate: 'El adjunto solo se envía después del botón: active «Pedir primero que me sigan» para usarlo.',

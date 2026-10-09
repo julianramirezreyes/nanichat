@@ -11,6 +11,7 @@ import { listPendingReview, truncateText } from '../services/pending-review.ts';
 import { storedPublicReplyVariants } from '../services/public-reply.ts';
 import { FollowGateConfigError, InteractiveModeRetiredError, assertInteractiveRetired, storedFollowGateConfig } from '../services/automations.ts';
 import { ResourceAttachmentError, storedResourceAttachment } from '../services/resource-attachment.ts';
+import { followGateAvailable } from '../services/follow-gate-rules.ts';
 import type { ImportedMetaEnvironment } from '../security/env-import.ts';
 
 const BODY_LIMIT = 64 * 1024;
@@ -31,6 +32,8 @@ export type ApiDependencies = {
   importEnvironment?: () => Promise<ImportedMetaEnvironment>;
   /** EXPERIMENTAL read-only diagnostics (follow gate phase 0): GET-only provider calls. */
   diagnostics?: Required<Pick<SocialProvider, 'diagnoseConversation' | 'getUserProfile'>>;
+  /** TEST-ONLY override of FOLLOW_GATE_AVAILABLE (the retired follow gate); production never passes it. */
+  followGateAvailable?: boolean;
   legacy?: {
     inspect(username: string): { blocked: boolean; reasonCode?: string; lockPresent: boolean; counterVersion: string; holdConfigured?: boolean };
     acknowledge(username: string, version: string): { ok: boolean; state: { lockPresent: boolean; counterVersion: string } };
@@ -157,7 +160,7 @@ async function route(
     const accountIdValue = accountFilter(url);
     return send(response, 200, { media: listMedia(db, accountIdValue) });
   }
-  if (path === '/api/automations' && method === 'GET') return send(response, 200, { automations: listAutomations(db, accountFilter(url)) });
+  if (path === '/api/automations' && method === 'GET') return send(response, 200, { automations: listAutomations(db, accountFilter(url), followGateAvailable(deps.followGateAvailable)) });
   if (path === '/api/automations' && method === 'POST') {
     const service = requireService(deps.automations, 'automations');
     const account = accountId(body.accountId, db);
@@ -176,7 +179,7 @@ async function route(
     const automationId = service.create({ accountId: account, scope, mediaId: scope === 'account' ? null : text(body.mediaId), name: text(body.name),
       replyText: text(body.replyText), matchMode: matchMode(body.matchMode, true), buttons: buttons(body.buttons),
       publicReplyEnabled: body.publicReplyEnabled as boolean | undefined, publicReplyVariants: body.publicReplyVariants as string[] | undefined,
-      // Follow gate and its optional attachment: validated strictly by the service (typed 400 codes, never coerced).
+      // Follow gate and attachment: RETIRED (400 follow_gate_retired / attachment_retired unless the test-only override is on).
       ...followGateFields(body) });
     for (const keyword of keywords) service.addKeyword(account, automationId, keyword);
     return send(response, 201, { automationId });
@@ -192,7 +195,7 @@ async function route(
       matchMode: matchMode(body.matchMode, false), buttons: buttons(body.buttons), keywords: stringList(body.keywords, 20),
       // Omitted: the stored public reply configuration is kept.
       publicReplyEnabled: body.publicReplyEnabled as boolean | undefined, publicReplyVariants: body.publicReplyVariants as string[] | undefined,
-      // Follow gate (and attachment): omitted fields keep the stored configuration; changes apply to new sessions only.
+      // Follow gate and attachment: RETIRED, so a valid PUT resets any stored configuration to off/empty (400 if requested).
       ...followGateFields(body),
     });
     return send(response, 200, { ok: true });
@@ -273,7 +276,8 @@ async function route(
     const selected = accountId(url.searchParams.get('accountId'), db);
     const limit = Math.min(200, Math.max(1, Math.trunc(Number(url.searchParams.get('limit') ?? 50)) || 50));
     const offset = Math.max(0, Math.min(100_000, Math.trunc(Number(url.searchParams.get('offset') ?? 0)) || 0));
-    return send(response, 200, listPendingReview(db, selected, { limit, offset, now: (deps.clock ?? Date.now)() }));
+    return send(response, 200, listPendingReview(db, selected, { limit, offset, now: (deps.clock ?? Date.now)(),
+      followGateAvailable: deps.followGateAvailable }));
   }
   if (path === '/api/queue' && method === 'GET') return send(response, 200, queuePage(db, accountFilter(url), url));
   const attemptsMatch = path.match(/^\/api\/queue\/([^/]+)\/attempts$/u);
@@ -399,7 +403,7 @@ function listMedia(db: DatabaseSync, selected?: string) {
     FROM media ${selected ? 'WHERE account_id=?' : ''} ORDER BY published_at DESC, media_id LIMIT 500`).all(...(selected ? [selected] : []));
 }
 
-function listAutomations(db: DatabaseSync, selected?: string) {
+function listAutomations(db: DatabaseSync, selected?: string, gateAvailable = false) {
   if (selected) accountId(selected, db);
   const rows = db.prepare(`SELECT automation_id AS automationId, account_id AS accountId, media_id AS mediaId, scope, name,
       status, match_mode AS matchMode, reply_text AS replyText, buttons_json AS buttonsJson, real_enabled AS realEnabled,
@@ -411,6 +415,8 @@ function listAutomations(db: DatabaseSync, selected?: string) {
   return rows.map(({ publicReplyVariantsJson, ...row }) => ({ ...row,
     ...(({ enabled, message, buttonTitle }) => ({ followGateEnabled: enabled, followGateMessage: message, followGateButtonTitle: buttonTitle }))(
       storedFollowGateConfig(row.followGateEnabled, row.followGateMessage, row.followGateButtonTitle)),
+    // Retired follow gate: the fields stay in the DTO but always read as disabled/empty (stored values are inert).
+    ...(gateAvailable ? {} : { followGateEnabled: false, followGateMessage: '', resourceAttachmentKind: '', resourceAttachmentUrl: '' }),
     buttons: JSON.parse(String(row.buttonsJson)), realEnabled: Boolean(row.realEnabled),
     publicReplyEnabled: Boolean(row.publicReplyEnabled), publicReplyVariants: storedPublicReplyVariants(String(publicReplyVariantsJson)),
     keywords: db.prepare(`SELECT phrase FROM automation_keywords WHERE account_id=? AND automation_id=? ORDER BY rowid`)
@@ -440,7 +446,7 @@ function queuePage(db: DatabaseSync, selected: string | undefined, url: URL) {
       g.next_poll_at AS gateNextPollAt, g.poll_count AS gatePollCount, g.resource_message_id AS gateResourceMessageId,
       g.last_error_code AS gateLastErrorCode, g.button_title AS gateButtonTitle, g.gate_session_id AS gateSessionId,
       g.resource_attachment_kind AS gateAttachmentKind, g.resource_attachment_url AS gateAttachmentUrl,
-      CASE WHEN q.state='EXPIRED' AND q.state_reason_code IS NOT NULL THEN q.state_reason_code
+      CASE WHEN q.state IN ('EXPIRED','SKIPPED') AND q.state_reason_code IS NOT NULL THEN q.state_reason_code
         ELSE (SELECT safe_error_code FROM send_attempts e WHERE e.account_id=q.account_id AND e.queue_item_id=q.queue_item_id ORDER BY event_at DESC LIMIT 1) END AS safeErrorCode
       FROM queue_items q JOIN social_accounts s ON s.account_id=q.account_id LEFT JOIN automations a ON a.automation_id=q.automation_id AND a.account_id=q.account_id
       LEFT JOIN comments cm ON cm.account_id=q.account_id AND cm.comment_id=q.comment_id

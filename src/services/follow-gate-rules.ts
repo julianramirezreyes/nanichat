@@ -4,6 +4,24 @@
  * gate button simply releases the resource message.
  */
 
+/**
+ * CENTRAL SWITCH — the follow gate and its resource attachment are RETIRED (2026-10-09). With this polling-only app,
+ * Meta rejects the follow-up send after the tap (HTTP 403, code 10, subcode 2534022 "This message is sent outside of
+ * allowed window"), so a person who taps the button receives nothing. While this is false: the API rejects gate and
+ * attachment requests (follow_gate_retired / attachment_retired), enqueue ignores stored gate/attachment rows, queued
+ * gate payloads are SKIPPED, open sessions are CANCELLED without any Meta call, and the UI hides the options. The engine
+ * stays in the code, dormant. Do NOT flip it without webhook-based tap handling and a live verification.
+ */
+export const FOLLOW_GATE_AVAILABLE = false;
+
+/** Effective switch. `override` exists ONLY for tests (services take it as an option); production never passes it. */
+export function followGateAvailable(override?: boolean): boolean {
+  return override ?? FOLLOW_GATE_AVAILABLE;
+}
+
+/** Safe code of everything turned off by the retirement (API 400, skipped queue items, cancelled sessions). */
+export const FOLLOW_GATE_RETIRED_CODE = 'follow_gate_retired';
+
 const MINUTE = 60_000;
 /** First conversation poll after the gate message was accepted. */
 export const GATE_FIRST_POLL_MS = 20_000;

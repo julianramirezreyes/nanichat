@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AccountRef, DirectAttachmentPayload, DirectMessagePayload, ResourceAttachment, SendResult, SocialProvider, TapResult } from '../core/domain.ts';
 import {
-  GATE_MAX_SEND_ATTEMPTS, GATE_MAX_SESSIONS_PER_TICK, GATE_PART_SPACING_MS, GATE_POLL_ERROR_MIN_DELAY_MS, GATE_RESOURCE_WINDOW_MS, GATE_SPACING_MS,
+  FOLLOW_GATE_RETIRED_CODE, followGateAvailable, GATE_MAX_SEND_ATTEMPTS, GATE_MAX_SESSIONS_PER_TICK, GATE_PART_SPACING_MS, GATE_POLL_ERROR_MIN_DELAY_MS, GATE_RESOURCE_WINDOW_MS, GATE_SPACING_MS,
   GATE_TAP_EXPIRY_MS, nextGatePollDelay, normalizeTapText,
 } from './follow-gate-rules.ts';
 import { legacyAcknowledged, type LegacyQueueInterlock } from './queue.ts';
@@ -41,6 +41,8 @@ export type FollowGateOptions = {
   spacingMs?: number;
   maxPerTick?: number;
   legacyInterlock?: LegacyQueueInterlock;
+  /** TEST-ONLY override of FOLLOW_GATE_AVAILABLE (the gate is retired); production never passes it. */
+  followGateAvailable?: boolean;
 };
 
 /**
@@ -103,12 +105,32 @@ export class FollowGateService {
     return expired;
   }
 
+  /**
+   * Retired gate (FOLLOW_GATE_AVAILABLE false): every session still waiting for a tap (tapped or not) is CANCELLED with
+   * `follow_gate_retired` plus an append-only event, locally, without any provider call. Closed sessions (COMPLETED,
+   * FAILED, EXPIRED, CANCELLED, UNKNOWN_OUTCOME) are history and stay untouched. A RESOURCE_SENDING session is never
+   * cancelled here: its POST may have gone out, so startup recovery records it as UNKNOWN_OUTCOME instead.
+   */
+  cancelRetired(): number {
+    const rows = this.database.prepare(`SELECT gate_session_id, account_id FROM gate_sessions WHERE state='AWAITING_TAP' ORDER BY gate_sent_at LIMIT ?`)
+      .all(SWEEP_LIMIT) as Array<{ gate_session_id: string; account_id: string }>;
+    let cancelled = 0;
+    for (const row of rows) {
+      if (this.transition(row, ['AWAITING_TAP'], 'CANCELLED', 'cancelled', { code: FOLLOW_GATE_RETIRED_CODE })) cancelled++;
+    }
+    return cancelled;
+  }
+
   /** Processes at most `maxPerTick` due sessions sequentially. Returns how many sessions were looked at. */
   async processDue(): Promise<number> {
     if (this.running) return 0;
     this.running = true;
     this.calls = 0;
     try {
+      if (!followGateAvailable(this.options.followGateAvailable)) {
+        this.cancelRetired();
+        return 0;
+      }
       this.expireStale();
       if (this.readDryRun() || !this.provider.findUserTap || !this.provider.sendMessage) return 0;
       const nowIso = new Date(this.clock()).toISOString();

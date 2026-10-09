@@ -2,7 +2,8 @@ import type { FollowGateSnapshot, InteractiveMode, ProviderComment, PrivateReply
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { storedPublicReplyVariants, validatePublicReplyVariants } from './public-reply.ts';
-import { validateResourceAttachment } from './resource-attachment.ts';
+import { assertAttachmentRetired, validateResourceAttachment } from './resource-attachment.ts';
+import { followGateAvailable } from './follow-gate-rules.ts';
 
 export const PRIVATE_REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -126,10 +127,27 @@ export const FOLLOW_GATE_DEFAULT_TITLE = 'Ya te sigo';
 
 /** Validation error of the follow gate configuration with a safe machine code (the API answers 400 with it). */
 export class FollowGateConfigError extends TypeError {
-  constructor(readonly code: 'follow_gate_invalid' | 'follow_gate_message_invalid' | 'follow_gate_button_title_invalid' | 'follow_gate_interactive_conflict', message: string) {
+  constructor(readonly code: 'follow_gate_invalid' | 'follow_gate_message_invalid' | 'follow_gate_button_title_invalid' | 'follow_gate_interactive_conflict'
+    | 'follow_gate_retired', message: string) {
     super(message);
   }
 }
+
+/**
+ * Retired follow gate (see FOLLOW_GATE_AVAILABLE): only a request that leaves it off is accepted — `followGateEnabled`
+ * omitted or false, the message omitted or blank, the button title omitted, blank or the default «Ya te sigo». Anything
+ * else is rejected with `follow_gate_retired` before any other validation.
+ */
+export function assertFollowGateRetired(input: { enabled?: unknown; message?: unknown; buttonTitle?: unknown }): void {
+  const blank = (value: unknown) => value === undefined || value === null || (typeof value === 'string' && !value.trim());
+  const enabledOk = input.enabled === undefined || input.enabled === null || input.enabled === false;
+  const titleOk = blank(input.buttonTitle) || (typeof input.buttonTitle === 'string' && input.buttonTitle.trim() === FOLLOW_GATE_DEFAULT_TITLE);
+  if (!enabledOk || !blank(input.message) || !titleOk) throw new FollowGateConfigError('follow_gate_retired', 'The follow gate was retired');
+}
+
+/** Stored configuration of a retired gate: off, no message, default title, no attachment. */
+const RETIRED_GATE: FollowGateConfig = { enabled: false, message: '', buttonTitle: FOLLOW_GATE_DEFAULT_TITLE };
+const NO_ATTACHMENT = { kind: '' as const, url: '' };
 
 export type FollowGateConfig = { enabled: boolean; message: string; buttonTitle: string };
 const SAMPLE_VARIABLES: ReplyVariables = { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' };
@@ -332,7 +350,11 @@ export function claimingAutomations(database: DatabaseSync, accountId: string, m
 }
 
 export class AutomationService {
-  constructor(private readonly database: DatabaseSync) {}
+  constructor(
+    private readonly database: DatabaseSync,
+    /** `followGateAvailable` is a TEST-ONLY override of FOLLOW_GATE_AVAILABLE (production never passes it). */
+    private readonly options: { followGateAvailable?: boolean } = {},
+  ) {}
 
   create(input: {
     accountId: string;
@@ -362,8 +384,15 @@ export class AutomationService {
     const publicReply = publicReplyConfig(input.publicReplyEnabled, input.publicReplyVariants, { enabled: false, variants: [] });
     const scope = input.scope ?? 'media';
     if (scope !== 'media' && scope !== 'account') throw new TypeError('Invalid automation scope');
-    const followGate = validateFollowGateConfig({ enabled: input.followGateEnabled, message: input.followGateMessage, buttonTitle: input.followGateButtonTitle }, 'none');
-    const attachment = validateResourceAttachment({ kind: input.resourceAttachmentKind, url: input.resourceAttachmentUrl }, followGate.enabled);
+    const gateInput = { enabled: input.followGateEnabled, message: input.followGateMessage, buttonTitle: input.followGateButtonTitle };
+    const available = followGateAvailable(this.options.followGateAvailable);
+    if (!available) {
+      assertFollowGateRetired(gateInput);
+      assertAttachmentRetired(input.resourceAttachmentKind, input.resourceAttachmentUrl);
+    }
+    const followGate = available ? validateFollowGateConfig(gateInput, 'none') : RETIRED_GATE;
+    const attachment = available
+      ? validateResourceAttachment({ kind: input.resourceAttachmentKind, url: input.resourceAttachmentUrl }, followGate.enabled) : NO_ATTACHMENT;
     const automationId = randomUUID();
     renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons ?? []);
     let mediaId: string | null = null;
@@ -424,10 +453,17 @@ export class AutomationService {
         follow_gate_enabled: number; follow_gate_message: string; follow_gate_button_title: string;
         resource_attachment_kind: string; resource_attachment_url: string } | undefined;
     if (!stored) throw new Error('Automation does not belong to this account');
-    const followGate = validateFollowGateConfig({ enabled: input.followGateEnabled, message: input.followGateMessage, buttonTitle: input.followGateButtonTitle },
-      'none', storedFollowGateConfig(stored.follow_gate_enabled, stored.follow_gate_message, stored.follow_gate_button_title));
-    const attachment = validateResourceAttachment({ kind: input.resourceAttachmentKind, url: input.resourceAttachmentUrl }, followGate.enabled,
-      { kind: stored.resource_attachment_kind, url: stored.resource_attachment_url });
+    const gateInput = { enabled: input.followGateEnabled, message: input.followGateMessage, buttonTitle: input.followGateButtonTitle };
+    const available = followGateAvailable(this.options.followGateAvailable);
+    if (!available) {
+      assertFollowGateRetired(gateInput);
+      assertAttachmentRetired(input.resourceAttachmentKind, input.resourceAttachmentUrl);
+    }
+    // Retired: any edit resets a stored gate/attachment (old test configurations) to off/empty.
+    const followGate = available ? validateFollowGateConfig(gateInput, 'none',
+      storedFollowGateConfig(stored.follow_gate_enabled, stored.follow_gate_message, stored.follow_gate_button_title)) : RETIRED_GATE;
+    const attachment = available ? validateResourceAttachment({ kind: input.resourceAttachmentKind, url: input.resourceAttachmentUrl }, followGate.enabled,
+      { kind: stored.resource_attachment_kind, url: stored.resource_attachment_url }) : NO_ATTACHMENT;
     const storedVariants = storedPublicReplyVariants(stored.public_reply_variants_json);
     const publicReply = publicReplyConfig(input.publicReplyEnabled, input.publicReplyVariants,
       { enabled: stored.public_reply_enabled === 1, variants: storedVariants });

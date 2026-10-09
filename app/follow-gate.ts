@@ -1,4 +1,18 @@
-/** Follow gate (honor system): presentation helpers without side effects. Server-side validation is authoritative. */
+/**
+ * Follow gate (honor system): presentation helpers without side effects. Server-side validation is authoritative.
+ * RETIRED (2026-10-09): the form no longer offers the gate; these helpers remain for the dormant code and to keep
+ * historical sessions readable in «Cola e historial».
+ */
+
+/** Spanish label of the API code `follow_gate_retired`. */
+export const FOLLOW_GATE_RETIRED_LABEL = 'Esta opción está desactivada: Meta no permite entregar el recurso después del toque del botón con esta aplicación.';
+/** One neutral line near the URL buttons of the form (no feature promises). */
+export const MEDIA_LINK_TIP = 'Para entregar un audio o un video, ponlo en tu página y enlázalo con un botón de enlace.';
+
+/** The «Seguimiento» block of a queue item is shown only for a historical session, never for a bare payload snapshot. */
+export function showFollowGateDetail(item: { followGate?: unknown; payload?: unknown }): boolean {
+  return Boolean(item.followGate);
+}
 
 export const FOLLOW_GATE_DEFAULT_TITLE = 'Ya te sigo';
 export const FOLLOW_GATE_DEFAULT_MESSAGE = '¡Hola {{username}}! Antes de enviarte el recurso, sígueme y luego toca el botón 👇';
@@ -48,7 +62,8 @@ const ERROR_HINTS: Record<string, string> = {
   process_interrupted_after_intent: 'La aplicación se detuvo durante el envío: revise en Instagram si llegó. Nunca se reintenta.',
   tap_already_used: 'Ese mensaje ya se usó como toque de otra sesión; se sigue esperando.',
   meta_4: 'Meta limitó temporalmente las consultas; se reintenta más tarde.',
-  meta_10: 'Falta un permiso de mensajería en esta conexión.',
+  meta_10: 'Meta rechazó el envío (código 10). Con esta aplicación ocurre al enviar el recurso después del toque: Meta lo considera fuera de la ventana permitida.',
+  follow_gate_retired: 'Función retirada: «Pedir primero que me sigan» se desactivó porque Meta no permite entregar el recurso después del toque del botón con esta aplicación. No se envía nada más.',
 };
 
 export function followGateErrorHint(code: string | null | undefined): string | null {
