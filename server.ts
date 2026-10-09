@@ -14,6 +14,7 @@ import { Scheduler } from './src/services/scheduler.ts';
 import { ConnectionService } from './src/services/connections.ts';
 import { AutomationService } from './src/services/automations.ts';
 import { BacklogService } from './src/services/backlog.ts';
+import { FollowGateService } from './src/services/follow-gate.ts';
 import { createApiHandler } from './src/http/router.ts';
 import { legacyInterlockFromConfig } from './src/services/legacy-interlock.ts';
 import { readImportedEnvironment } from './src/security/env-import.ts';
@@ -30,7 +31,9 @@ const queue = new QueueService(database, provider, legacyInterlock ? { legacyInt
 const scanner = new Scanner(database, provider);
 const connections = new ConnectionService(database, vault, provider);
 // General (account-wide) automations refresh the account's publication list through the same provider path as the UI.
-const scheduler = new Scheduler(database, scanner, queue, { mediaRefresher: connections });
+// Follow gate (honor system): polls for the tap on the gate button and sends the resource once; never in Dry Run.
+const followGate = new FollowGateService(database, provider, legacyInterlock ? { legacyInterlock } : {});
+const scheduler = new Scheduler(database, scanner, queue, { mediaRefresher: connections, followGate });
 const automations = new AutomationService(database);
 const backlog = new BacklogService(database, scanner, queue);
 // Opt-in (SOCIAL_DESK_IMPORT_ENV_PATH): without it the explicit .env import endpoint is unavailable.
@@ -40,7 +43,7 @@ const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toStr
   diagnostics: provider,
   ...(legacyInterlock ? { legacy: legacyInterlock } : {}),
   ...(importEnvPath ? { importEnvironment: async () => readImportedEnvironment(importEnvPath) } : {}) });
-export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog };
+export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog, followGate };
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const app = next({ dev: isDevelopment, hostname: config.host, port: config.port });

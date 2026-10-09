@@ -2,10 +2,13 @@ import type { DatabaseSync } from 'node:sqlite';
 import type {
   AccountRef,
   ConnectionValidation,
+  DirectAttachmentPayload,
+  DirectMessagePayload,
   ConversationDiagnostics,
   DiagnosticMessage,
   DiscoveredAccount,
   MediaItem,
+  MetaErrorDetails,
   MediaType,
   MessageReadback,
   PrivateReplyPayload,
@@ -14,6 +17,8 @@ import type {
   PublicReplyResult,
   SendResult,
   SocialProvider,
+  TapResult,
+  TapSearch,
   UserProfileProbe,
 } from '../../core/domain.ts';
 import {
@@ -22,10 +27,13 @@ import {
   getConnectionCredential,
   getConnectionSummary,
 } from '../../db/repositories.ts';
+import { redactSecrets } from '../../security/redact.ts';
 import type { CredentialVault } from '../../security/vault.ts';
 import {
   INTERACTIVE_MAX_BUTTONS, INTERACTIVE_PAYLOAD_PATTERN, INTERACTIVE_TITLE_MAX, looksLikeUrl, normalizeMatchText,
 } from '../../services/automations.ts';
+import { GATE_MAX_DETAIL_CALLS, normalizeTapText } from '../../services/follow-gate-rules.ts';
+import { isAttachmentKind, isPublicHttpsUrl } from '../../services/resource-attachment.ts';
 
 type MetaObject = Record<string, unknown>;
 const READBACK_MAX_RECIPIENTS = 50;
@@ -232,15 +240,13 @@ export class MetaProvider implements SocialProvider {
       title: button.title,
       url: button.url,
     }));
-    // EXPERIMENTAL (follow gate phase 0). Shapes from Meta's Instagram messaging docs (button template and quick
-    // replies); whether a private reply (recipient.comment_id) accepts them is NOT documented.
-    const interactive = Boolean(payload.quickReplies?.length || payload.postbackButtons?.length);
+    // Follow gate button: a postback button inside the button template (Meta's Instagram button template docs). The
+    // experimental quick replies were retired and are rejected by validPrivateReplyPayload before any request.
+    const interactive = Boolean(payload.postbackButtons?.length);
     for (const button of payload.postbackButtons ?? []) buttons.push({ type: 'postback', title: button.title, payload: button.payload });
-    const message = payload.quickReplies?.length
-      ? { text: payload.text, quick_replies: payload.quickReplies.map((reply) => ({ content_type: 'text', title: reply.title, payload: reply.payload })) }
-      : buttons.length
-        ? { attachment: { type: 'template', payload: { template_type: 'button', text: payload.text, buttons } } }
-        : { text: payload.text };
+    const message = buttons.length
+      ? { attachment: { type: 'template', payload: { template_type: 'button', text: payload.text, buttons } } }
+      : { text: payload.text };
 
     try {
       const result = await this.request(
@@ -335,6 +341,92 @@ export class MetaProvider implements SocialProvider {
   }
 
   /**
+   * Follow gate resource: `POST /{ig-id}/messages` with `{ recipient: { id: <IGSID> }, message }` (Instagram Messaging
+   * API, Send API). Either text or a button template with web_url buttons, built exactly like the private reply, or ONE
+   * attachment by URL (`{ attachment: { type: image|audio|video|file, payload: { url } } }`; Meta downloads the file, so
+   * a slow download may surface as a timeout = ambiguous). Buttons and media never travel in the same message. Meta only
+   * accepts it within 24 h after the user's last message. Same hardened request path; errors map like private sends.
+   */
+  async sendMessage(account: AccountRef, igsid: string, payload: DirectMessagePayload | DirectAttachmentPayload): Promise<SendResult> {
+    if (!opaqueId(igsid)) return { outcome: 'definitive_rejection', safeErrorCode: 'invalid_igsid' };
+    let message: Record<string, unknown>;
+    if (payload && typeof payload === 'object' && 'attachment' in payload) {
+      // Attachment follow-up: `message.attachment = { type, payload: { url } }` (Instagram Messaging API, "Send media").
+      // Only image/audio/video/file with a public HTTPS URL, and nothing else in the payload (no text, no buttons).
+      const attachment = (payload as DirectAttachmentPayload).attachment as unknown as Record<string, unknown> | null;
+      if (Object.keys(payload).length !== 1 || !isObject(attachment) || !isAttachmentKind(attachment.kind) || !isPublicHttpsUrl(attachment.url)) {
+        return { outcome: 'definitive_rejection', safeErrorCode: 'invalid_message_payload' };
+      }
+      message = { attachment: { type: attachment.kind, payload: { url: attachment.url } } };
+    } else {
+      const candidate = payload as PrivateReplyPayload;
+      if (!candidate || candidate.quickReplies !== undefined || candidate.postbackButtons !== undefined || !validPrivateReplyPayload(candidate)) {
+        return { outcome: 'definitive_rejection', safeErrorCode: 'invalid_message_payload' };
+      }
+      const buttons = candidate.buttons.map((button) => ({ type: 'web_url', title: button.title, url: button.url }));
+      message = buttons.length
+        ? { attachment: { type: 'template', payload: { template_type: 'button', text: candidate.text, buttons } } }
+        : { text: candidate.text };
+    }
+    const { connection, token } = this.accountContext(account);
+    try {
+      const result = await this.request(connection.loginKind, connection.graphVersion,
+        `/${encodeURIComponent(account.providerAccountId)}/messages`, token,
+        { method: 'POST', body: JSON.stringify({ recipient: { id: igsid }, message }) });
+      const messageId = string(result.message_id)?.trim();
+      if (!messageId) return { outcome: 'ambiguous', safeErrorCode: 'meta_missing_message_id', usageHeaders: safeUsage(object(result.__safe_usage)) };
+      const recipientId = opaqueId(result.recipient_id);
+      return { outcome: 'accepted', messageId, ...(recipientId ? { recipientId } : {}), usageHeaders: safeUsage(object(result.__safe_usage)) };
+    } catch (error) {
+      return sendFailure(error);
+    }
+  }
+
+  /**
+   * Follow gate tap lookup (GET only, bounded): finds the conversation with the user, lists its message ids and reads
+   * details newest-first (at most GATE_MAX_DETAIL_CALLS, spaced) until a message is older than `afterIso`. Messages of
+   * the account are ignored. Returns the earliest user message read whose normalized text equals the title. A tap on a
+   * postback button appears in the conversation as a user message with the button title (verified live; no payload).
+   */
+  async findUserTap(account: AccountRef, igsid: string, search: TapSearch): Promise<TapResult> {
+    if (!opaqueId(igsid)) return { found: false, pollError: 'invalid_igsid' };
+    const after = Date.parse(search?.afterIso ?? '');
+    if (!Number.isFinite(after) || typeof search.titleNormalized !== 'string' || !search.titleNormalized) {
+      return { found: false, pollError: 'invalid_tap_search' };
+    }
+    const { connection, token } = this.accountContext(account);
+    const get = async (path: string, first = false): Promise<MetaObject> => {
+      if (!first) await this.diagnosticPause();
+      return this.request(connection.loginKind, connection.graphVersion, path, token);
+    };
+    try {
+      const query = new URLSearchParams({ platform: 'instagram', user_id: igsid });
+      const conversations = await get(`/${encodeURIComponent(account.providerAccountId)}/conversations?${query.toString()}`, true);
+      if (!Array.isArray(conversations.data)) return { found: false, pollError: 'invalid_provider_response' };
+      if (conversations.data[0] === undefined) return { found: false };
+      const conversationId = opaqueId(object(conversations.data[0])?.id, 256);
+      if (!conversationId) return { found: false, pollError: 'invalid_provider_response' };
+      const listing = await get(`/${encodeURIComponent(conversationId)}?fields=messages`);
+      const rows = object(listing.messages)?.data;
+      if (!Array.isArray(rows)) return { found: false, pollError: 'invalid_provider_response' };
+      const ids = rows.slice(0, DIAGNOSTIC_MAX_MESSAGES).map((row) => opaqueId(object(row)?.id, 256)).filter((id): id is string => Boolean(id));
+      let match: { id: string; at: number } | undefined;
+      for (const id of ids.slice(0, GATE_MAX_DETAIL_CALLS)) {
+        const raw = await get(`/${encodeURIComponent(id)}?fields=id,created_time,from,to,message`);
+        const created = Date.parse(string(raw.created_time) ?? '');
+        if (!Number.isFinite(created)) continue;
+        if (created < after) break;
+        if (summarizeMessage(id, raw, account).direction !== 'user') continue;
+        const text = string(raw.message);
+        if (text !== undefined && normalizeTapText(text) === search.titleNormalized && (!match || created <= match.at)) match = { id, at: created };
+      }
+      return match ? { found: true, tapMessageId: match.id, tapAt: new Date(match.at).toISOString() } : { found: false };
+    } catch (error) {
+      return { found: false, pollError: safeMetaCode(error) };
+    }
+  }
+
+  /**
    * READ-ONLY follow check (experimental): `GET /{igsid}?fields=name,username,is_user_follow_business,is_business_follow_user`.
    * Only the two booleans are returned. Meta requires prior user consent (the user messaged the account); the
    * documented "User consent is required" error maps to `user_consent_required`.
@@ -342,16 +434,28 @@ export class MetaProvider implements SocialProvider {
   async getUserProfile(account: AccountRef, igsid: string): Promise<UserProfileProbe> {
     if (!opaqueId(igsid)) return { ok: false, safeErrorCode: 'invalid_igsid' };
     const { connection, token } = this.accountContext(account);
+    const requestedFields = PROFILE_FIELDS;
+    const hostKind = connection.loginKind === 'instagram_login' ? 'instagram' as const : 'facebook' as const;
     try {
       const profile = await this.request(connection.loginKind, connection.graphVersion,
-        `/${encodeURIComponent(igsid)}?fields=name,username,is_user_follow_business,is_business_follow_user`, token);
+        `/${encodeURIComponent(igsid)}?fields=${requestedFields}`, token);
       return {
         ok: true,
+        requestedFields,
+        hostKind,
         ...(typeof profile.is_user_follow_business === 'boolean' ? { isUserFollowBusiness: profile.is_user_follow_business } : {}),
         ...(typeof profile.is_business_follow_user === 'boolean' ? { isBusinessFollowUser: profile.is_business_follow_user } : {}),
       };
     } catch (error) {
-      return { ok: false, safeErrorCode: error instanceof MetaSafeError && error.consentRequired ? 'user_consent_required' : safeMetaCode(error) };
+      const details = error instanceof MetaSafeError ? error.details : undefined;
+      const metaError = details ? { ...details, ...(details.message ? { message: redactMetaMessage(details.message, token) } : {}) } : undefined;
+      return {
+        ok: false,
+        safeErrorCode: error instanceof MetaSafeError && error.consentRequired ? 'user_consent_required' : safeMetaCode(error),
+        ...(metaError && Object.keys(metaError).length > 0 ? { metaError } : {}),
+        requestedFields,
+        hostKind,
+      };
     }
   }
 
@@ -653,6 +757,8 @@ class MetaSafeError extends Error {
   diagnostics?: ReadbackDiagnostics;
   /** True when Meta's error message says user consent is required (the message itself is never kept). */
   consentRequired?: boolean;
+  /** Bounded type-checked subset of Meta's error object (message is redacted by the profile diagnostic before exposure). */
+  details?: MetaErrorDetails;
   usageHeaders?: { appUsage?: string; pageUsage?: string; retryAfter?: string };
   constructor(
     readonly code: string,
@@ -753,7 +859,29 @@ function metaError(body: unknown, status: number): MetaSafeError {
   const safe = new MetaSafeError('meta_api_error', status, number(error?.code), number(error?.error_subcode));
   const message = string(error?.message);
   if (message && /user consent is required/iu.test(message.slice(0, 500))) safe.consentRequired = true;
+  const type = string(error?.type);
+  const trace = string(error?.fbtrace_id);
+  const details: MetaErrorDetails = {
+    httpStatus: status,
+    ...(number(error?.code) !== undefined ? { code: number(error?.code) } : {}),
+    ...(number(error?.error_subcode) !== undefined ? { subcode: number(error?.error_subcode) } : {}),
+    ...(type ? { type: type.slice(0, 60) } : {}),
+    ...(message ? { message: message.slice(0, 2000) } : {}),
+    ...(trace ? { fbtraceId: trace.slice(0, 40) } : {}),
+  };
+  safe.details = details;
   return safe;
+}
+
+const PROFILE_FIELDS = 'name,username,is_user_follow_business,is_business_follow_user';
+
+/** Redacts bearer/token-like content from a Meta error message, then bounds it to 200 characters. */
+function redactMetaMessage(message: string, token: string): string {
+  return redactSecrets(message, [token])
+    .replace(/\b(?:access_)?token=[^\s&"']+/giu, (match) => `${match.slice(0, match.indexOf('=') + 1)}[REDACTED]`)
+    .replace(/\b[0-9a-f]{20,}\b/giu, '[REDACTED]')
+    .replace(/[A-Za-z0-9_-]{30,}/gu, '[REDACTED]')
+    .slice(0, 200);
 }
 
 /**
@@ -887,10 +1015,8 @@ function validInteractiveButtons(value: unknown): value is Array<{ title: string
 function validPrivateReplyPayload(payload: PrivateReplyPayload): boolean {
   if (!payload || typeof payload.text !== 'string' || !payload.text.trim() || payload.text.length > 1000
     || !Array.isArray(payload.buttons) || payload.buttons.length > 2) return false;
-  if (payload.quickReplies !== undefined) {
-    // Quick replies only on a plain text message (mixing with a template is undocumented: fail closed).
-    if (!validInteractiveButtons(payload.quickReplies) || payload.buttons.length > 0 || payload.postbackButtons !== undefined) return false;
-  }
+  // Retired experiment: quick replies are never sent again (fail closed before any request).
+  if (payload.quickReplies !== undefined) return false;
   if (payload.postbackButtons !== undefined) {
     if (!validInteractiveButtons(payload.postbackButtons) || payload.buttons.length + payload.postbackButtons.length > INTERACTIVE_MAX_BUTTONS) return false;
   }

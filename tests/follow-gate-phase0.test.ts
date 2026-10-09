@@ -14,7 +14,7 @@ import { createVault } from '../src/security/vault.ts';
 import { AutomationService, renderReply } from '../src/services/automations.ts';
 import { QueueService } from '../src/services/queue.ts';
 import { Scanner } from '../src/services/scanner.ts';
-import { interactiveRequestFields } from '../app/interactive-buttons.ts';
+import { directionLabel } from '../app/interactive-buttons.ts';
 
 type Db = ReturnType<typeof openDatabase>;
 const one = (db: Db, sql: string, ...params: unknown[]) => ({ ...(db.prepare(sql).get(...params as never[]) as Record<string, any>) });
@@ -79,7 +79,7 @@ test('migration v11 -> v12 adds comments.author_igsid and automation interactive
       INSERT INTO queue_items(queue_item_id,account_id,comment_id,automation_id,state,dry_run,payload_json,created_at,updated_at)
         VALUES ('q1','acc','c1','a1','SENT',0,'{"text":"x"}','2026','2026');`);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 12);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 14);
     assert.equal(one(db, 'PRAGMA foreign_keys').foreign_keys, 1);
     const comment = one(db, `SELECT * FROM comments WHERE comment_id='c1'`);
     assert.equal(comment.text, 'hola');
@@ -92,7 +92,7 @@ test('migration v11 -> v12 adds comments.author_igsid and automation interactive
     assert.equal(one(db, `SELECT state FROM queue_items WHERE queue_item_id='q1'`).state, 'SENT');
     assert.throws(() => db.exec(`UPDATE automations SET interactive_mode='bogus' WHERE automation_id='a1'`), /CHECK/);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 12);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 14);
   }, 11);
 });
 
@@ -165,19 +165,13 @@ test("mode 'none' request bodies are byte-for-byte unchanged (text and web_url t
   });
 });
 
-test('quick replies are sent on the message next to text with content_type text', async () => {
+test('quick replies (retired experiment) are rejected before any request', async () => {
   await withProvider(() => Response.json({ message_id: 'mid.1' }), async (provider, calls, state) => {
     const result = await provider.sendPrivateReply(state.account, COMMENT, {
       text: 'Hola', buttons: [], quickReplies: [{ title: 'Ya te sigo', payload: 'gate:a1:0' }, { title: 'Aún no', payload: 'gate:a1:1' }],
     });
-    assert.equal(result.outcome, 'accepted');
-    assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), {
-      recipient: { comment_id: COMMENT },
-      message: { text: 'Hola', quick_replies: [
-        { content_type: 'text', title: 'Ya te sigo', payload: 'gate:a1:0' },
-        { content_type: 'text', title: 'Aún no', payload: 'gate:a1:1' },
-      ] },
-    });
+    assert.deepEqual([result.outcome, result.safeErrorCode], ['definitive_rejection', 'invalid_reply_payload']);
+    assert.equal(calls.length, 0);
   });
 });
 
@@ -227,7 +221,8 @@ test('provider rejects invalid interactive payloads before any request', async (
 
 test('an explicit Meta rejection of an interactive payload is a safe definitive rejection; unknown outcomes stay ambiguous', async () => {
   let response: () => Response = () => Response.json({ error: { code: 100, message: 'Invalid parameter token=abc' } }, { status: 400 });
-  const interactive: PrivateReplyPayload = { text: 'Hola', buttons: [], quickReplies: [{ title: 'Ok', payload: 'gate:a1:0' }] };
+  // The follow gate's postback button is the only interactive element still sent.
+  const interactive: PrivateReplyPayload = { text: 'Hola', buttons: [], postbackButtons: [{ title: 'Ok', payload: 'gate:a1:0' }] };
   await withProvider(() => response(), async (provider, _calls, state) => {
     const rejected = await provider.sendPrivateReply(state.account, COMMENT, interactive);
     assert.deepEqual({ outcome: rejected.outcome, safeErrorCode: rejected.safeErrorCode }, { outcome: 'definitive_rejection', safeErrorCode: 'interactive_payload_rejected' });
@@ -278,27 +273,21 @@ test("renderReply generates server-side payloads and leaves mode 'none' untouche
   }
 });
 
-test('automation service stores interactive configuration with defaults and keeps it when omitted on update', async () => {
+test('automation service: interactive configuration is retired (always none; any other mode is rejected)', async () => {
   await withDb((db) => {
     const ctx = seed(db);
     const service = new AutomationService(db);
     const plain = service.create({ accountId: ctx.accountId, mediaId: ctx.mediaId, name: 'Plain', replyText: 'Hola' });
     assert.deepEqual(one(db, `SELECT interactive_mode, interactive_titles_json FROM automations WHERE automation_id=?`, plain),
       { interactive_mode: 'none', interactive_titles_json: '[]' });
-    const gate = service.create({ accountId: ctx.accountId, mediaId: ctx.mediaId, name: 'Gate', replyText: 'Hola',
-      interactiveMode: 'quick_reply', interactiveTitles: [' Ya te sigo ', 'Aún no'] });
-    assert.deepEqual(one(db, `SELECT interactive_mode, interactive_titles_json FROM automations WHERE automation_id=?`, gate),
-      { interactive_mode: 'quick_reply', interactive_titles_json: '["Ya te sigo","Aún no"]' });
-    service.update(ctx.accountId, gate, { name: 'Gate', mediaId: ctx.mediaId, replyText: 'Hola 2', matchMode: 'contains', buttons: [], keywords: ['guia'] });
-    assert.equal(one(db, `SELECT interactive_mode FROM automations WHERE automation_id=?`, gate).interactive_mode, 'quick_reply');
-    service.update(ctx.accountId, gate, { name: 'Gate', mediaId: ctx.mediaId, replyText: 'Hola', matchMode: 'contains', buttons: [], keywords: ['guia'],
-      interactiveMode: 'none', interactiveTitles: [] });
-    assert.deepEqual(one(db, `SELECT interactive_mode, interactive_titles_json FROM automations WHERE automation_id=?`, gate),
-      { interactive_mode: 'none', interactive_titles_json: '[]' });
+    const retired = (error: unknown) => (error as { code?: string }).code === 'interactive_mode_retired';
+    assert.throws(() => service.create({ accountId: ctx.accountId, mediaId: ctx.mediaId, name: 'Gate', replyText: 'Hola',
+      interactiveMode: 'quick_reply', interactiveTitles: [' Ya te sigo ', 'Aún no'] }), retired);
     assert.throws(() => service.create({ accountId: ctx.accountId, mediaId: ctx.mediaId, name: 'Bad', replyText: 'Hola',
       interactiveMode: 'quick_reply', interactiveTitles: 'Ya' as never }), TypeError);
-    assert.throws(() => service.create({ accountId: ctx.accountId, mediaId: ctx.mediaId, name: 'Bad', replyText: 'Hola',
-      interactiveMode: 'postback', interactiveTitles: ['a', 'b'], buttons: [{ title: 'A', url: 'https://a.example' }, { title: 'B', url: 'https://b.example' }] }), TypeError);
+    service.update(ctx.accountId, plain, { name: 'Plain', mediaId: ctx.mediaId, replyText: 'Hola', matchMode: 'contains', buttons: [], keywords: ['guia'],
+      interactiveMode: 'none', interactiveTitles: [] });
+    assert.equal(one(db, `SELECT interactive_mode FROM automations WHERE automation_id=?`, plain).interactive_mode, 'none');
   });
 });
 
@@ -350,10 +339,12 @@ function sendingProvider(result: Record<string, unknown>) {
   };
 }
 
-test("queue freezes interactive payloads, records recipientId on accept and exposes both in DTOs; 'none' payload is unchanged", async () => {
+test("queue ignores a legacy interactive mode, records recipientId on accept and exposes it in DTOs; 'none' payload is unchanged", async () => {
   await withDb(async (db) => {
     const ctx = seed(db);
-    const gate = realAutomation(db, ctx, { interactiveMode: 'quick_reply', interactiveTitles: ['Ya te sigo', 'Aún no'] });
+    const gate = realAutomation(db, ctx);
+    // Legacy row from before the retirement: the stored mode is ignored at enqueue (no dead button is sent).
+    db.prepare(`UPDATE automations SET interactive_mode='quick_reply', interactive_titles_json='["Ya te sigo","Aún no"]' WHERE automation_id=?`).run(gate);
     createComment(db, { accountId: ctx.accountId, mediaId: ctx.mediaId, commentId: 'c1', text: 'quiero la guide', username: 'customer',
       createdAt: new Date(Date.now() - 60_000).toISOString() });
     const provider = sendingProvider({ outcome: 'accepted', messageId: 'mid.1', recipientId: '5544332211' });
@@ -361,8 +352,7 @@ test("queue freezes interactive payloads, records recipientId on accept and expo
     queue.setDryRun(false, true);
     await queue.enqueueReviewed(ctx.accountId, gate, ['c1']);
     await queue.processOne(ctx.accountId);
-    assert.deepEqual((provider.sent[0] as PrivateReplyPayload).quickReplies,
-      [{ title: 'Ya te sigo', payload: `gate:${gate}:0` }, { title: 'Aún no', payload: `gate:${gate}:1` }]);
+    assert.equal((provider.sent[0] as PrivateReplyPayload).quickReplies, undefined);
     const accepted = one(db, `SELECT details_json FROM send_attempts WHERE event_type='accepted'`);
     assert.equal(JSON.parse(accepted.details_json).recipientId, '5544332211');
 
@@ -370,7 +360,7 @@ test("queue freezes interactive payloads, records recipientId on accept and expo
     const { server, origin } = await listen(handler);
     try {
       const page = await call(origin, `/api/queue?accountId=${ctx.accountId}`);
-      assert.deepEqual(page.json.items[0].payload, { text: 'Hola customer', buttons: [], quickReplies: [{ title: 'Ya te sigo' }, { title: 'Aún no' }] });
+      assert.deepEqual(page.json.items[0].payload, { text: 'Hola customer', buttons: [] });
       const queueId = page.json.items[0].id;
       const attempts = await call(origin, `/api/queue/${queueId}/attempts?accountId=${ctx.accountId}`);
       assert.equal(attempts.json.events.find((event: { type: string }) => event.type === 'accepted').details.recipientId, '5544332211');
@@ -393,7 +383,7 @@ test("queue freezes interactive payloads, records recipientId on accept and expo
   });
 });
 
-test('automations API validates interactive fields strictly and lists them', async () => {
+test('automations API rejects every interactive field value except none/[] (retired) and no longer lists them', async () => {
   await withDb(async (db) => {
     const ctx = seed(db);
     const handler = createApiHandler({ database: db, csrfToken: 'csrf', automations: new AutomationService(db) } as never);
@@ -411,21 +401,18 @@ test('automations API validates interactive fields strictly and lists them', asy
         { interactiveMode: 'postback', interactiveTitles: 'a' },
       ]) {
         const result = await call(origin, '/api/automations', { method: 'POST', headers, body: { ...base, ...extra } });
-        assert.equal(result.status, 400, JSON.stringify(extra));
+        assert.deepEqual([result.status, result.json.error], [400, 'interactive_mode_retired'], JSON.stringify(extra));
       }
-      assert.equal((await call(origin, '/api/automations', { method: 'POST', headers, body: base })).status, 201);
-      const created = await call(origin, '/api/automations', { method: 'POST', headers, body: { ...base, name: 'Gate 2', interactiveMode: 'postback', interactiveTitles: ['Listo'] } });
+      const created = await call(origin, '/api/automations', { method: 'POST', headers, body: base });
       assert.equal(created.status, 201);
+      const retired = await call(origin, '/api/automations', { method: 'POST', headers, body: { ...base, name: 'Gate 2', interactiveMode: 'postback', interactiveTitles: ['Listo'] } });
+      assert.deepEqual([retired.status, retired.json.error], [400, 'interactive_mode_retired']);
       const listed = (await call(origin, `/api/automations?accountId=${ctx.accountId}`)).json.automations as Array<Record<string, unknown>>;
-      assert.deepEqual(listed.map((row) => [row.name, row.interactiveMode, row.interactiveTitles]).sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
-        [['Gate', 'none', []], ['Gate 2', 'postback', ['Listo']]]);
+      assert.deepEqual(listed.map((row) => [row.name, Object.hasOwn(row, 'interactiveMode')]), [['Gate', false]]);
       const put = await call(origin, `/api/automations/${created.json.automationId}`, { method: 'PUT', headers,
-        body: { ...base, name: 'Gate 2', matchMode: 'contains', interactiveMode: 'quick_reply', interactiveTitles: ['x'.repeat(21)] } });
-      assert.equal(put.status, 400);
-      const ok = await call(origin, `/api/automations/${created.json.automationId}`, { method: 'PUT', headers,
-        body: { ...base, name: 'Gate 2', matchMode: 'contains', interactiveMode: 'quick_reply', interactiveTitles: ['Sí', 'No'] } });
-      assert.equal(ok.status, 200);
-      assert.equal(one(db, `SELECT interactive_titles_json FROM automations WHERE automation_id=?`, created.json.automationId).interactive_titles_json, '["Sí","No"]');
+        body: { ...base, matchMode: 'contains', interactiveMode: 'quick_reply', interactiveTitles: ['Sí', 'No'] } });
+      assert.deepEqual([put.status, put.json.error], [400, 'interactive_mode_retired']);
+      assert.equal(one(db, `SELECT interactive_titles_json FROM automations WHERE automation_id=?`, created.json.automationId).interactive_titles_json, '[]');
     } finally { server.close(); }
   });
 });
@@ -509,16 +496,70 @@ test('getUserProfile returns only follow booleans and maps the consent error to 
   let response: () => Response = () => Response.json({ name: 'Real Name', username: 'customer', is_user_follow_business: true, is_business_follow_user: false });
   await withProvider(() => response(), async (provider, calls, state) => {
     const ok = await provider.getUserProfile(state.account, IGSID);
-    assert.deepEqual(ok, { ok: true, isUserFollowBusiness: true, isBusinessFollowUser: false });
+    assert.deepEqual(ok, { ok: true, isUserFollowBusiness: true, isBusinessFollowUser: false, requestedFields: PROFILE_FIELDS, hostKind: 'instagram' });
     assert.equal(calls[0]!.url.pathname, `/v26.0/${IGSID}`);
     assert.equal(calls[0]!.url.searchParams.get('fields'), 'name,username,is_user_follow_business,is_business_follow_user');
     response = () => Response.json({ error: { code: 230, message: 'User consent is required to access user profile.' } }, { status: 400 });
-    assert.deepEqual(await provider.getUserProfile(state.account, IGSID), { ok: false, safeErrorCode: 'user_consent_required' });
+    assert.deepEqual(await provider.getUserProfile(state.account, IGSID), { ok: false, safeErrorCode: 'user_consent_required', requestedFields: PROFILE_FIELDS, hostKind: 'instagram',
+      metaError: { httpStatus: 400, code: 230, message: 'User consent is required to access user profile.' } });
     response = () => Response.json({ error: { code: 100, message: 'Unsupported get request token=abc' } }, { status: 400 });
     const other = await provider.getUserProfile(state.account, IGSID);
-    assert.deepEqual(other, { ok: false, safeErrorCode: 'meta_100' });
+    assert.equal(other.safeErrorCode, 'meta_100');
+    assert.equal(other.metaError?.message, 'Unsupported get request token=[REDACTED]');
     response = () => Response.json({ is_user_follow_business: 'yes' });
-    assert.deepEqual(await provider.getUserProfile(state.account, IGSID), { ok: true });
+    assert.deepEqual(await provider.getUserProfile(state.account, IGSID), { ok: true, requestedFields: PROFILE_FIELDS, hostKind: 'instagram' });
+  });
+});
+
+const PROFILE_FIELDS = 'name,username,is_user_follow_business,is_business_follow_user';
+
+test('getUserProfile metaError: parses typical Graph error shapes, bounded and typed', async () => {
+  let response: () => Response = () => Response.json({});
+  await withProvider(() => response(), async (provider, _calls, state) => {
+    response = () => Response.json({ error: { message: '(#3) Capability not enabled', type: 'OAuthException', code: 3, error_subcode: 2534014, fbtrace_id: 'A1b2C3d4E5f' } }, { status: 403 });
+    const full = await provider.getUserProfile(state.account, IGSID);
+    assert.deepEqual(full.metaError, { httpStatus: 403, code: 3, subcode: 2534014, type: 'OAuthException', message: '(#3) Capability not enabled', fbtraceId: 'A1b2C3d4E5f' });
+    assert.equal(full.safeErrorCode, 'meta_3_2534014');
+    // wrong types are dropped, long fields truncated, unknown fields never copied
+    response = () => Response.json({ error: { message: 'word '.repeat(100), type: 42, code: '100', error_subcode: null, fbtrace_id: 'T'.repeat(100), error_data: { secret: 'LEAK' }, extra: 'LEAK' } }, { status: 400 });
+    const bounded = await provider.getUserProfile(state.account, IGSID);
+    assert.equal(bounded.metaError?.message?.length, 200);
+    assert.equal(bounded.metaError?.fbtraceId?.length, 40);
+    assert.deepEqual(Object.keys(bounded.metaError!).sort(), ['fbtraceId', 'httpStatus', 'message']);
+    assert.equal(JSON.stringify(bounded).includes('LEAK'), false);
+  });
+});
+
+test('getUserProfile metaError: redacts bearer tokens and token-like strings', async () => {
+  let message = '';
+  await withProvider(() => Response.json({ error: { code: 190, message } }, { status: 401 }), async (provider, _calls, state) => {
+    for (const secret of ['Bearer abc123def456ghi789', 'EAAGm0PX4ZCpsBAKxyzXYZ1234567890abcdefghij', 'ig-user-token', 'access_token=zzz999', '1234567890123456789012', 'deadbeefdeadbeefdeadbeef']) {
+      message = `Invalid OAuth ${secret} here`;
+      const result = await provider.getUserProfile(state.account, IGSID);
+      assert.equal(result.metaError?.message?.includes(secret.replace(/^[a-z_]+=|^Bearer /u, '')), false, secret);
+      assert.match(result.metaError!.message!, /\[REDACTED\]/u);
+    }
+  });
+});
+
+test('getUserProfile metaError: absent or malformed error bodies yield no raw data', async () => {
+  let body: () => Response = () => new Response('<html>LEAK</html>', { status: 502 });
+  await withProvider(() => body(), async (provider, _calls, state) => {
+    for (const make of [
+      () => new Response('<html>LEAK</html>', { status: 502 }),
+      () => Response.json({ error: 'LEAK' }, { status: 500 }),
+      () => Response.json({ error: ['LEAK'] }, { status: 500 }),
+      () => Response.json(null, { status: 500 }),
+      () => Response.json({}, { status: 400 }),
+    ]) {
+      body = make;
+      const result = await provider.getUserProfile(state.account, IGSID);
+      assert.equal(result.ok, false);
+      assert.equal(JSON.stringify(result).includes('LEAK'), false);
+      assert.equal(result.requestedFields, PROFILE_FIELDS);
+      assert.equal(result.hostKind, 'instagram');
+      assert.deepEqual(Object.keys(result.metaError ?? {}).filter((key) => !['httpStatus'].includes(key)), []);
+    }
   });
 });
 
@@ -541,7 +582,8 @@ test('diagnostics endpoint: guards, ownership, igsid_unknown, sanitized result a
         seen.push({ account, igsid });
         return { found: true, messages: [{ id: 'm1', createdTime: 't', direction: 'user', text: 'hi', keys: ['id', 'message'], attachmentsShape: 'missing', raw: 'LEAK' }], raw: 'LEAK' };
       },
-      async getUserProfile() { return { ok: false, safeErrorCode: 'user_consent_required', raw: 'LEAK' }; },
+      async getUserProfile() { return { ok: false, safeErrorCode: 'user_consent_required', raw: 'LEAK', requestedFields: 'name,username', hostKind: 'instagram',
+        metaError: { httpStatus: 400, code: 230, subcode: 1, type: 'OAuthException', message: 'consent', fbtraceId: 'abc', raw: 'LEAK', headers: { a: 'LEAK' } } }; },
     };
     const handler = createApiHandler({ database: db, csrfToken: 'csrf', diagnostics, clock: () => now } as never);
     const { server, origin } = await listen(handler);
@@ -567,7 +609,8 @@ test('diagnostics endpoint: guards, ownership, igsid_unknown, sanitized result a
       assert.equal(seen[0]!.account.accountId, ctx.accountId);
       assert.equal(ok.json.igsid, '…2211');
       assert.deepEqual(ok.json.conversation, { found: true, messages: [{ id: 'm1', createdTime: 't', direction: 'user', text: 'hi', keys: ['id', 'message'], attachmentsShape: 'missing' }] });
-      assert.deepEqual(ok.json.profile, { ok: false, safeErrorCode: 'user_consent_required' });
+      assert.deepEqual(ok.json.profile, { ok: false, safeErrorCode: 'user_consent_required', requestedFields: 'name,username', hostKind: 'instagram',
+        metaError: { httpStatus: 400, code: 230, subcode: 1, type: 'OAuthException', message: 'consent', fbtraceId: 'abc' } });
       assert.equal(JSON.stringify(ok.json).includes('LEAK'), false);
       assert.equal(JSON.stringify(ok.json).includes(IGSID), false);
 
@@ -590,8 +633,6 @@ test('diagnostics endpoint: guards, ownership, igsid_unknown, sanitized result a
 // UI helper
 // ---------------------------------------------------------------------------------------------------------------
 
-test('interactiveRequestFields sends none with no titles and trims non-empty titles otherwise', () => {
-  assert.deepEqual(interactiveRequestFields('none', ['a', 'b']), { interactiveMode: 'none', interactiveTitles: [] });
-  assert.deepEqual(interactiveRequestFields('quick_reply', [' Ya te sigo ', '', '  ', 'No']), { interactiveMode: 'quick_reply', interactiveTitles: ['Ya te sigo', 'No'] });
-  assert.deepEqual(interactiveRequestFields('weird', ['a']), { interactiveMode: 'none', interactiveTitles: [] });
+test('directionLabel (conversation inspector) maps directions to Spanish', () => {
+  assert.deepEqual(['account', 'user', 'x'].map(directionLabel), ['Cuenta', 'Usuario', 'Desconocido']);
 });

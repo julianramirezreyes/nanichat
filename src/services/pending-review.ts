@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { claimsMediaSql, hasOwnerReply, isPastPrivateReplyWindow, renderReply } from './automations.ts';
+import type { ResourceAttachment } from '../core/domain.ts';
+import { claimsMediaSql, hasOwnerReply, isPastPrivateReplyWindow, renderReply, storedFollowGateConfig } from './automations.ts';
+import { storedResourceAttachment } from './resource-attachment.ts';
 
 export const COMMENT_PREVIEW_LIMIT = 280;
 // Must stay identical to the provenance rule in BacklogService.processEligible.
@@ -19,12 +21,17 @@ export type PendingReviewItem = {
   mediaId: string; mediaCaption: string | null; mediaType: string | null; mediaPublishedAt: string | null; username: string;
   commentText: string; commentCreatedAt: string | null; matchedKeywords: string[]; analyzedAt: string | null;
   previewText: string | null; previewButtons: Array<{ title: string; url: string }>;
+  /** Follow gate on: first message (gate text + its button); `previewText`/`previewButtons` are then the resource sent after the tap. */
+  /** `attachment` (sent before the resource text) appears only when the automation has one. */
+  gatePreview?: { text: string; buttonTitle: string; attachment?: ResourceAttachment } | null;
 };
 
 type Row = {
   comment_id: string; automation_id: string; automation_name: string; scope: 'media' | 'account'; media_id: string; reply_text: string;
   buttons_json: string; permalink: string | null; caption: string | null; media_type: string | null; published_at: string | null; author: string | null; text: string | null; comment_created_at: string | null;
   matched_keywords_json: string; analyzed_at: string | null;
+  follow_gate_enabled: number; follow_gate_message: string; follow_gate_button_title: string;
+  resource_attachment_kind: string; resource_attachment_url: string;
 };
 
 function parseList<T>(value: string, fallback: T[]): T[] {
@@ -42,7 +49,8 @@ export function listPendingReview(database: DatabaseSync, accountId: string, opt
   // enabled media-specific one), so a comment appears once per claiming automation, exactly as enqueue accepts it.
   const rows = database.prepare(`SELECT c.comment_id, c.automation_id, a.name AS automation_name, a.scope, cm.media_id, a.reply_text,
       a.buttons_json, m.permalink, m.caption, m.media_type, m.published_at, cm.username AS author, cm.text,
-      cm.created_at AS comment_created_at, c.matched_keywords_json, s.finished_at AS analyzed_at
+      cm.created_at AS comment_created_at, c.matched_keywords_json, s.finished_at AS analyzed_at,
+      a.follow_gate_enabled, a.follow_gate_message, a.follow_gate_button_title, a.resource_attachment_kind, a.resource_attachment_url
     FROM comment_classifications c
     JOIN scan_runs s ON s.scan_id = c.scan_id AND s.account_id = c.account_id
     JOIN automations a ON a.automation_id = c.automation_id AND a.account_id = c.account_id
@@ -60,19 +68,30 @@ export function listPendingReview(database: DatabaseSync, accountId: string, opt
     const matchedKeywords = parseList<string>(row.matched_keywords_json, []).filter((k) => typeof k === 'string');
     const buttons = parseList<{ title: string; url: string }>(row.buttons_json, []);
     let previewText: string | null = null; let previewButtons: Array<{ title: string; url: string }> = [];
+    let gatePreview: PendingReviewItem['gatePreview'] = null;
+    const gate = storedFollowGateConfig(row.follow_gate_enabled, row.follow_gate_message, row.follow_gate_button_title);
+    const variables = {
+      username: row.author ?? '', comment: row.text ?? '', keyword: matchedKeywords[0] ?? '', account: account?.username ?? '',
+      media: (row.permalink || row.media_id).slice(0, 100),
+    };
     try {
-      const payload = renderReply(row.reply_text, {
-        username: row.author ?? '', comment: row.text ?? '', keyword: matchedKeywords[0] ?? '', account: account?.username ?? '',
-        media: (row.permalink || row.media_id).slice(0, 100),
-      }, buttons);
+      const payload = renderReply(row.reply_text, variables, buttons);
       previewText = payload.text; previewButtons = payload.buttons;
     } catch { /* invalid template: still list the comment, without a preview */ }
+    if (gate.enabled) {
+      try {
+        const attachment = storedResourceAttachment(row.resource_attachment_kind, row.resource_attachment_url);
+        gatePreview = { text: renderReply(gate.message, variables, []).text, buttonTitle: gate.buttonTitle, ...(attachment ? { attachment } : {}) };
+      } catch { /* invalid gate template: no gate preview */ }
+    }
     return {
       accountId, commentId: row.comment_id, automationId: row.automation_id, automationName: row.automation_name, scope: row.scope,
       mediaId: row.media_id, mediaCaption: row.caption ? truncateText(row.caption, 80) : null, mediaType: row.media_type,
       mediaPublishedAt: row.published_at,
       username: row.author ?? '', commentText: truncateText(row.text), commentCreatedAt: row.comment_created_at, matchedKeywords,
       analyzedAt: row.analyzed_at, previewText, previewButtons,
+      // Only present when the gate is on, so the DTO of every other automation is unchanged.
+      ...(gate.enabled ? { gatePreview } : {}),
     };
   });
   const last = database.prepare(`SELECT MAX(finished_at) AS at FROM scan_runs WHERE account_id=? AND status='complete' AND scan_kind IN (${kinds})`)

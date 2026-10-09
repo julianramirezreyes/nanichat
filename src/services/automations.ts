@@ -1,7 +1,8 @@
-import type { InteractiveMode, ProviderComment, PrivateReplyPayload } from '../core/domain.ts';
+import type { FollowGateSnapshot, InteractiveMode, ProviderComment, PrivateReplyPayload, ResourceAttachment } from '../core/domain.ts';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { storedPublicReplyVariants, validatePublicReplyVariants } from './public-reply.ts';
+import { validateResourceAttachment } from './resource-attachment.ts';
 
 export const PRIVATE_REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -93,6 +94,21 @@ export function validateInteractiveConfig(mode: unknown, titles: unknown, urlBut
   return { mode, titles: trimmed };
 }
 
+/** The experimental interactive buttons are retired: requests may only say 'none' (or omit the fields). */
+export class InteractiveModeRetiredError extends TypeError {
+  readonly code = 'interactive_mode_retired';
+}
+
+/**
+ * Rejects any request that still asks for the retired experimental interactive buttons: a mode other than 'none' or a
+ * non-empty title list. Omitted fields, `'none'` and `[]` are accepted (nothing is stored but 'none').
+ */
+export function assertInteractiveRetired(mode: unknown, titles: unknown): void {
+  const modeOk = mode === undefined || mode === 'none';
+  const titlesOk = titles === undefined || (Array.isArray(titles) && titles.length === 0);
+  if (!modeOk || !titlesOk) throw new InteractiveModeRetiredError('The experimental interactive buttons were retired');
+}
+
 /** Stored interactive configuration; anything unreadable falls back to 'none' (the historic behaviour). */
 export function storedInteractiveConfig(mode: unknown, titlesJson: unknown): { mode: InteractiveMode; titles: string[] } {
   try {
@@ -102,6 +118,83 @@ export function storedInteractiveConfig(mode: unknown, titlesJson: unknown): { m
     }
   } catch { /* fall through */ }
   return { mode: 'none', titles: [] };
+}
+
+export const FOLLOW_GATE_MESSAGE_MAX = 640;
+export const FOLLOW_GATE_TITLE_MAX = 20;
+export const FOLLOW_GATE_DEFAULT_TITLE = 'Ya te sigo';
+
+/** Validation error of the follow gate configuration with a safe machine code (the API answers 400 with it). */
+export class FollowGateConfigError extends TypeError {
+  constructor(readonly code: 'follow_gate_invalid' | 'follow_gate_message_invalid' | 'follow_gate_button_title_invalid' | 'follow_gate_interactive_conflict', message: string) {
+    super(message);
+  }
+}
+
+export type FollowGateConfig = { enabled: boolean; message: string; buttonTitle: string };
+const SAMPLE_VARIABLES: ReplyVariables = { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' };
+
+/**
+ * Strict validation of the follow gate (honor system). Omitted fields keep `current` (default: off, no message, no
+ * title; a disabled gate stores "Ya te sigo" when no title is given). Never coerces. Enabled requires a 1-640 character message (same variables as the reply text) and a
+ * 1-20 character button title without links or line breaks, and cannot be combined with an interactive mode (the
+ * experimental modes are retired, so the service always passes 'none'). A disabled gate may keep a stored draft
+ * message/title, still bounded.
+ */
+export function validateFollowGateConfig(
+  input: { enabled?: unknown; message?: unknown; buttonTitle?: unknown },
+  interactiveMode: string,
+  current: FollowGateConfig = { enabled: false, message: '', buttonTitle: '' },
+): FollowGateConfig {
+  if (input.enabled !== undefined && typeof input.enabled !== 'boolean') throw new FollowGateConfigError('follow_gate_invalid', 'followGateEnabled must be a boolean');
+  if (input.message !== undefined && typeof input.message !== 'string') throw new FollowGateConfigError('follow_gate_message_invalid', 'Follow gate message must be text');
+  if (input.buttonTitle !== undefined && typeof input.buttonTitle !== 'string') throw new FollowGateConfigError('follow_gate_button_title_invalid', 'Follow gate button title must be text');
+  const enabled = (input.enabled as boolean | undefined) ?? current.enabled;
+  const message = input.message === undefined ? current.message : (input.message as string).trim();
+  const buttonTitle = input.buttonTitle === undefined ? current.buttonTitle : (input.buttonTitle as string).trim();
+  if (Array.from(message).length > FOLLOW_GATE_MESSAGE_MAX) throw new FollowGateConfigError('follow_gate_message_invalid', 'Follow gate message is too long');
+  if (Array.from(buttonTitle).length > FOLLOW_GATE_TITLE_MAX || /[\r\n]/u.test(buttonTitle) || (buttonTitle && looksLikeUrl(buttonTitle))) {
+    throw new FollowGateConfigError('follow_gate_button_title_invalid', 'Follow gate button title must have 1-20 characters and no links');
+  }
+  if (!enabled) return { enabled, message, buttonTitle: buttonTitle || FOLLOW_GATE_DEFAULT_TITLE };
+  if (!message) throw new FollowGateConfigError('follow_gate_message_invalid', 'Follow gate message is required');
+  try {
+    renderReply(message, SAMPLE_VARIABLES, []);
+  } catch {
+    throw new FollowGateConfigError('follow_gate_message_invalid', 'Follow gate message has an unsupported or malformed variable');
+  }
+  if (!buttonTitle) throw new FollowGateConfigError('follow_gate_button_title_invalid', 'Follow gate button title is required');
+  if (interactiveMode !== 'none') {
+    throw new FollowGateConfigError('follow_gate_interactive_conflict', 'The follow gate cannot be combined with the experimental interactive buttons');
+  }
+  return { enabled, message, buttonTitle };
+}
+
+/** Stored follow gate configuration (defensive read). */
+export function storedFollowGateConfig(enabled: unknown, message: unknown, buttonTitle: unknown): FollowGateConfig {
+  return {
+    enabled: enabled === 1,
+    message: typeof message === 'string' ? message : '',
+    buttonTitle: typeof buttonTitle === 'string' && buttonTitle.trim() ? buttonTitle : FOLLOW_GATE_DEFAULT_TITLE,
+  };
+}
+
+/**
+ * First message of a follow gate: the rendered gate text with ONE server-generated postback button (no URL buttons),
+ * plus the snapshot of the resource message (the automation's reply text and URL buttons) sent after the tap.
+ */
+export function renderFollowGatePayload(
+  gate: { message: string; buttonTitle: string },
+  variables: ReplyVariables,
+  resource: { replyText: string; buttons: Array<{ title: string; url: string }> },
+  automationId: string,
+  attachment?: ResourceAttachment | null,
+): PrivateReplyPayload & { followGate: FollowGateSnapshot } {
+  const first = renderReply(gate.message, variables, [], { mode: 'postback', titles: [gate.buttonTitle], automationId });
+  const rendered = renderReply(resource.replyText, variables, resource.buttons);
+  // The attachment key exists only when configured, so gates without one keep their exact historic payload.
+  return { ...first, followGate: { buttonTitle: gate.buttonTitle.trim(), ...(attachment ? { attachment: { kind: attachment.kind, url: attachment.url } } : {}),
+    resource: { text: rendered.text, buttons: rendered.buttons } } };
 }
 
 export function renderReply(
@@ -253,18 +346,26 @@ export class AutomationService {
     /** Optional public reply after an accepted private reply; enabled requires at least one valid variant. */
     publicReplyEnabled?: boolean;
     publicReplyVariants?: string[];
-    /** EXPERIMENTAL (follow gate phase 0). Omitted: 'none' with no titles. */
+    /** RETIRED experimental interactive buttons: only omitted, 'none' and [] are accepted. */
     interactiveMode?: InteractiveMode;
     interactiveTitles?: string[];
+    /** Follow gate (honor system). Omitted: off. */
+    followGateEnabled?: boolean;
+    followGateMessage?: string;
+    followGateButtonTitle?: string;
+    /** Optional follow gate attachment ('' = none), validated strictly; requires the gate. Omitted: none. */
+    resourceAttachmentKind?: unknown;
+    resourceAttachmentUrl?: unknown;
   }): string {
     if (!input.name.trim()) throw new TypeError('Automation name is required');
+    assertInteractiveRetired(input.interactiveMode, input.interactiveTitles);
     const publicReply = publicReplyConfig(input.publicReplyEnabled, input.publicReplyVariants, { enabled: false, variants: [] });
     const scope = input.scope ?? 'media';
     if (scope !== 'media' && scope !== 'account') throw new TypeError('Invalid automation scope');
-    const interactive = validateInteractiveConfig(input.interactiveMode ?? 'none', input.interactiveTitles ?? [], (input.buttons ?? []).length);
+    const followGate = validateFollowGateConfig({ enabled: input.followGateEnabled, message: input.followGateMessage, buttonTitle: input.followGateButtonTitle }, 'none');
+    const attachment = validateResourceAttachment({ kind: input.resourceAttachmentKind, url: input.resourceAttachmentUrl }, followGate.enabled);
     const automationId = randomUUID();
-    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons ?? [],
-      { ...interactive, automationId });
+    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons ?? []);
     let mediaId: string | null = null;
     if (scope === 'account') {
       if (input.mediaId !== undefined && input.mediaId !== null) throw new TypeError('A general automation cannot target one media');
@@ -281,11 +382,12 @@ export class AutomationService {
     this.database.prepare(`INSERT INTO automations
       (automation_id, account_id, media_id, scope, name, status, match_mode, reply_text, buttons_json,
        created_at, updated_at, real_enabled, monitoring_started_at, public_reply_enabled, public_reply_variants_json,
-       interactive_mode, interactive_titles_json)
-      VALUES (?, ?, ?, ?, ?, 'disabled', ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)`)
+       interactive_mode, interactive_titles_json, follow_gate_enabled, follow_gate_message, follow_gate_button_title,
+       resource_attachment_kind, resource_attachment_url)
+      VALUES (?, ?, ?, ?, ?, 'disabled', ?, ?, ?, ?, ?, 0, NULL, ?, ?, 'none', '[]', ?, ?, ?, ?, ?)`)
       .run(automationId, input.accountId, mediaId, scope, input.name.trim(), input.matchMode ?? 'contains',
         input.replyText, JSON.stringify(input.buttons ?? []), now, now, publicReply.enabled ? 1 : 0, JSON.stringify(publicReply.variants),
-        interactive.mode, JSON.stringify(interactive.titles));
+        followGate.enabled ? 1 : 0, followGate.message, followGate.buttonTitle, attachment.kind, attachment.url);
     return automationId;
   }
 
@@ -302,19 +404,30 @@ export class AutomationService {
     /** Omitted: keep the stored public reply configuration. */
     publicReplyEnabled?: boolean;
     publicReplyVariants?: string[];
-    /** EXPERIMENTAL. Both omitted: keep the stored interactive configuration. */
+    /** RETIRED experimental interactive buttons: only omitted, 'none' and [] are accepted; a legacy stored mode is reset. */
     interactiveMode?: InteractiveMode;
     interactiveTitles?: string[];
+    /** Follow gate. Omitted fields keep the stored values; changes apply to new sessions only. */
+    followGateEnabled?: boolean;
+    followGateMessage?: string;
+    followGateButtonTitle?: string;
+    /** Follow gate attachment. Omitted fields keep the stored values; '' clears it. */
+    resourceAttachmentKind?: unknown;
+    resourceAttachmentUrl?: unknown;
   }): void {
     if (!input.name.trim()) throw new TypeError('Automation name is required');
-    const stored = this.database.prepare(`SELECT scope, public_reply_enabled, public_reply_variants_json, interactive_mode, interactive_titles_json
+    assertInteractiveRetired(input.interactiveMode, input.interactiveTitles);
+    const stored = this.database.prepare(`SELECT scope, public_reply_enabled, public_reply_variants_json,
+        follow_gate_enabled, follow_gate_message, follow_gate_button_title, resource_attachment_kind, resource_attachment_url
       FROM automations WHERE account_id=? AND automation_id=?`)
       .get(accountId, automationId) as { scope: AutomationScope; public_reply_enabled: number; public_reply_variants_json: string;
-        interactive_mode: string; interactive_titles_json: string } | undefined;
+        follow_gate_enabled: number; follow_gate_message: string; follow_gate_button_title: string;
+        resource_attachment_kind: string; resource_attachment_url: string } | undefined;
     if (!stored) throw new Error('Automation does not belong to this account');
-    const storedInteractive = storedInteractiveConfig(stored.interactive_mode, stored.interactive_titles_json);
-    const interactive = validateInteractiveConfig(input.interactiveMode ?? storedInteractive.mode,
-      input.interactiveTitles ?? (input.interactiveMode === undefined ? storedInteractive.titles : []), input.buttons.length);
+    const followGate = validateFollowGateConfig({ enabled: input.followGateEnabled, message: input.followGateMessage, buttonTitle: input.followGateButtonTitle },
+      'none', storedFollowGateConfig(stored.follow_gate_enabled, stored.follow_gate_message, stored.follow_gate_button_title));
+    const attachment = validateResourceAttachment({ kind: input.resourceAttachmentKind, url: input.resourceAttachmentUrl }, followGate.enabled,
+      { kind: stored.resource_attachment_kind, url: stored.resource_attachment_url });
     const storedVariants = storedPublicReplyVariants(stored.public_reply_variants_json);
     const publicReply = publicReplyConfig(input.publicReplyEnabled, input.publicReplyVariants,
       { enabled: stored.public_reply_enabled === 1, variants: storedVariants });
@@ -326,8 +439,7 @@ export class AutomationService {
     const normalizedKeywords = input.keywords.map(normalizeMatchText);
     if (!normalizedKeywords.length || normalizedKeywords.some((phrase) => !phrase)
       || new Set(normalizedKeywords).size !== normalizedKeywords.length) throw new TypeError('Automation keywords must be distinct non-empty phrases');
-    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons,
-      { ...interactive, automationId });
+    renderReply(input.replyText, { username: 'user', comment: 'comment', keyword: 'keyword', account: 'account', media: 'media' }, input.buttons);
     if (mediaId !== null) {
       const media = this.database.prepare(`SELECT 1 FROM media WHERE account_id=? AND media_id=?`).get(accountId, mediaId);
       if (!media) throw new Error('Media does not belong to this account');
@@ -336,10 +448,12 @@ export class AutomationService {
     this.database.exec('BEGIN IMMEDIATE');
     try {
       const updated = this.database.prepare(`UPDATE automations SET media_id=?, name=?, match_mode=?, reply_text=?, buttons_json=?,
-        public_reply_enabled=?, public_reply_variants_json=?, interactive_mode=?, interactive_titles_json=?,
+        public_reply_enabled=?, public_reply_variants_json=?, interactive_mode='none', interactive_titles_json='[]',
+        follow_gate_enabled=?, follow_gate_message=?, follow_gate_button_title=?, resource_attachment_kind=?, resource_attachment_url=?,
         version=version+1, updated_at=? WHERE account_id=? AND automation_id=? AND scope=? AND name NOT LIKE '% (archived)'`)
         .run(mediaId, input.name.trim(), input.matchMode, input.replyText, JSON.stringify(input.buttons),
-          publicReply.enabled ? 1 : 0, JSON.stringify(publicReply.variants), interactive.mode, JSON.stringify(interactive.titles),
+          publicReply.enabled ? 1 : 0, JSON.stringify(publicReply.variants),
+          followGate.enabled ? 1 : 0, followGate.message, followGate.buttonTitle, attachment.kind, attachment.url,
           now, accountId, automationId, stored.scope);
       if (Number(updated.changes) !== 1) throw new Error('Automation does not belong to this account');
       this.database.prepare(`DELETE FROM automation_keywords WHERE account_id=? AND automation_id=?`).run(accountId, automationId);

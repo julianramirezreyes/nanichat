@@ -20,6 +20,8 @@ Documento de referencia para quien mantiene o audita Social Desk. Describe la ar
 14. [Límites de volumen](#14-límites-de-volumen)
 15. [Limitaciones conocidas](#15-limitaciones-conocidas)
 16. [Fase 0 del follow gate (experimental)](#16-fase-0-del-follow-gate-experimental)
+17. [Pedir que me sigan (follow gate de confianza)](#17-pedir-que-me-sigan-follow-gate-de-confianza)
+18. [Adjunto del recurso por URL](#18-adjunto-del-recurso-por-url)
 
 ## 1. Arquitectura
 
@@ -96,7 +98,7 @@ Respalda siempre la carpeta completa (base **y** llave) con la aplicación deten
 
 ## 3. Esquema y migraciones
 
-`src/db/migrations.ts` aplica en **una sola transacción** todas las migraciones pendientes al arrancar y deja la versión en `PRAGMA user_version`. La versión actual es **12**. Una base con versión mayor que la soportada se rechaza (`Database schema version N is newer than supported version 12`), así que no hay vuelta atrás sin una copia de seguridad.
+`src/db/migrations.ts` aplica en **una sola transacción** todas las migraciones pendientes al arrancar y deja la versión en `PRAGMA user_version`. La versión actual es **13**. Una base con versión mayor que la soportada se rechaza (`Database schema version N is newer than supported version 13`), así que no hay vuelta atrás sin una copia de seguridad.
 
 | Versión | Cambio |
 | --- | --- |
@@ -112,6 +114,8 @@ Respalda siempre la carpeta completa (base **y** llave) con la aplicación deten
 | v10 | Reconstrucción de `automations` para añadir `scope` y permitir `media_id` nulo, con `CHECK ((scope='media' AND media_id IS NOT NULL) OR (scope='account' AND media_id IS NULL))`. Se hace con las foreign keys desactivadas temporalmente (para que el `ON DELETE CASCADE` de las palabras clave no se dispare), se verifica `PRAGMA foreign_key_check` antes de confirmar y se restauran. Las filas existentes pasan a `scope='media'` sin cambiar IDs. |
 | v11 | Respuesta pública (solo aditiva): `automations.public_reply_enabled`, `public_reply_variants_json`; en `queue_items`: `public_reply_state`, `public_reply_text`, `public_reply_attempts`, `public_reply_next_at`, `public_reply_variant`, `public_reply_selected_at`; tabla de solo inserción `public_reply_attempts` con índice único que permite como máximo un evento `accepted` por elemento. |
 | v12 | Fase 0 del follow gate (experimental, solo aditiva): `comments.author_igsid` (anulable; ID opaco del autor tomado de `from.id`), `automations.interactive_mode` (`'none'` por defecto, `CHECK` en `none`/`quick_reply`/`postback`) e `automations.interactive_titles_json` (`'[]'` por defecto). No reconstruye tablas. Ver [sección 16](#16-fase-0-del-follow-gate-experimental). |
+| v13 | «Pedir que me sigan» (solo aditiva): `automations.follow_gate_enabled` (`0` por defecto, `CHECK` 0/1), `follow_gate_message` (`''`), `follow_gate_button_title` (`'Ya te sigo'`); tablas `gate_sessions` y `gate_events` (solo inserción, a lo sumo un `tap_detected` y un `resource_accepted` por sesión). Las automatizaciones existentes quedan con la opción apagada. Ver [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza). |
+| v14 | Adjunto del recurso (solo aditiva): `automations.resource_attachment_kind` y `gate_sessions.resource_attachment_kind` (`''` por defecto, `CHECK` en `''`/`image`/`audio`/`video`/`file`), `automations.resource_attachment_url` y `gate_sessions.resource_attachment_url` (`''`); tabla `gate_part_events` (solo inserción, a lo sumo un `accepted` por sesión y parte). Filas existentes: sin adjunto, sin cambios. Ver [sección 18](#18-adjunto-del-recurso-por-url). |
 
 > **Importante:** respalda la carpeta de datos antes del primer arranque de cada versión que traiga migraciones.
 
@@ -303,21 +307,23 @@ Los valores por defecto son prudentes y locales, no una garantía de que Meta ac
 - La detección de «ya respondido» depende de las respuestas guardadas por escaneos anteriores; no hay comprobación en vivo al enviar.
 - El comportamiento de las respuestas privadas (permisos, reglas de 24 h/7 días, cómo se ven los botones) depende de Meta y debe comprobarse con un comentario real controlado antes de un uso amplio.
 - La retención heredada solo conoce el formato de carpetas descrito en la sección 12 (`run.lock` y los nombres de contador listados).
+- «Pedir que me sigan» no verifica el seguimiento (Meta no lo permite) y su detección del toque depende de leer la conversación; ver la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza).
+- El adjunto del recurso se envía por URL pública HTTPS: la aplicación no aloja archivos ni comprueba formato o tamaño; ver la [sección 18](#18-adjunto-del-recurso-por-url).
 
 ## 16. Fase 0 del follow gate (experimental)
 
-Objetivo: permitir **un experimento controlado** para saber qué acepta Meta antes de construir un «follow gate» (comentario → respuesta privada con botón → comprobar si la persona sigue la cuenta → enviar el recurso). **No** es el follow gate: el toque de un botón **no se procesa** y no se envía nada adicional.
+Objetivo: permitir **un experimento controlado** para saber qué acepta Meta antes de construir un «follow gate» (comentario → respuesta privada con botón → comprobar si la persona sigue la cuenta → enviar el recurso). **No** es el follow gate: el toque de un botón **no se procesa** y no se envía nada adicional. El flujo completo de confianza (sin verificación) está en la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza).
 
 ### Qué hace
 
 1. **Identificador del autor.** El escáner guarda `from.id` del comentario en `comments.author_igsid` (solo si tiene forma de ID opaco: letras, números, `_` o `-`, máximo 64). Un escaneo posterior sin `from.id` nunca borra un valor conocido. La respuesta del envío privado (`recipient_id`) se guarda, validada, en el evento `accepted` de `send_attempts` (`details.recipientId`) y aparece en el historial del elemento.
-2. **Botones interactivos experimentales.** Cada automatización tiene `interactive_mode` (`none` por defecto, `quick_reply` o `postback`) y de 1 a 3 títulos (1-20 caracteres, distintos, sin enlaces). El servidor genera los `payload` (`gate:<automation_id>:<índice>`); la persona nunca los escribe. Con `none` el mensaje enviado es **idéntico byte a byte** al de antes. Las respuestas rápidas no se combinan con botones URL (no está documentado: se rechaza); los botones postback comparten el límite de 3 botones de la plantilla con los botones URL. La configuración se congela en el elemento de la cola al encolar, igual que el texto.
+2. **Botones interactivos experimentales: RETIRADOS (v14).** Sus botones no hacían nada al tocarlos; la API rechaza cualquier `interactiveMode` distinto de `none` o `interactiveTitles` no vacío con `400 interactive_mode_retired`, el encolado ignora un `interactive_mode` heredado y un elemento ya congelado con esos botones se omite (`SKIPPED`, `interactive_mode_retired`); las columnas se conservan y el botón postback del follow gate sigue igual.
 3. **Diagnóstico de solo lectura.** `GET /api/diagnostics/conversation?accountId=&commentId=` (exige además el token CSRF de la sesión, aunque sea GET) busca la conversación con el autor, lee como máximo los 20 mensajes más recientes y consulta el perfil. Responde con un resumen saneado: ID del autor recortado (`…1234`), por mensaje `id`, fecha, dirección (`account`/`user`), texto recortado a 80 caracteres, `keys` (nombres de los campos presentes en el mensaje, nunca sus valores) y forma de los adjuntos; del perfil solo `isUserFollowBusiness` e `isBusinessFollowUser`. Errores: `404 comment_not_found` (el comentario no es de esa cuenta), `409 igsid_unknown` (aún no hay `author_igsid`), `429 diagnostics_rate_limited` (1 llamada por comentario cada 20 s, en memoria), `503 diagnostics_unavailable`. Entre llamadas a Meta espera 0,5 s (Meta documenta 2 llamadas por segundo), así que tarda unos 10 s.
 
 ### Formas JSON enviadas (POST `/{ig-id}/messages`, con `recipient: { comment_id }`)
 
-- Respuestas rápidas: `message: { text, quick_replies: [{ content_type: "text", title, payload }] }` — [Quick Replies](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/quick-replies).
-- Postback: `message: { attachment: { type: "template", payload: { template_type: "button", text, buttons: [{ type: "web_url", title, url }…, { type: "postback", title, payload }…] } } }` — [Button Template](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/button-template).
+- Respuestas rápidas (retiradas; el proveedor las rechaza antes de llamar a Meta): `message: { text, quick_replies: [{ content_type: "text", title, payload }] }` — [Quick Replies](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/quick-replies).
+- Postback (lo usa el follow gate): `message: { attachment: { type: "template", payload: { template_type: "button", text, buttons: [{ type: "web_url", title, url }…, { type: "postback", title, payload }…] } } }` — [Button Template](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/button-template).
 - Respuesta privada: [Private Replies](https://developers.facebook.com/docs/instagram-platform/private-replies) (respuesta `{ recipient_id, message_id }`); conversación: [Conversations API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/conversations-api); perfil: [User Profile](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/user-profile).
 
 Si Meta rechaza explícitamente el mensaje con botones (HTTP 400 que no sea de token, permisos ni límite de uso), el resultado es un rechazo definitivo con código `interactive_payload_rejected` (`FAILED_PERMANENT`, sin reintento). Timeouts, 5xx o respuestas sin ID siguen siendo `UNKNOWN_OUTCOME` y nunca se reintentan.
@@ -327,11 +333,138 @@ Si Meta rechaza explícitamente el mensaje con botones (HTTP 400 que no sea de t
 - Verificado con pruebas automáticas (proveedor simulado): las formas JSON exactas, los límites, la clasificación de errores, el saneamiento del diagnóstico y que el modo `none` no cambia.
 - **NO VERIFICADO** contra Meta: que una respuesta privada (`recipient.comment_id`) acepte respuestas rápidas o botones postback (la guía de respuestas privadas solo muestra texto); cómo aparece un toque al leer la conversación (se documenta que una respuesta rápida se publica como mensaje del usuario con el título; un postback puede no aparecer); si un toque cuenta como consentimiento para leer el perfil (la documentación solo menciona mensajes, icebreakers y menú persistente); si `from.id` del comentario es el mismo IGSID que `recipient_id`; el código numérico del error de consentimiento (se reconoce por su texto). Las `keys` solo pueden mostrar los campos pedidos (`id, created_time, from, to, message, attachments`).
 
-### Cómo hacer el experimento (una sola vez, con una cuenta de prueba propia)
+### El experimento
 
-1. Reinicie la aplicación para aplicar la migración v12 (respalde antes la carpeta de datos).
-2. Cree una automatización **nueva** para una publicación propia, con una palabra clave poco común; en «Botones interactivos (experimental)» elija «Respuestas rápidas» (o «Botones postback») y escriba 1-2 títulos. Actívela y use «Autorizar real»; el Dry Run global debe estar desactivado.
-3. Desde una cuenta de prueba propia (en el teléfono, no en escritorio), comente la palabra clave. Espere el envío en «Cola e historial». Si queda `FAILED_PERMANENT` con `interactive_payload_rejected`, Meta no acepta esa forma: ese es el resultado del experimento.
-4. Si llegó, toque un botón en el teléfono. Luego, en «Cola e historial», pulse «Ver» en ese elemento `SENT` y después «Inspeccionar conversación (experimental)». Anote si aparece un mensaje del usuario con el título, qué `keys` tiene y qué devuelve el perfil (`user_consent_required` o los dos valores de seguimiento).
-5. Al terminar, archive la automatización experimental o vuelva su modo a «Ninguno».
+Ya se hizo: la respuesta privada acepta el botón postback y el toque aparece al leer la conversación (ver la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza)). La sección «Botones interactivos (experimental)» se retiró de la interfaz; «Inspeccionar conversación (experimental)» se mantiene como herramienta de solo lectura.
+
+
+## 17. Pedir que me sigan (follow gate de confianza)
+
+Opción normal por automatización, **apagada por defecto**: «Pedir primero que me sigan (sin comprobación)». Es un **sistema de confianza**. Meta no permite comprobar si la persona sigue la cuenta: la consulta de perfil (`is_user_follow_business`) respondió `User consent is required` (código 230) en todas las conversaciones probadas en vivo. La aplicación **no verifica** el seguimiento y nunca dice que lo hizo: solo detecta que la persona tocó el botón.
+
+### Flujo
+
+1. Un comentario coincide con la automatización. El **primer** mensaje privado (respuesta al comentario, `recipient.comment_id`) es el «Mensaje previo» con **un** botón postback (título configurable, por defecto «Ya te sigo»; `payload` generado por el servidor `gate:<automation_id>:0`, el mismo constructor que la fase 0). Sin botones URL. Verificado en vivo: una respuesta privada acepta esta plantilla y el botón aparece dentro de la burbuja.
+2. Cuando ese mensaje queda `SENT` (aceptado con ID), en **la misma transacción** se crea una sesión en `gate_sessions` (`AWAITING_TAP`). El IGSID de la persona sale de `recipient_id` de la respuesta del envío (preferido) o de `comments.author_igsid`. Si no hay ninguno, la sesión queda `FAILED` con `igsid_unknown` y el mensaje privado sigue `SENT` (nunca se reenvía).
+3. El programador sondea la conversación (solo GET) buscando el toque. Verificado en vivo: el toque aparece al leer la conversación como un mensaje normal del usuario cuyo texto es el título del botón (campos `created_time, from, id, message, to`, sin `payload`), unos 25-35 s después; un texto escrito a mano aparece igual.
+4. Con el **primer** toque se envía el **recurso**: la «Respuesta» y los «Botones» URL de la automatización, por IGSID (`POST /{ig-id}/messages` con `recipient.id`). La sesión queda `COMPLETED`.
+
+El texto del primer mensaje, el título y el recurso se **congelan** al encolar (en `queue_items.payload_json`, clave `followGate`) y se copian a la sesión (`button_title`, `resource_payload_json`). Editar o apagar la opción solo afecta a sesiones **nuevas**; una sesión en curso conserva lo que se le prometió a la persona (pausar, archivar o quitar el permiso real sí la cancela, ver abajo).
+
+### Configuración y validación (400 estricto, sin coerción)
+
+| Campo (API) | Regla |
+| --- | --- |
+| `followGateEnabled` | booleano; omitido en `PUT` = se conserva. Error `follow_gate_invalid`. |
+| `followGateMessage` | con la opción activa: 1-640 caracteres tras recortar; variables `{{username}}`, `{{keyword}}`, `{{account}}`, `{{media}}`, `{{comment}}` (como la respuesta). Error `follow_gate_message_invalid`. |
+| `followGateButtonTitle` | con la opción activa: 1-20 caracteres, sin enlaces ni saltos de línea. Error `follow_gate_button_title_invalid`. |
+| `interactiveMode` / `interactiveTitles` | retirados: solo `none` / `[]` u omitidos. Error `interactive_mode_retired`. |
+| `resourceAttachmentKind` / `resourceAttachmentUrl` | adjunto opcional del recurso; ver la [sección 18](#18-adjunto-del-recurso-por-url). Errores `attachment_invalid`, `attachment_url_invalid`, `attachment_requires_follow_gate`. |
+
+El recurso sigue siendo `replyText` (obligatorio) más `buttons` (0-2 botones `web_url`). En Dry Run o sin «Autorizar real», el elemento queda `SIMULATED` con las dos vistas previas (mensaje 1 con botón y mensaje 2 con el recurso): **no se crea sesión ni se llama a Meta**. La Revisión pendiente muestra los dos mensajes (`gatePreview` en el DTO, solo cuando la opción está activa).
+
+### Tablas (v13)
+
+- `gate_sessions`: `gate_session_id`, `account_id`, `automation_id`, `queue_item_id` (único), `comment_id` (único por cuenta), `igsid`, `state`, `gate_sent_at`, `tap_message_id` (único), `tap_at`, `window_expires_at`, `next_poll_at`, `poll_count`, `send_attempts`, `button_title`, `resource_payload_json`, `resource_message_id`, `last_error_code`, fechas. Claves foráneas a la cuenta, el elemento de cola, el comentario y la automatización.
+- `gate_events` (solo inserción, triggers): `session_created`, `tap_detected`, `resource_intent_recorded`, `resource_accepted`, `resource_rejected`, `resource_ambiguous`, `expired`, `cancelled`, `poll_error`, con `message_id`, `safe_error_code` y `details_json` acotado.
+
+### Estados
+
+| Estado | Significado | Siguiente |
+| --- | --- | --- |
+| `AWAITING_TAP` | Esperando el toque (o, si `tap_at` ya existe, toque recibido y envío pendiente por límite de uso o por una guarda transitoria). | `RESOURCE_SENDING`, `EXPIRED`, `CANCELLED`, `FAILED` |
+| `RESOURCE_SENDING` | Intención durable registrada; POST en curso. | `COMPLETED`, `FAILED`, `UNKNOWN_OUTCOME`, `AWAITING_TAP` (solo por límite de uso), `EXPIRED` |
+| `COMPLETED` | Meta aceptó el recurso (con ID). | — |
+| `EXPIRED` | Sin toque en 7 días (`gate_no_tap_7d`) o pasaron 24 h desde el toque (`resource_window_elapsed`). Nunca se envía. | — |
+| `CANCELLED` | La automatización se pausó, archivó o perdió «Autorizar real» antes del envío (`automation_inactive`). | — |
+| `FAILED` | Rechazo definitivo de Meta (sin reintento) o `igsid_unknown`. | — |
+| `UNKNOWN_OUTCOME` | Timeout, error de red, 5xx, respuesta sin ID o reinicio con el envío en curso. **Nunca** se reintenta; revise en Instagram. | — |
+
+### Sondeo, límites y ventanas
+
+- Lo ejecuta el tick del Monitoreo (cada 60 s) después de la respuesta privada y la pública; con el Monitoreo apagado, en Dry Run o con la cuenta pausada **no se hace nada**. Por eso la resolución real es la del tick: el recurso suele llegar entre 30 s y 2 minutos después del toque.
+- Calendario por sesión: primer sondeo 20 s después del mensaje con botón, luego cada 30 s durante los primeros 10 minutos, cada 2 minutos hasta las 2 horas y cada 10 minutos hasta que vence (7 días sin toque).
+- Como máximo **10 sesiones por tick**, en secuencia, con 0,5 s entre llamadas a Meta. Cada sondeo: buscar la conversación (`GET /{ig-id}/conversations?platform=instagram&user_id=<IGSID>`), listar los IDs de mensajes (`GET /{conversación}?fields=messages`) y leer detalles del más nuevo al más viejo, **como máximo 5**, deteniéndose en el primero anterior al mensaje con botón. Los IDs se validan como opacos; se ignoran los mensajes de la propia cuenta.
+- Coincidencia: texto del mensaje del usuario normalizado (NFC, minúsculas, espacios colapsados, sin puntuación/emoji al inicio o al final) igual al título normalizado. Se toma el primer toque; los posteriores se ignoran (`tap_message_id` único).
+- Ventana: el recurso solo puede enviarse dentro de las **24 h** posteriores al toque (la ventana de mensajería de Meta cuenta desde el mensaje del usuario).
+- Un error de sondeo (límite de uso, red) **no cambia el estado**: se registra `poll_error` y el siguiente sondeo espera al menos 2 minutos.
+
+### Envío del recurso y fallos
+
+Antes del POST se revalida en SQL: Dry Run apagado, automatización existente, activa, no archivada y con «Autorizar real», cuenta y conexión válidas y monitoreadas, sin retención de envíos, ningún otro envío en curso de la cuenta (privado, público o de otro recurso) y ventana vigente. La retención heredada se aplica igual que en los demás envíos. Luego se confirma la intención (`RESOURCE_SENDING` + `resource_intent_recorded`) y recién entonces se hace el POST:
+
+```json
+{ "recipient": { "id": "<IGSID>" }, "message": { "text": "…" } }
+{ "recipient": { "id": "<IGSID>" }, "message": { "attachment": { "type": "template", "payload": { "template_type": "button", "text": "…", "buttons": [ { "type": "web_url", "title": "…", "url": "https://…" } ] } } } }
+```
+
+Resultados: aceptado con ID → `COMPLETED`; rechazo definitivo → `FAILED` sin reintento; límite de uso (HTTP 429 o códigos 4, 17, 32, 613) → se reintenta **solo el envío** (el toque ya quedó registrado) como máximo 3 intentos, respetando `Retry-After` y sin salir de la ventana; ambiguo → `UNKNOWN_OUTCOME`. Al arrancar, toda sesión `RESOURCE_SENDING` pasa a `UNKNOWN_OUTCOME` (`process_interrupted_after_intent`). No hay botón de reintento manual. No se hace lectura de comprobación del recurso.
+
+Documentación de Meta: [Instagram Messaging API (Send API)](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api) — `POST /<IG_ID>/messages` con `recipient.id` (IGSID), respuesta `{ recipient_id, message_id }` y ventana de 24 h; [Button Template](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/button-template) — `template_type: "button"`, 1-3 botones `web_url`/`postback`, texto hasta 640 caracteres.
+
+### API y vista
+
+- `GET /api/automations`: `followGateEnabled`, `followGateMessage`, `followGateButtonTitle`.
+- `GET /api/queue`: `payload.followGate` (`buttonTitle`, `resource { text, buttons }`) y `followGate` (sesión: `state`, `buttonTitle`, `gateSentAt`, `tapAt`, `windowExpiresAt`, `nextPollAt`, `pollCount`, `resourceMessageId`, `lastErrorCode`, o `null`). El IGSID nunca se expone.
+- `GET /api/queue/:id/attempts`: `gateEvents` (`type`, `at`, `safeErrorCode`, `details` acotado).
+- Interfaz: casilla en el formulario y en el diálogo de edición (mensaje previo, título, adjunto opcional, nota de la limitación y vista previa de los mensajes). Insignia «Pide seguir (sin comprobar)». En «Cola e historial» → «Ver», bloque «Seguimiento» con el estado en español, fechas, eventos y pistas de error.
+
+### Qué NO está verificado
+
+- La aplicación **no comprueba el seguimiento**; no hay forma conocida de hacerlo hoy.
+- El envío por IGSID (`recipient.id`) del recurso **no se probó en vivo** desde esta aplicación; las formas JSON siguen la documentación de Meta y están cubiertas por pruebas automáticas con un proveedor simulado.
+- El sondeo de conversaciones a escala (muchas sesiones simultáneas, límites de uso reales de Meta) no se midió. Si la persona escribe más de 5 mensajes después de tocar el botón antes del siguiente sondeo, el toque puede quedar fuera de los 5 detalles leídos y no detectarse.
+- Que `from.id` del comentario sea el mismo IGSID que `recipient_id` no está confirmado; por eso se prefiere `recipient_id`.
+
+## 18. Adjunto del recurso por URL
+
+Opcional, solo con «Pedir primero que me sigan» activo: un medio (imagen, audio, video o PDF) que se envía **como mensaje aparte, antes** del texto del recurso. Sin adjunto, todo funciona exactamente como en la [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza) (mismo payload, mismos eventos; no se escriben `gate_part_events`).
+
+### Por qué dos mensajes y por qué una URL
+
+- Según la documentación de Meta, en un mensaje de seguimiento (`POST /<IG_ID>/messages` con `recipient.id`, dentro de las 24 h posteriores al mensaje de la persona) un adjunto va en `message.attachment = { type, payload: { url } }`. Los botones solo viajan en plantillas, así que **adjunto y botones en un mismo mensaje no está documentado**: se envían dos mensajes seguidos, (1) el adjunto y (2) el texto con los botones (la plantilla de botones de siempre).
+- Meta descarga el archivo desde **sus** servidores: la URL debe ser pública y HTTPS. Esta aplicación es local, no aloja archivos y **nunca descarga** la URL (no comprueba formato ni tamaño).
+- Formatos y tamaños según Meta (consultado el 2026-10-08): imagen png o jpeg, 8 MB; audio aac, m4a, wav o mp4, 25 MB; video mp4, ogg, avi, mov o webm, 25 MB; archivo: solo PDF, 25 MB. mp3 y gif **no** están en la lista documentada: no se bloquean, pero la interfaz muestra un aviso.
+- Fuentes: [Instagram Messaging API](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api) y [Send a message](https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/send-message).
+
+```json
+{ "recipient": { "id": "<IGSID>" }, "message": { "attachment": { "type": "audio", "payload": { "url": "https://…/clase.m4a" } } } }
+```
+
+(`type` es `image`, `audio`, `video` o `file`; el segundo mensaje es exactamente el JSON de la sección 17.)
+
+### Configuración y validación (400 estricto)
+
+| Campo (API) | Regla | Error |
+| --- | --- | --- |
+| `resourceAttachmentKind` | `''` (sin adjunto), `image`, `audio`, `video` o `file` (PDF). Omitido en `PUT` = se conserva. | `attachment_invalid` |
+| `resourceAttachmentUrl` | obligatoria con un tipo; `https:`, hasta 2048 caracteres, sin usuario ni contraseña, sin espacios; el host no puede ser `localhost`, una IP (v4 en cualquier forma o v6), un nombre sin punto ni terminar en `.local`, `.localhost`, `.lan`, `.home`, `.internal`, `.intranet`, `.corp`, `.arpa`, `.test` o `.invalid`. Una URL sin tipo es `attachment_invalid`. | `attachment_url_invalid` |
+| (requisito) | un adjunto enviado en la solicitud exige `followGateEnabled` efectivo. Con la opción apagada, un adjunto ya guardado se conserva como borrador y no se usa. | `attachment_requires_follow_gate` |
+
+Al encolar, el adjunto se congela en `payload.followGate.attachment` (solo si existe) y, al crear la sesión, en `gate_sessions.resource_attachment_kind/url`. Editar la automatización solo afecta a sesiones nuevas.
+
+### Secuencia y estados por parte
+
+1. Toque detectado (igual que la sección 17).
+2. **Parte `attachment`:** intención durable (`RESOURCE_SENDING` + `resource_intent_recorded` con `details.part` + `gate_part_events` `intent_recorded`), con las mismas guardas SQL más «el adjunto no tiene resultado final»; luego el POST.
+3. Resultado del adjunto: aceptado con ID → `accepted` y la sesión vuelve a `AWAITING_TAP` (toque conservado); rechazo definitivo → `rejected` + `skipped` (`attachment_failed`) y se sigue con el texto; límite de uso → `rejected` con `retryAt`, se reintenta **solo el adjunto** (máximo 3 intentos de esa parte, `Retry-After`, dentro de la ventana; si se agotan se trata como rechazo y se omite); ambiguo → `ambiguous`, sesión `UNKNOWN_OUTCOME` y el texto **nunca** se envía.
+4. Espera de al menos **1 s** (`GATE_PART_SPACING_MS`, medido con el reloj del motor desde el resultado del adjunto). Si no pasó, la sesión queda con `next_poll_at` = ese momento y el texto sale en un tick posterior.
+5. **Parte `text`:** intención durable (la SQL exige adjunto `accepted` o `skipped` y texto sin `accepted`/`ambiguous`) y POST de la plantilla de siempre. Aceptado → `COMPLETED` (con `last_error_code = attachment_failed` si el adjunto se omitió); rechazo → `FAILED`; límite de uso → se reintenta solo el texto (3 intentos propios); ambiguo → `UNKNOWN_OUTCOME`. Un fallo del texto **nunca** reenvía el adjunto.
+
+`gate_part_events` (solo inserción): `part` (`attachment`/`text`), `event_type` (`intent_recorded`, `accepted`, `rejected`, `ambiguous`, `skipped`), `event_at`, `message_id`, `safe_error_code`, `details_json`; índice único: un `accepted` por (sesión, parte). Al arrancar, una sesión `RESOURCE_SENDING` pasa a `UNKNOWN_OUTCOME` y la parte que tenía intención sin resultado recibe `ambiguous` (`process_interrupted_after_intent`). Expiración (24 h), cancelación por automatización inactiva, Dry Run y aislamiento por cuenta no cambian.
+
+### API y vista
+
+- `GET /api/automations`: `resourceAttachmentKind`, `resourceAttachmentUrl`.
+- `GET /api/queue`: `payload.followGate.attachment` (si existe) y, en sesiones con adjunto, `followGate.attachment` y `followGate.parts { attachment, text }` con `state` (`pending`, `sending`, `rejected`, `accepted`, `skipped`, `ambiguous`), `safeErrorCode` y `attempts`. Las sesiones sin adjunto conservan exactamente sus claves.
+- `GET /api/queue/:id/attempts`: `gatePartEvents` (`part`, `type`, `at`, `safeErrorCode`; sin IDs de mensaje).
+- Revisión pendiente: `gatePreview.attachment` cuando hay adjunto.
+- Interfaz: «Adjunto del recurso (opcional)» (tipo + URL, ayuda y avisos de mp3/gif o de enlaces para compartir), vista previa «Mensaje 1: se enviaría un audio (host · archivo)» y «Mensaje 2 · texto + botones», insignia «Adjunto: audio/imagen/video/PDF», y en «Seguimiento» el estado de cada parte con la pista «Meta rechazó el adjunto; se envió solo el texto».
+
+### Qué NO está verificado
+
+- Nada de esto se probó en vivo contra Meta: JSON y reglas vienen de la documentación y de pruebas con un proveedor simulado.
+- Cómo se ve un audio en Instagram (reproductor o nota de voz), si Meta acepta mp3 o gif, el límite real de tiempo de descarga de Meta (una descarga lenta puede terminar en el timeout de 10 s de la aplicación y quedar `UNKNOWN_OUTCOME`), y si «Your app user must own any media» limita URLs de terceros.
+- Que los dos mensajes lleguen en orden: Meta no documenta una garantía de orden; la aplicación solo garantiza el orden de envío y la separación mínima de 1 s.
+- Adjuntos dentro de la respuesta privada al comentario: no documentado, **fuera de alcance** (allí solo texto y la plantilla del botón).
 

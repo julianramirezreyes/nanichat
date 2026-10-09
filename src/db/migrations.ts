@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-const VERSION = 12;
+const VERSION = 14;
 
 const INITIAL_SCHEMA = `
 CREATE TABLE connections (
@@ -174,6 +174,8 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
     if (rebuild) migrateAutomationScope(database);
     if (current < 11 && target >= 11) migratePublicReply(database);
     if (current < 12 && target >= 12) migrateFollowGatePhase0(database);
+    if (current < 13 && target >= 13) migrateFollowGate(database);
+    if (current < 14 && target >= 14) migrateResourceAttachment(database);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -181,6 +183,103 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
   } finally {
     if (rebuild && foreignKeys) database.exec('PRAGMA foreign_keys = ON');
   }
+}
+
+/**
+ * v14 (follow gate resource attachment by URL): additive only (ADD COLUMN with defaults, one new table). Automations
+ * gain an optional attachment kind/url ('' = none); gate sessions freeze the same pair at creation. `gate_part_events`
+ * is the append-only per-part log of the resource follow-ups ('attachment' then 'text'), with at most one `accepted`
+ * per session and part. Rows of earlier versions keep every value (no attachment); `gate_events` is not rebuilt.
+ */
+function migrateResourceAttachment(database: DatabaseSync): void {
+  const kinds = `('', 'image', 'audio', 'video', 'file')`;
+  database.exec(`ALTER TABLE automations ADD COLUMN resource_attachment_kind TEXT NOT NULL DEFAULT '' CHECK (resource_attachment_kind IN ${kinds});
+  ALTER TABLE automations ADD COLUMN resource_attachment_url TEXT NOT NULL DEFAULT '';
+  ALTER TABLE gate_sessions ADD COLUMN resource_attachment_kind TEXT NOT NULL DEFAULT '' CHECK (resource_attachment_kind IN ${kinds});
+  ALTER TABLE gate_sessions ADD COLUMN resource_attachment_url TEXT NOT NULL DEFAULT '';
+  CREATE TABLE gate_part_events (
+    gate_part_event_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    gate_session_id TEXT NOT NULL,
+    part TEXT NOT NULL CHECK (part IN ('attachment', 'text')),
+    event_type TEXT NOT NULL CHECK (event_type IN ('intent_recorded', 'accepted', 'rejected', 'ambiguous', 'skipped')),
+    event_at TEXT NOT NULL,
+    message_id TEXT,
+    safe_error_code TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY(gate_session_id, account_id) REFERENCES gate_sessions(gate_session_id, account_id) ON DELETE RESTRICT
+  );
+  CREATE INDEX gate_part_events_session_idx ON gate_part_events(account_id, gate_session_id, event_at);
+  CREATE UNIQUE INDEX gate_part_events_one_accepted_per_part ON gate_part_events(gate_session_id, part) WHERE event_type = 'accepted';
+  CREATE TRIGGER gate_part_events_no_update BEFORE UPDATE ON gate_part_events BEGIN
+    SELECT RAISE(ABORT, 'gate_part_events is append-only');
+  END;
+  CREATE TRIGGER gate_part_events_no_delete BEFORE DELETE ON gate_part_events BEGIN
+    SELECT RAISE(ABORT, 'gate_part_events is append-only');
+  END;
+  PRAGMA user_version = 14;`);
+}
+
+/**
+ * v13 (follow gate, honor system): additive only. Automations gain the per-automation gate option (off by default).
+ * `gate_sessions` tracks one gate per accepted private reply (at most one per queue item and per comment); it stores
+ * the button title and the rendered resource message as a snapshot. `gate_events` is append-only; at most one
+ * `tap_detected` and one `resource_accepted` can ever exist per session.
+ */
+function migrateFollowGate(database: DatabaseSync): void {
+  database.exec(`ALTER TABLE automations ADD COLUMN follow_gate_enabled INTEGER NOT NULL DEFAULT 0 CHECK (follow_gate_enabled IN (0, 1));
+  ALTER TABLE automations ADD COLUMN follow_gate_message TEXT NOT NULL DEFAULT '';
+  ALTER TABLE automations ADD COLUMN follow_gate_button_title TEXT NOT NULL DEFAULT 'Ya te sigo';
+  CREATE TABLE gate_sessions (
+    gate_session_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES social_accounts(account_id) ON DELETE RESTRICT,
+    automation_id TEXT NOT NULL,
+    queue_item_id TEXT NOT NULL UNIQUE,
+    comment_id TEXT NOT NULL,
+    igsid TEXT,
+    state TEXT NOT NULL CHECK (state IN ('AWAITING_TAP', 'RESOURCE_SENDING', 'COMPLETED', 'EXPIRED', 'CANCELLED', 'FAILED', 'UNKNOWN_OUTCOME')),
+    gate_sent_at TEXT NOT NULL,
+    tap_message_id TEXT UNIQUE,
+    tap_at TEXT,
+    window_expires_at TEXT,
+    next_poll_at TEXT,
+    poll_count INTEGER NOT NULL DEFAULT 0,
+    send_attempts INTEGER NOT NULL DEFAULT 0,
+    button_title TEXT NOT NULL,
+    resource_payload_json TEXT NOT NULL,
+    resource_message_id TEXT,
+    last_error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(account_id, comment_id),
+    UNIQUE(gate_session_id, account_id),
+    FOREIGN KEY(queue_item_id, account_id) REFERENCES queue_items(queue_item_id, account_id) ON DELETE RESTRICT,
+    FOREIGN KEY(account_id, comment_id) REFERENCES comments(account_id, comment_id) ON DELETE RESTRICT,
+    FOREIGN KEY(automation_id, account_id) REFERENCES automations(automation_id, account_id) ON DELETE RESTRICT
+  );
+  CREATE INDEX gate_sessions_due_idx ON gate_sessions(state, next_poll_at);
+  CREATE TABLE gate_events (
+    gate_event_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    gate_session_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('session_created', 'tap_detected', 'resource_intent_recorded', 'resource_accepted',
+      'resource_rejected', 'resource_ambiguous', 'expired', 'cancelled', 'poll_error')),
+    event_at TEXT NOT NULL,
+    message_id TEXT,
+    safe_error_code TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY(gate_session_id, account_id) REFERENCES gate_sessions(gate_session_id, account_id) ON DELETE RESTRICT
+  );
+  CREATE INDEX gate_events_session_idx ON gate_events(account_id, gate_session_id, event_at);
+  CREATE UNIQUE INDEX gate_events_one_tap_per_session ON gate_events(gate_session_id) WHERE event_type = 'tap_detected';
+  CREATE UNIQUE INDEX gate_events_one_resource_per_session ON gate_events(gate_session_id) WHERE event_type = 'resource_accepted';
+  CREATE TRIGGER gate_events_no_update BEFORE UPDATE ON gate_events BEGIN
+    SELECT RAISE(ABORT, 'gate_events is append-only');
+  END;
+  CREATE TRIGGER gate_events_no_delete BEFORE DELETE ON gate_events BEGIN
+    SELECT RAISE(ABORT, 'gate_events is append-only');
+  END;
+  PRAGMA user_version = 13;`);
 }
 
 /**

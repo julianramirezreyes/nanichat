@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AccountRef, MessageReadback, PublicReplyResult, SendResult, SocialProvider } from '../core/domain.ts';
-import { claimsMediaSql, classifyComment, hasEnabledMediaAutomation, hasOwnerReply, isPastPrivateReplyWindow, matchAutomation, renderReply, storedInteractiveConfig } from './automations.ts';
+import {
+  claimsMediaSql, classifyComment, hasEnabledMediaAutomation, hasOwnerReply, isPastPrivateReplyWindow, matchAutomation, renderFollowGatePayload,
+  renderReply, storedFollowGateConfig,
+} from './automations.ts';
+import { storedResourceAttachment } from './resource-attachment.ts';
+import { GATE_FIRST_POLL_MS, safeIgsid } from './follow-gate-rules.ts';
 import {
   PUBLIC_REPLY_MAX_ATTEMPTS, PUBLIC_REPLY_RECENT_WINDOW, PUBLIC_REPLY_SPACING_MS, PUBLIC_REPLY_WINDOW_MS,
   renderPublicReply, selectPublicReplyVariant, storedPublicReplyVariants,
@@ -22,7 +27,7 @@ type PublicRow = {
   connection_id: string; provider_account_id: string; username: string;
 };
 type PublicEvent = 'intent_recorded' | 'accepted' | 'definitive_rejection' | 'ambiguous' | 'skipped' | 'expired' | 'manual_retry';
-type LegacyQueueInterlock = {
+export type LegacyQueueInterlock = {
   /** holdConfigured: the account is a configured legacy hold, so even an absent counter needs an acknowledgement. */
   inspect(username: string): { counterVersion: string; lockPresent: boolean; holdConfigured?: boolean };
   withExclusiveLock<T>(username: string, operation: () => Promise<T>): Promise<T>;
@@ -88,11 +93,13 @@ export class QueueService {
   async enqueueReviewed(accountId: string, automationId: string, reviewedCommentIds: string[]): Promise<string[]> {
     if (!reviewedCommentIds.length) return [];
     const automation = this.database.prepare(`SELECT media_id, scope, status, real_enabled, match_mode, reply_text, buttons_json, version,
-      public_reply_enabled, public_reply_variants_json, interactive_mode, interactive_titles_json
+      public_reply_enabled, public_reply_variants_json,
+      follow_gate_enabled, follow_gate_message, follow_gate_button_title, resource_attachment_kind, resource_attachment_url
       FROM automations WHERE account_id = ? AND automation_id = ?`).get(accountId, automationId) as {
       media_id: string | null; scope: 'media' | 'account'; status: string; real_enabled: number; match_mode: 'exact' | 'contains';
       reply_text: string; buttons_json: string; version: number; public_reply_enabled: number; public_reply_variants_json: string;
-      interactive_mode: string; interactive_titles_json: string;
+      follow_gate_enabled: number; follow_gate_message: string; follow_gate_button_title: string;
+      resource_attachment_kind: string; resource_attachment_url: string;
     } | undefined;
     if (!automation) throw new Error('Automation does not belong to this account');
     if (automation.status !== 'enabled') throw new Error('Automation is not enabled');
@@ -145,12 +152,19 @@ export class QueueService {
       if (matchingIds.some((match) => match.automation_id !== automationId)) {
         throw new Error('Comment matches multiple automations and requires review');
       }
-      const payload = renderReply(automation.reply_text, {
+      const variables = {
         username: comment.username ?? '', comment: comment.text ?? '', keyword: classification.matchedKeywords[0]!,
         account: account.username, media: mediaLabel,
-      }, JSON.parse(automation.buttons_json) as Array<{ title: string; url: string }>,
-      // EXPERIMENTAL interactive buttons are frozen into the payload at enqueue time ('none' adds no keys).
-      { ...storedInteractiveConfig(automation.interactive_mode, automation.interactive_titles_json), automationId });
+      };
+      const urlButtons = JSON.parse(automation.buttons_json) as Array<{ title: string; url: string }>;
+      const followGate = storedFollowGateConfig(automation.follow_gate_enabled, automation.follow_gate_message, automation.follow_gate_button_title);
+      // Follow gate: the first message is the gate (one postback button); the resource (reply text + URL buttons, plus the
+      // optional attachment) is rendered now and frozen in the payload, so later edits never alter it. Without the gate
+      // the payload is the historic one. A legacy interactive_mode (retired experiment) is ignored: no dead button is sent.
+      const payload = followGate.enabled
+        ? renderFollowGatePayload(followGate, variables, { replyText: automation.reply_text, buttons: urlButtons }, automationId,
+          storedResourceAttachment(automation.resource_attachment_kind, automation.resource_attachment_url))
+        : renderReply(automation.reply_text, variables, urlButtons);
       const now = new Date().toISOString();
       // Simulated items keep the would-be public reply as an inert preview (WOULD_REPLY_PUBLIC); it is never posted.
       const preview = simulated && automation.public_reply_enabled === 1
@@ -194,6 +208,14 @@ export class QueueService {
       username: row.username,
     };
 
+    // Retired experiment: a payload frozen with quick replies, or with postback buttons outside the follow gate, would
+    // send buttons that do nothing when tapped. Skip it before any provider call, intent or POST.
+    if (retiredInteractivePayload(row.payload_json)) {
+      this.database.prepare(`UPDATE queue_items SET state='SKIPPED', state_reason_code='interactive_mode_retired', updated_at=?
+        WHERE queue_item_id=? AND state IN ('QUEUED','FAILED_RETRYABLE')`)
+        .run(new Date().toISOString(), row.queue_item_id);
+      return row.queue_item_id;
+    }
     let freshComment;
     try {
       freshComment = await this.provider.getComment(account, row.comment_id);
@@ -295,6 +317,8 @@ export class QueueService {
       // Private first, public after: the public step becomes PENDING in the SAME transaction that records the
       // accepted private reply, so a crash can never leave a SENT item without its scheduled public step (or the reverse).
       this.schedulePublicReply(row, freshComment);
+      // Follow gate: the session starts in the SAME transaction that records the accepted gate message.
+      this.createGateSession(row, recipientId);
       this.database.exec('COMMIT');
     } catch (error) {
       this.database.exec('ROLLBACK');
@@ -666,6 +690,41 @@ export class QueueService {
       .run(selection.text, selection.variant, new Date(this.clock()).toISOString(), row.queue_item_id);
   }
 
+  /**
+   * Called inside the accepted-private transaction for a queue item whose frozen payload carries a follow gate. The
+   * IGSID comes from the send response (preferred) or the stored comment author; without one the session is recorded
+   * as FAILED (igsid_unknown) and the private item stays SENT (it is never resent).
+   */
+  private createGateSession(row: QueueRow, recipientId: string | undefined): void {
+    let snapshot: { buttonTitle?: unknown; resource?: { text?: unknown; buttons?: unknown }; attachment?: { kind?: unknown; url?: unknown } } | undefined;
+    try {
+      snapshot = (JSON.parse(row.payload_json) as { followGate?: typeof snapshot }).followGate;
+    } catch {
+      snapshot = undefined;
+    }
+    if (!snapshot || typeof snapshot.buttonTitle !== 'string' || typeof snapshot.resource?.text !== 'string' || !Array.isArray(snapshot.resource.buttons)) return;
+    const author = this.database.prepare(`SELECT author_igsid FROM comments WHERE account_id=? AND comment_id=?`)
+      .get(row.account_id, row.comment_id) as { author_igsid: string | null } | undefined;
+    const igsid = recipientId ?? safeIgsid(author?.author_igsid);
+    const now = this.clock();
+    const nowIso = new Date(now).toISOString();
+    const sessionId = randomUUID();
+    // The attachment is frozen on the session like the other snapshots ('' = none; an invalid snapshot is never sent).
+    const attachment = snapshot.attachment ? storedResourceAttachment(snapshot.attachment.kind, snapshot.attachment.url) : null;
+    this.database.prepare(`INSERT INTO gate_sessions (gate_session_id, account_id, automation_id, queue_item_id, comment_id, igsid, state,
+        gate_sent_at, next_poll_at, button_title, resource_payload_json, last_error_code, created_at, updated_at,
+        resource_attachment_kind, resource_attachment_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(sessionId, row.account_id, row.automation_id, row.queue_item_id, row.comment_id, igsid ?? null, igsid ? 'AWAITING_TAP' : 'FAILED',
+        nowIso, igsid ? new Date(now + GATE_FIRST_POLL_MS).toISOString() : null, snapshot.buttonTitle,
+        JSON.stringify({ text: snapshot.resource.text, buttons: snapshot.resource.buttons }), igsid ? null : 'igsid_unknown', nowIso, nowIso,
+        attachment?.kind ?? '', attachment?.url ?? '');
+    this.database.prepare(`INSERT INTO gate_events (gate_event_id, account_id, gate_session_id, event_type, event_at, safe_error_code, details_json)
+      VALUES (?, ?, ?, 'session_created', ?, ?, ?)`)
+      .run(randomUUID(), row.account_id, sessionId, nowIso, igsid ? null : 'igsid_unknown',
+        JSON.stringify({ igsidSource: recipientId ? 'send_response' : igsid ? 'comment_author' : 'none' }));
+  }
+
   /** Rotation: avoids the account's most recent variants (see selectPublicReplyVariant). Null when nothing valid renders. */
   private choosePublicReply(accountId: string, variants: string[], variables: { username: string; keyword: string }):
     { variant: string; text: string } | null {
@@ -688,14 +747,7 @@ export class QueueService {
   }
 
   private legacyAcknowledged(row: QueueRow, ownLockHeld = false): boolean {
-    const state = this.options.legacyInterlock?.inspect(row.username);
-    if (!state || (!ownLockHeld && state.lockPresent)) return false;
-    const acknowledgement = this.database.prepare(`SELECT username, counter_version FROM legacy_account_acknowledgements WHERE account_id=?`)
-      .get(row.account_id) as { username: string; counter_version: string } | undefined;
-    const normalized = row.username.normalize('NFC').trim().replace(/^@/u, '').toLocaleLowerCase('und');
-    if (state.counterVersion === 'unreadable') return false;
-    if (state.counterVersion === 'absent' && !state.holdConfigured) return true;
-    return Boolean(acknowledgement && acknowledgement.username === normalized && acknowledgement.counter_version === state.counterVersion);
+    return legacyAcknowledged(this.database, this.options.legacyInterlock, row.account_id, row.username, ownLockHeld);
   }
 
   private nextQueued(accountId?: string, queueItemId?: string, now = Date.now()): QueueRow | undefined {
@@ -836,6 +888,20 @@ export class QueueService {
   }
 }
 
+/** Legacy interlock rule shared by every send path (private, public, follow gate resource). */
+export function legacyAcknowledged(
+  database: DatabaseSync, interlock: LegacyQueueInterlock | undefined, accountId: string, username: string, ownLockHeld = false,
+): boolean {
+  const state = interlock?.inspect(username);
+  if (!state || (!ownLockHeld && state.lockPresent)) return false;
+  const acknowledgement = database.prepare(`SELECT username, counter_version FROM legacy_account_acknowledgements WHERE account_id=?`)
+    .get(accountId) as { username: string; counter_version: string } | undefined;
+  const normalized = username.normalize('NFC').trim().replace(/^@/u, '').toLocaleLowerCase('und');
+  if (state.counterVersion === 'unreadable') return false;
+  if (state.counterVersion === 'absent' && !state.holdConfigured) return true;
+  return Boolean(acknowledgement && acknowledgement.username === normalized && acknowledgement.counter_version === state.counterVersion);
+}
+
 function boundedRetryDelay(retryAfter: unknown, attemptCount: number): number {
   const maximum = 15 * 60 * 1000;
   if (typeof retryAfter === 'string') {
@@ -851,6 +917,16 @@ function publicRetryDelay(retryAfter: string | undefined, attempts: number, now:
     if (Number.isFinite(delay) && delay > 0) return delay;
   }
   return Math.min(PUBLIC_RETRY_MAX_DELAY_MS, PUBLIC_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attempts - 1)));
+}
+
+/** True for a frozen payload of the retired experiment: quick replies, or postback buttons without a follow gate. */
+function retiredInteractivePayload(payloadJson: string): boolean {
+  try {
+    const payload = JSON.parse(payloadJson) as { quickReplies?: unknown; postbackButtons?: unknown; followGate?: unknown };
+    return payload.quickReplies !== undefined || (payload.postbackButtons !== undefined && !payload.followGate);
+  } catch {
+    return false;
+  }
 }
 
 /** Opaque Instagram-scoped id from the send response: bounded, simple charset, otherwise dropped. */

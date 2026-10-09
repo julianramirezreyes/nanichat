@@ -9,7 +9,8 @@ import { ScanProgress, type BacklogService } from '../services/backlog.ts';
 import { QueueReadbackError, type QueueService } from '../services/queue.ts';
 import { listPendingReview, truncateText } from '../services/pending-review.ts';
 import { storedPublicReplyVariants } from '../services/public-reply.ts';
-import { storedInteractiveConfig } from '../services/automations.ts';
+import { FollowGateConfigError, InteractiveModeRetiredError, assertInteractiveRetired, storedFollowGateConfig } from '../services/automations.ts';
+import { ResourceAttachmentError, storedResourceAttachment } from '../services/resource-attachment.ts';
 import type { ImportedMetaEnvironment } from '../security/env-import.ts';
 
 const BODY_LIMIT = 64 * 1024;
@@ -68,7 +69,9 @@ export function createApiHandler(deps: ApiDependencies) {
     } catch (error) {
       if (error instanceof QueueReadbackError) return send(response, error.status, { error: error.code });
       const status = error instanceof ApiError ? error.status : error instanceof TypeError ? 400 : 409;
-      const code = error instanceof ApiError ? error.code : error instanceof TypeError ? 'invalid_request' : 'operation_rejected';
+      const code = error instanceof ApiError ? error.code
+        : error instanceof FollowGateConfigError || error instanceof ResourceAttachmentError || error instanceof InteractiveModeRetiredError ? error.code
+          : error instanceof TypeError ? 'invalid_request' : 'operation_rejected';
       send(response, status, { error: code });
     }
   };
@@ -158,6 +161,8 @@ async function route(
   if (path === '/api/automations' && method === 'POST') {
     const service = requireService(deps.automations, 'automations');
     const account = accountId(body.accountId, db);
+    // The experimental interactive buttons are retired: anything but 'none'/[] (or omitted) is a 400.
+    assertInteractiveRetired(body.interactiveMode, body.interactiveTitles);
     const keywords = stringList(body.keywords, 20);
     const normalizedKeywords = keywords.map((keyword) => keyword.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('und').replace(/[\s\u00a0]+/gu, ' ').trim());
     if (!keywords.length || normalizedKeywords.some((keyword) => !keyword) || new Set(normalizedKeywords).size !== normalizedKeywords.length) {
@@ -171,14 +176,15 @@ async function route(
     const automationId = service.create({ accountId: account, scope, mediaId: scope === 'account' ? null : text(body.mediaId), name: text(body.name),
       replyText: text(body.replyText), matchMode: matchMode(body.matchMode, true), buttons: buttons(body.buttons),
       publicReplyEnabled: body.publicReplyEnabled as boolean | undefined, publicReplyVariants: body.publicReplyVariants as string[] | undefined,
-      // EXPERIMENTAL: validated strictly by the service (TypeError -> 400); omitted means 'none'.
-      interactiveMode: body.interactiveMode as never, interactiveTitles: body.interactiveTitles as never });
+      // Follow gate and its optional attachment: validated strictly by the service (typed 400 codes, never coerced).
+      ...followGateFields(body) });
     for (const keyword of keywords) service.addKeyword(account, automationId, keyword);
     return send(response, 201, { automationId });
   }
   const automationEdit = path.match(/^\/api\/automations\/([^/]+)$/u);
   if (automationEdit && method === 'PUT') {
     const account = accountId(body.accountId, db);
+    assertInteractiveRetired(body.interactiveMode, body.interactiveTitles);
     // The stored scope is authoritative: a different `scope`, or a media for a general automation, is rejected (409).
     requireService(deps.automations, 'automations').update(account, decodeURIComponent(automationEdit[1]!), {
       name: text(body.name), mediaId: body.mediaId === undefined || body.mediaId === null ? null : text(body.mediaId),
@@ -186,8 +192,8 @@ async function route(
       matchMode: matchMode(body.matchMode, false), buttons: buttons(body.buttons), keywords: stringList(body.keywords, 20),
       // Omitted: the stored public reply configuration is kept.
       publicReplyEnabled: body.publicReplyEnabled as boolean | undefined, publicReplyVariants: body.publicReplyVariants as string[] | undefined,
-      // EXPERIMENTAL: omitted keeps the stored interactive configuration.
-      interactiveMode: body.interactiveMode as never, interactiveTitles: body.interactiveTitles as never,
+      // Follow gate (and attachment): omitted fields keep the stored configuration; changes apply to new sessions only.
+      ...followGateFields(body),
     });
     return send(response, 200, { ok: true });
   }
@@ -280,8 +286,19 @@ async function route(
       FROM send_attempts WHERE account_id=? AND queue_item_id=? ORDER BY event_at, attempt_event_id`).all(selected, queueId) as Array<Record<string, unknown>>;
     const publicEvents = db.prepare(`SELECT event_type AS type, event_at AS at, reply_id AS replyId, safe_error_code AS safeErrorCode, details_json
       FROM public_reply_attempts WHERE account_id=? AND queue_item_id=? ORDER BY event_at, rowid`).all(selected, queueId) as Array<Record<string, unknown>>;
+    const gateEvents = db.prepare(`SELECT e.event_type AS type, e.event_at AS at, e.safe_error_code AS safeErrorCode, e.details_json
+      FROM gate_events e JOIN gate_sessions g ON g.gate_session_id=e.gate_session_id AND g.account_id=e.account_id
+      WHERE g.account_id=? AND g.queue_item_id=? ORDER BY e.event_at, e.rowid`).all(selected, queueId) as Array<Record<string, unknown>>;
+    const gatePartEvents = db.prepare(`SELECT p.part, p.event_type AS type, p.event_at AS at, p.safe_error_code AS safeErrorCode
+      FROM gate_part_events p JOIN gate_sessions g ON g.gate_session_id=p.gate_session_id AND g.account_id=p.account_id
+      WHERE g.account_id=? AND g.queue_item_id=? ORDER BY p.rowid`).all(selected, queueId) as Array<Record<string, unknown>>;
     return send(response, 200, { events: events.map((event) => ({ type: event.type, at: event.at, messageId: event.messageId,
       safeErrorCode: event.safeErrorCode, details: safeAttemptDetails(String(event.details_json)) })),
+      // Follow gate events: type, time and safe code only (message ids and IGSIDs stay server-side).
+      gateEvents: gateEvents.map((event) => ({ type: event.type, at: event.at, safeErrorCode: event.safeErrorCode ?? null,
+        details: safeGateDetails(String(event.details_json)) })),
+      // Attachment sessions: per-part log (attachment / text); message ids stay server-side.
+      gatePartEvents: gatePartEvents.map((event) => ({ part: event.part, type: event.type, at: event.at, safeErrorCode: event.safeErrorCode ?? null })),
       publicEvents: publicEvents.map((event) => ({ type: event.type, at: event.at, replyId: event.replyId,
         safeErrorCode: event.safeErrorCode, details: safeAttemptDetails(String(event.details_json)) })) });
   }
@@ -387,11 +404,13 @@ function listAutomations(db: DatabaseSync, selected?: string) {
   const rows = db.prepare(`SELECT automation_id AS automationId, account_id AS accountId, media_id AS mediaId, scope, name,
       status, match_mode AS matchMode, reply_text AS replyText, buttons_json AS buttonsJson, real_enabled AS realEnabled,
       monitoring_started_at AS monitoringStartedAt, public_reply_enabled AS publicReplyEnabled,
-      public_reply_variants_json AS publicReplyVariantsJson, interactive_mode AS interactiveMode,
-      interactive_titles_json AS interactiveTitlesJson FROM automations ${selected ? "WHERE account_id=? AND name NOT LIKE '% (archived)'" : "WHERE name NOT LIKE '% (archived)'"} ORDER BY updated_at DESC LIMIT 500`)
+      public_reply_variants_json AS publicReplyVariantsJson, follow_gate_enabled AS followGateEnabled,
+      follow_gate_message AS followGateMessage, follow_gate_button_title AS followGateButtonTitle,
+      resource_attachment_kind AS resourceAttachmentKind, resource_attachment_url AS resourceAttachmentUrl FROM automations ${selected ? "WHERE account_id=? AND name NOT LIKE '% (archived)'" : "WHERE name NOT LIKE '% (archived)'"} ORDER BY updated_at DESC LIMIT 500`)
     .all(...(selected ? [selected] : [])) as Array<Record<string, unknown>>;
-  return rows.map(({ publicReplyVariantsJson, interactiveTitlesJson, ...row }) => ({ ...row,
-    ...(({ mode, titles }) => ({ interactiveMode: mode, interactiveTitles: titles }))(storedInteractiveConfig(row.interactiveMode, interactiveTitlesJson)),
+  return rows.map(({ publicReplyVariantsJson, ...row }) => ({ ...row,
+    ...(({ enabled, message, buttonTitle }) => ({ followGateEnabled: enabled, followGateMessage: message, followGateButtonTitle: buttonTitle }))(
+      storedFollowGateConfig(row.followGateEnabled, row.followGateMessage, row.followGateButtonTitle)),
     buttons: JSON.parse(String(row.buttonsJson)), realEnabled: Boolean(row.realEnabled),
     publicReplyEnabled: Boolean(row.publicReplyEnabled), publicReplyVariants: storedPublicReplyVariants(String(publicReplyVariantsJson)),
     keywords: db.prepare(`SELECT phrase FROM automation_keywords WHERE account_id=? AND automation_id=? ORDER BY rowid`)
@@ -417,21 +436,56 @@ function queuePage(db: DatabaseSync, selected: string | undefined, url: URL) {
       (SELECT reply_id FROM public_reply_attempts p WHERE p.account_id=q.account_id AND p.queue_item_id=q.queue_item_id
         AND p.event_type='accepted' LIMIT 1) AS publicReplyId,
       (SELECT MAX(message_id) FROM send_attempts e WHERE e.account_id=q.account_id AND e.queue_item_id=q.queue_item_id) AS messageId,
+      g.state AS gateState, g.gate_sent_at AS gateSentAt, g.tap_at AS gateTapAt, g.window_expires_at AS gateWindowExpiresAt,
+      g.next_poll_at AS gateNextPollAt, g.poll_count AS gatePollCount, g.resource_message_id AS gateResourceMessageId,
+      g.last_error_code AS gateLastErrorCode, g.button_title AS gateButtonTitle, g.gate_session_id AS gateSessionId,
+      g.resource_attachment_kind AS gateAttachmentKind, g.resource_attachment_url AS gateAttachmentUrl,
       CASE WHEN q.state='EXPIRED' AND q.state_reason_code IS NOT NULL THEN q.state_reason_code
         ELSE (SELECT safe_error_code FROM send_attempts e WHERE e.account_id=q.account_id AND e.queue_item_id=q.queue_item_id ORDER BY event_at DESC LIMIT 1) END AS safeErrorCode
       FROM queue_items q JOIN social_accounts s ON s.account_id=q.account_id LEFT JOIN automations a ON a.automation_id=q.automation_id AND a.account_id=q.account_id
       LEFT JOIN comments cm ON cm.account_id=q.account_id AND cm.comment_id=q.comment_id
+      LEFT JOIN gate_sessions g ON g.queue_item_id=q.queue_item_id AND g.account_id=q.account_id
       ${where} ORDER BY q.created_at DESC LIMIT ? OFFSET ?`).all(...values, limit, offset) as Array<Record<string, unknown>>;
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM queue_items q ${where}`).get(...values as never[]) as { count: number }).count;
-  return { items: items.map(({ payload, commentText, publicReplyState, publicReplyText, publicReplyAttempts, publicReplyNextAt, publicReplyErrorCode, publicReplyId, ...row }) => ({
-    ...row, commentText: truncateText(typeof commentText === 'string' ? commentText : ''), payload: safePayload(String(payload)),
+  const partRows = db.prepare(`SELECT part, event_type, safe_error_code FROM gate_part_events WHERE gate_session_id=? AND account_id=? ORDER BY rowid`);
+  return { items: items.map(({ payload, commentText, publicReplyState, publicReplyText, publicReplyAttempts, publicReplyNextAt, publicReplyErrorCode, publicReplyId,
+    gateState, gateSentAt, gateTapAt, gateWindowExpiresAt, gateNextPollAt, gatePollCount, gateResourceMessageId, gateLastErrorCode, gateButtonTitle,
+    gateSessionId, gateAttachmentKind, gateAttachmentUrl, ...row }) => {
+    const attachment = gateState ? storedResourceAttachment(gateAttachmentKind, gateAttachmentUrl) : null;
+    return {
+    ...row,
+    // Follow gate session (null without a session; simulated items never have one). The IGSID is never exposed.
+    // `attachment` and `parts` exist only for sessions with an attachment, so every other session keeps its DTO.
+    followGate: gateState ? {
+      state: gateState, buttonTitle: gateButtonTitle ?? null, gateSentAt: gateSentAt ?? null, tapAt: gateTapAt ?? null,
+      windowExpiresAt: gateWindowExpiresAt ?? null, nextPollAt: gateNextPollAt ?? null, pollCount: Number(gatePollCount ?? 0),
+      resourceMessageId: gateResourceMessageId ?? null, lastErrorCode: gateLastErrorCode ?? null,
+      ...(attachment ? { attachment, parts: summarizeParts(partRows.all(String(gateSessionId), String(row.accountId)) as PartRow[]) } : {}),
+    } : null, commentText: truncateText(typeof commentText === 'string' ? commentText : ''), payload: safePayload(String(payload)),
     // Public reply DTO: exact text posted (or, for simulated items, the inert WOULD_REPLY_PUBLIC preview).
     publicReply: publicReplyState || publicReplyText ? {
       state: publicReplyState ?? null, text: publicReplyText ?? null, attempts: Number(publicReplyAttempts ?? 0),
       nextAt: publicReplyNextAt ?? null, safeErrorCode: publicReplyErrorCode ?? null, replyId: publicReplyId ?? null,
       preview: !publicReplyState && row.state === 'SIMULATED',
     } : null,
-  })), total, limit, offset };
+  }; }), total, limit, offset };
+}
+
+type PartRow = { part: string; event_type: string; safe_error_code: string | null };
+type PartSummary = { state: 'pending' | 'sending' | 'retrying' | 'accepted' | 'skipped' | 'ambiguous' | 'rejected'; safeErrorCode: string | null; attempts: number };
+
+/** Per-part state of an attachment session from its append-only part log (final outcome wins; else the last event). */
+function summarizeParts(rows: PartRow[]): { attachment: PartSummary; text: PartSummary } {
+  const summary = (part: 'attachment' | 'text'): PartSummary => {
+    const own = rows.filter((row) => row.part === part);
+    const final = own.find((row) => ['accepted', 'skipped', 'ambiguous'].includes(row.event_type));
+    const last = own.at(-1)?.event_type;
+    const state: PartSummary['state'] = final ? final.event_type as PartSummary['state']
+      : last === 'intent_recorded' ? 'sending' : last === 'rejected' ? 'rejected' : 'pending';
+    const code = [...own].reverse().find((row) => row.safe_error_code && SAFE_CODE.test(row.safe_error_code))?.safe_error_code ?? null;
+    return { state, safeErrorCode: code, attempts: own.filter((row) => row.event_type === 'intent_recorded').length };
+  };
+  return { attachment: summary('attachment'), text: summary('text') };
 }
 
 function safePayload(value: string): unknown {
@@ -443,7 +497,8 @@ function safePayload(value: string): unknown {
     // EXPERIMENTAL interactive buttons: titles only (payload strings stay server-side); absent keys keep the old DTO.
     return { text: typeof parsed.text === 'string' ? parsed.text : '', buttons: Array.isArray(parsed.buttons) ? parsed.buttons : [],
       ...(Array.isArray(parsed.quickReplies) ? { quickReplies: titles(parsed.quickReplies) } : {}),
-      ...(Array.isArray(parsed.postbackButtons) ? { postbackButtons: titles(parsed.postbackButtons) } : {}) };
+      ...(Array.isArray(parsed.postbackButtons) ? { postbackButtons: titles(parsed.postbackButtons) } : {}),
+      ...safeFollowGateSnapshot(parsed.followGate) };
   }
   catch { return { text: '', buttons: [] }; }
 }
@@ -477,7 +532,54 @@ function safeProfile(value: unknown): Json {
   return { ok: source.ok === true,
     ...(typeof source.isUserFollowBusiness === 'boolean' ? { isUserFollowBusiness: source.isUserFollowBusiness } : {}),
     ...(typeof source.isBusinessFollowUser === 'boolean' ? { isBusinessFollowUser: source.isBusinessFollowUser } : {}),
-    ...(typeof source.safeErrorCode === 'string' && SAFE_CODE.test(source.safeErrorCode) ? { safeErrorCode: source.safeErrorCode } : {}) };
+    ...(typeof source.safeErrorCode === 'string' && SAFE_CODE.test(source.safeErrorCode) ? { safeErrorCode: source.safeErrorCode } : {}),
+    ...(typeof source.requestedFields === 'string' && /^[a-z_,]{1,200}$/u.test(source.requestedFields) ? { requestedFields: source.requestedFields } : {}),
+    ...(source.hostKind === 'instagram' || source.hostKind === 'facebook' ? { hostKind: source.hostKind } : {}),
+    ...safeMetaErrorField(source.metaError) };
+}
+
+function safeMetaErrorField(value: unknown): Json {
+  if (!value || typeof value !== 'object') return {};
+  const raw = value as Json;
+  const int = (input: unknown) => typeof input === 'number' && Number.isSafeInteger(input) ? input : undefined;
+  const entries: Array<[string, unknown]> = [
+    ['httpStatus', int(raw.httpStatus)], ['code', int(raw.code)], ['subcode', int(raw.subcode)],
+    ['type', typeof raw.type === 'string' ? raw.type.slice(0, 60) : undefined],
+    ['message', typeof raw.message === 'string' ? raw.message.slice(0, 200) : undefined],
+    ['fbtraceId', typeof raw.fbtraceId === 'string' ? raw.fbtraceId.slice(0, 40) : undefined],
+  ];
+  const metaError = Object.fromEntries(entries.filter(([, entry]) => entry !== undefined));
+  return Object.keys(metaError).length > 0 ? { metaError } : {};
+}
+
+/** Follow gate snapshot of a queue payload: button title and the resource message (text + URL buttons). */
+function safeFollowGateSnapshot(value: unknown): Json {
+  if (!value || typeof value !== 'object') return {};
+  const snapshot = value as Json;
+  const resource = snapshot.resource && typeof snapshot.resource === 'object' ? snapshot.resource as Json : {};
+  const buttons = (Array.isArray(resource.buttons) ? resource.buttons : []).slice(0, 2)
+    .filter((entry): entry is Json => Boolean(entry) && typeof entry === 'object' && typeof (entry as Json).title === 'string' && typeof (entry as Json).url === 'string')
+    .map((entry) => ({ title: String(entry.title), url: String(entry.url) }));
+  const attachment = snapshot.attachment && typeof snapshot.attachment === 'object'
+    ? storedResourceAttachment((snapshot.attachment as Json).kind, (snapshot.attachment as Json).url) : null;
+  return { followGate: { buttonTitle: typeof snapshot.buttonTitle === 'string' ? snapshot.buttonTitle.slice(0, 20) : '',
+    ...(attachment ? { attachment } : {}), resource: { text: typeof resource.text === 'string' ? resource.text : '', buttons } } };
+}
+
+function safeGateDetails(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as Json;
+    const allowed = ['httpStatus', 'retryAfter', 'retryAt', 'expired', 'igsidSource', 'usageHeaders', 'part'];
+    return Object.fromEntries(allowed.filter((key) => Object.hasOwn(parsed, key)).map((key) => [key, parsed[key]]));
+  } catch { return {}; }
+}
+
+/** Follow gate request fields passed through untouched: the service validates them strictly and never coerces. */
+function followGateFields(body: Json): { followGateEnabled?: boolean; followGateMessage?: string; followGateButtonTitle?: string;
+  resourceAttachmentKind?: unknown; resourceAttachmentUrl?: unknown } {
+  return { followGateEnabled: body.followGateEnabled as boolean | undefined, followGateMessage: body.followGateMessage as string | undefined,
+    followGateButtonTitle: body.followGateButtonTitle as string | undefined,
+    resourceAttachmentKind: body.resourceAttachmentKind, resourceAttachmentUrl: body.resourceAttachmentUrl };
 }
 
 function safeAttemptDetails(value: string): Record<string, unknown> {

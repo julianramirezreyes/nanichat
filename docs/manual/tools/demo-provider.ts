@@ -11,6 +11,8 @@ import { resolve } from 'node:path';
 import type {
   AccountRef,
   ConnectionValidation,
+  DirectAttachmentPayload,
+  DirectMessagePayload,
   DiscoveredAccount,
   MediaItem,
   MediaType,
@@ -21,6 +23,8 @@ import type {
   PublicReplyResult,
   SendResult,
   SocialProvider,
+  TapResult,
+  TapSearch,
 } from '../../../src/core/domain.ts';
 
 export const DEMO_ACCOUNTS: DiscoveredAccount[] = [
@@ -232,6 +236,19 @@ export class DemoProvider implements SocialProvider {
     await this.pause(300);
     this.counter++;
     return { outcome: 'accepted', replyId: `demo_reply_${String(this.counter).padStart(4, '0')}`, httpStatus: 200 };
+  }
+
+  /** Follow gate resource by IGSID: text + buttons or the attachment follow-up (canned acceptance, no network). */
+  async sendMessage(_account: AccountRef, igsid: string, _payload: DirectMessagePayload | DirectAttachmentPayload): Promise<SendResult> {
+    await this.pause(300);
+    this.counter++;
+    return { outcome: 'accepted', messageId: `demo_dm_${String(this.counter).padStart(4, '0')}`, recipientId: igsid, httpStatus: 200 };
+  }
+
+  /** Follow gate tap lookup: the demo conversation never contains a tap (sessions stay «Esperando toque»). */
+  async findUserTap(_account: AccountRef, _igsid: string, _search: TapSearch): Promise<TapResult> {
+    await this.pause(200);
+    return { found: false };
   }
 
   async readMessage(account: AccountRef, messageId: string): Promise<MessageReadback> {

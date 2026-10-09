@@ -27,6 +27,8 @@ export type SchedulerOptions = {
   generalMediaRefreshMs?: number;
   generalMediaScanIntervalMs?: number;
   generalMaxMediaScansPerTick?: number;
+  /** Follow gate engine (FollowGateService in production): recovered at startup, run after the reply steps on each tick. */
+  followGate?: { recoverInterrupted(): number; processDue(): Promise<number> };
 };
 
 export class Scheduler {
@@ -45,6 +47,7 @@ export class Scheduler {
     this.setGlobalMonitor(false);
     this.database.prepare(`UPDATE social_accounts SET monitoring_paused=1`).run();
     this.queue.recoverInterrupted();
+    this.options.followGate?.recoverInterrupted();
     this.queue.expireStale();
   }
 
@@ -120,6 +123,14 @@ export class Scheduler {
       // Public replies run strictly after the private step, at most one per tick, with their own spacing inside
       // QueueService (it also expires stale ones and never posts in Dry Run).
       await this.queue.processPublicReply();
+      // Follow gate: poll due sessions for the user's tap and send the resource once (never in Dry Run).
+      if (this.options.followGate) {
+        try {
+          await this.options.followGate.processDue();
+        } catch {
+          // Gate errors are isolated: they never stop monitoring or the reply steps.
+        }
+      }
     } finally {
       this.scanning = false;
     }

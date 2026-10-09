@@ -4,6 +4,8 @@ export type PendingItem = {
   mediaId: string; mediaCaption?: string | null; mediaType?: string | null; mediaPublishedAt?: string | null; username: string;
   commentText: string; commentCreatedAt: string | null; matchedKeywords: string[]; analyzedAt: string | null;
   previewText: string | null; previewButtons: ReplyButton[];
+  /** Follow gate on: first message (text + button title); previewText is then the resource sent after the tap. */
+  gatePreview?: { text: string; buttonTitle: string; attachment?: { kind: string; url: string } } | null;
 };
 export type PendingPage = { items: PendingItem[]; total: number; lastAnalyzedAt: string | null; limit: number; offset: number };
 
