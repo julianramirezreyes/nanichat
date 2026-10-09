@@ -279,4 +279,6 @@ npm run typecheck   # verificación de tipos con TypeScript
 
 ## Licencia
 
-Este repositorio **todavía no tiene un archivo de licencia**. Mientras no exista, se aplican los derechos de autor por defecto: puedes ver el código, pero no hay permiso explícito para reutilizarlo o redistribuirlo. La persona dueña del proyecto debe agregar un archivo `LICENSE` con la licencia que elija.
+Este proyecto se publica bajo la **licencia MIT**: puedes usar, copiar, modificar y distribuir el código, incluso con fines comerciales, siempre que conserves el aviso de derechos de autor. Se ofrece **«tal cual», sin garantía de ningún tipo**. El texto completo está en el archivo [LICENSE](LICENSE).
+
+> **Importante:** la licencia cubre el código de este repositorio. No te da ningún derecho sobre las marcas ni las APIs de Meta ni de Instagram. Quien use la aplicación es responsable de cumplir las políticas de la plataforma de Meta y las leyes de su país.
