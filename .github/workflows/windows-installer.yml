@@ -69,14 +69,20 @@ jobs:
       - name: Test suite (non-blocking for now)
         id: tests
         continue-on-error: true
-        timeout-minutes: 25
+        timeout-minutes: 10
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           New-Item -ItemType Directory -Force -Path test-output | Out-Null
-          npm test 2>&1 | Tee-Object -FilePath test-output/npm-test.txt
+          # --test-timeout fails a hung test instead of blocking the job; --test-force-exit stops the runner even if a
+          # spawned child server survives (SIGTERM is not delivered to grandchildren on Windows).
+          npm test -- --test-timeout=90000 --test-force-exit 2>&1 | Tee-Object -FilePath test-output/npm-test.txt
           $code = $LASTEXITCODE
           "npm test exit code: $code" | Tee-Object -FilePath test-output/npm-test.txt -Append
           exit $code
+
+      - name: Stop leftover Node processes from the tests
+        if: always()
+        run: Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
       - name: Test suite summary
         if: always()
