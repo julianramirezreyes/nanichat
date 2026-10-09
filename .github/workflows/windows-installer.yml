@@ -1,0 +1,261 @@
+# Builds the Social Desk Windows installer on a real Windows runner, smoke-tests it (silent install, start, stop,
+# restart, uninstall) and, for v* tags, publishes it as a GitHub Release. Details: packaging/windows/README.md.
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    # Path filters are not evaluated for tag pushes: every v* tag builds and releases.
+    tags: ['v*']
+    paths:
+      - 'packaging/**'
+      - '.github/workflows/windows-installer.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and smoke-test the installer
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      npm_config_fund: 'false'
+      npm_config_audit: 'false'
+    outputs:
+      version: ${{ steps.versions.outputs.app }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Read versions from package.json
+        id: versions
+        run: |
+          $manifest = Get-Content -Raw package.json | ConvertFrom-Json
+          $node = ($manifest.engines.node -replace '^\s*>=\s*', '').Trim()
+          if ($node -notmatch '^\d+\.\d+\.\d+$') { throw "engines.node must be a plain minimum like >=24.21.0 (found '$($manifest.engines.node)')" }
+          $app = $manifest.version
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $tag = $env:GITHUB_REF_NAME
+            if ($tag -ne "v$app") { throw "Tag $tag does not match package.json version $app (expected v$app)" }
+          }
+          "node=$node" >> $env:GITHUB_OUTPUT
+          "app=$app" >> $env:GITHUB_OUTPUT
+          Write-Host "Node.js $node, Social Desk $app"
+
+      - name: Set up Node.js ${{ steps.versions.outputs.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.versions.outputs.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # TODO(windows-ci): first real Windows run of the test suite. It is non-blocking ONLY until the Windows-specific
+      # failures it reveals are fixed; then remove continue-on-error so a failing test fails the build.
+      - name: Test suite (non-blocking for now)
+        id: tests
+        continue-on-error: true
+        timeout-minutes: 25
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          New-Item -ItemType Directory -Force -Path test-output | Out-Null
+          npm test 2>&1 | Tee-Object -FilePath test-output/npm-test.txt
+          $code = $LASTEXITCODE
+          "npm test exit code: $code" | Tee-Object -FilePath test-output/npm-test.txt -Append
+          exit $code
+
+      - name: Test suite summary
+        if: always()
+        run: |
+          $summary = @('## npm test on Windows', '', "Outcome: **${{ steps.tests.outcome }}** (non-blocking for now, see TODO in the workflow)", '')
+          if (Test-Path test-output/npm-test.txt) {
+            $lines = Get-Content test-output/npm-test.txt
+            $totals = $lines | Where-Object { $_ -match '(^|\s)(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) [\d.]+\s*$' }
+            $failed = $lines | Where-Object { $_ -match '^\s*not ok\b' }
+            $summary += '```'
+            $summary += $totals
+            $summary += '```'
+            if ($failed) { $summary += ''; $summary += '**Failed tests:**'; $summary += '```'; $summary += $failed; $summary += '```' }
+          } else {
+            $summary += '_No test output was captured._'
+          }
+          $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Build the web app
+        run: npm run build
+
+      - name: Download and verify portable Node.js
+        env:
+          PORTABLE_NODE_VERSION: ${{ steps.versions.outputs.node }}
+        run: |
+          node packaging/windows/fetch-node.mjs
+          & dist/node-win-x64/node.exe -v
+          if ($LASTEXITCODE -ne 0) { throw 'The downloaded node.exe does not run' }
+
+      - name: Build the installer payload
+        run: node packaging/windows/build-payload.mjs
+
+      - name: Locate or install Inno Setup 6
+        id: inno
+        run: |
+          function Find-Iscc {
+            $command = Get-Command iscc.exe -ErrorAction SilentlyContinue
+            if ($command) { return $command.Source }
+            $candidates = @(
+              (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+              (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
+              (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
+            )
+            return $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          }
+          $iscc = Find-Iscc
+          if (-not $iscc) {
+            Write-Host 'Inno Setup not found; installing it with Chocolatey'
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "choco install innosetup failed ($LASTEXITCODE)" }
+            $iscc = Find-Iscc
+          }
+          if (-not $iscc) { throw 'ISCC.exe not found after installing Inno Setup' }
+          Write-Host "ISCC: $iscc ($((Get-Item $iscc).VersionInfo.ProductVersion))"
+          "iscc=$iscc" >> $env:GITHUB_OUTPUT
+
+      - name: Compile the installer
+        run: |
+          $payload = Join-Path $PWD 'dist\payload'
+          $output = Join-Path $PWD 'dist\installer'
+          & '${{ steps.inno.outputs.iscc }}' "/DAppVersion=${{ steps.versions.outputs.app }}" "/DPayloadDir=$payload" "/DOutputDir=$output" packaging\windows\SocialDesk.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          Get-ChildItem dist\installer
+
+      # Windows PowerShell 5.1 on purpose: the same engine the installed shortcuts use.
+      - name: Smoke test (silent install, start, stop, restart, uninstall)
+        timeout-minutes: 20
+        shell: powershell
+        run: |
+          $installer = "dist\installer\SocialDesk-Setup-${{ steps.versions.outputs.app }}.exe"
+          & .\packaging\windows\test\smoke.ps1 -Installer $installer `
+            -InstallDir (Join-Path $env:RUNNER_TEMP 'SocialDeskSmoke\app') `
+            -ArtifactsDir (Join-Path $PWD 'test-output\smoke')
+          exit $LASTEXITCODE
+
+      - name: Compute SHA-256
+        run: |
+          $installer = Get-Item "dist\installer\SocialDesk-Setup-${{ steps.versions.outputs.app }}.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
+          # Same format as `sha256sum`, LF line ending, so `sha256sum -c SHA256SUMS.txt` works.
+          [System.IO.File]::WriteAllText((Join-Path $installer.DirectoryName 'SHA256SUMS.txt'), "$hash  $($installer.Name)`n")
+          Get-Content dist\installer\SHA256SUMS.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          $lines = @('## Windows installer', '')
+          if (Test-Path dist/payload-report.json) {
+            $report = Get-Content -Raw dist/payload-report.json | ConvertFrom-Json
+            $lines += "- Payload: **$([math]::Round($report.totalBytes / 1MB, 1)) MB** in $($report.files) files (Node.js $($report.nodeVersion))"
+            foreach ($part in $report.parts.PSObject.Properties) { $lines += "  - ``$($part.Name)``: $([math]::Round($part.Value / 1MB, 1)) MB" }
+            $lines += "- Longest payload path: $($report.longestPathLength) characters"
+          }
+          $exe = Get-ChildItem dist/installer/*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($exe) { $lines += "- Installer: ``$($exe.Name)`` **$([math]::Round($exe.Length / 1MB, 1)) MB**" }
+          if (Test-Path dist/installer/SHA256SUMS.txt) { $lines += "- SHA-256: ``$((Get-Content dist/installer/SHA256SUMS.txt).Split(' ')[0])``" }
+          $lines += "- npm test: ${{ steps.tests.outcome }} (non-blocking)"
+          $lines += "- Job status: ${{ job.status }}"
+          $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/installer/*.exe
+            dist/installer/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-logs
+          path: |
+            test-output/
+            dist/payload-report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist
+
+      - name: Verify checksum
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS.txt
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          installer="SocialDesk-Setup-${VERSION}.exe"
+          test -f "dist/${installer}"
+          sha="$(cut -d' ' -f1 dist/SHA256SUMS.txt)"
+          manual="https://github.com/${GH_REPO}/blob/${TAG}/docs/manual/Manual-Social-Desk.pdf"
+          cat > notes.md <<EOF
+          ## Social Desk ${VERSION} para Windows
+
+          ### Instalar
+          1. Descarga **${installer}** (abajo, en «Assets»).
+          2. Haz doble clic en el archivo. No necesitas permisos de administrador.
+          3. Windows puede mostrar «Windows protegió su PC» (SmartScreen) porque el instalador **no está firmado** digitalmente. Pulsa **Más información → Ejecutar de todas formas**.
+          4. Al terminar, abre **Social Desk** desde el icono del escritorio o el menú Inicio. Se abre en tu navegador, en \`http://localhost:3000\` (u otro puerto libre).
+
+          ### Antes de empezar
+          - Necesitas **tus propias credenciales de Meta** (una app de Meta y un token de acceso de Instagram). El instalador no incluye ninguna.
+          - La aplicación arranca en **Dry Run** (no envía nada) y con el **Monitoreo apagado**.
+          - Manual de usuario: [Manual-Social-Desk.pdf](${manual}) (también en el menú Inicio → Social Desk → Manual de usuario).
+
+          ### Tus datos
+          - Se guardan en \`%LOCALAPPDATA%\\SocialDesk\\data\` (base de datos y \`vault.key\`). Desinstalar **no** los borra.
+          - Respáldalos (toda la carpeta, con la aplicación detenida) antes de actualizar.
+
+          ### Verificar la descarga (opcional)
+          SHA-256 de \`${installer}\`: \`${sha}\` (también en \`SHA256SUMS.txt\`).
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Social Desk ${VERSION}" --notes-file notes.md
+          else
+            gh release create "$TAG" --title "Social Desk ${VERSION}" --notes-file notes.md --verify-tag
+          fi
+          gh release upload "$TAG" "dist/${installer}" dist/SHA256SUMS.txt --clobber
