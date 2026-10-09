@@ -64,12 +64,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # TODO(windows-ci): the Windows-specific failures found by windows-tests-diagnostic.yml are fixed (POSIX mode
-      # assertions, temp-dir cleanup order, queue clock / timestamp ties) and the timeout flags now really apply, but
-      # the full suite has not yet passed here in one concurrent run. Remove continue-on-error after the first green run.
-      - name: Test suite (non-blocking until the first green full run)
+      # The full suite passes on Windows (345/345 in about one minute), so a failing test now blocks the installer.
+      - name: Test suite
         id: tests
-        continue-on-error: true
         timeout-minutes: 15
         run: |
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -89,7 +86,7 @@ jobs:
       - name: Test suite summary
         if: always()
         run: |
-          $summary = @('## npm test on Windows', '', "Outcome: **${{ steps.tests.outcome }}** (non-blocking until the first green full run, see TODO in the workflow)", '')
+          $summary = @('## npm test on Windows', '', "Outcome: **${{ steps.tests.outcome }}** (a failure blocks the build)", '')
           if (Test-Path test-output/npm-test.txt) {
             $lines = Get-Content test-output/npm-test.txt
             $totals = $lines | Where-Object { $_ -match '(^|\s)(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) [\d.]+\s*$' }
