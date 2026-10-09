@@ -19,8 +19,7 @@
 
 #define AppName "Social Desk"
 #define PowerShellExe "{sys}\WindowsPowerShell\v1.0\powershell.exe"
-#define LaunchParams "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher\launch.ps1"""
-#define StopParams "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\launcher\stop.ps1"""
+#define PsArgs "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File"
 #define IconFile "{app}\launcher\social-desk.ico"
 
 [Setup]
@@ -75,17 +74,17 @@ Type: filesandordirs; Name: "{app}\docs"
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Social Desk"; Filename: "{#PowerShellExe}"; Parameters: "{#LaunchParams}"; WorkingDir: "{app}"; IconFilename: "{#IconFile}"; Comment: "Abre Social Desk en el navegador"
-Name: "{group}\Detener Social Desk"; Filename: "{#PowerShellExe}"; Parameters: "{#StopParams}"; WorkingDir: "{app}"; IconFilename: "{#IconFile}"; Comment: "Cierra Social Desk"
+Name: "{group}\Social Desk"; Filename: "{#PowerShellExe}"; Parameters: "{#PsArgs} ""{app}\launcher\launch.ps1"""; WorkingDir: "{app}"; IconFilename: "{#IconFile}"; Comment: "Abre Social Desk en el navegador"
+Name: "{group}\Detener Social Desk"; Filename: "{#PowerShellExe}"; Parameters: "{#PsArgs} ""{app}\launcher\stop.ps1"""; WorkingDir: "{app}"; IconFilename: "{#IconFile}"; Comment: "Cierra Social Desk"
 Name: "{group}\Manual de usuario"; Filename: "{app}\docs\Manual-Social-Desk.pdf"; Comment: "Manual de usuario de Social Desk (PDF)"
-Name: "{autodesktop}\Social Desk"; Filename: "{#PowerShellExe}"; Parameters: "{#LaunchParams}"; WorkingDir: "{app}"; IconFilename: "{#IconFile}"; Comment: "Abre Social Desk en el navegador"; Tasks: desktopicon
+Name: "{autodesktop}\Social Desk"; Filename: "{#PowerShellExe}"; Parameters: "{#PsArgs} ""{app}\launcher\launch.ps1"""; WorkingDir: "{app}"; IconFilename: "{#IconFile}"; Comment: "Abre Social Desk en el navegador"; Tasks: desktopicon
 
 [Run]
-Filename: "{#PowerShellExe}"; Parameters: "{#LaunchParams}"; WorkingDir: "{app}"; Description: "Abrir Social Desk al terminar"; Flags: postinstall nowait skipifsilent runhidden
+Filename: "{#PowerShellExe}"; Parameters: "{#PsArgs} ""{app}\launcher\launch.ps1"""; WorkingDir: "{app}"; Description: "Abrir Social Desk al terminar"; Flags: postinstall nowait skipifsilent runhidden
 
 [UninstallRun]
 ; Stop the server before its files are removed. Runs in silent uninstalls too.
-Filename: "{#PowerShellExe}"; Parameters: "{#StopParams} -Quiet"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopSocialDesk"
+Filename: "{#PowerShellExe}"; Parameters: "{#PsArgs} ""{app}\launcher\stop.ps1"" -Quiet"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopSocialDesk"
 
 [UninstallDelete]
 ; Files created at run time inside the program folders (for example app\.next\cache). Only these subfolders of
