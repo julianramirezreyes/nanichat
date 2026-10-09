@@ -86,7 +86,7 @@ test('migration v9 -> v10 preserves automations, keywords, classifications, queu
         VALUES ('q1','acc','c1','auto1','SENT',0,'{}','2026-01-01','2026-01-01');
       INSERT INTO send_attempts(attempt_event_id,account_id,queue_item_id,event_type,event_at) VALUES ('e1','acc','q1','intent_recorded','2026-01-01');`);
     migrateDatabase(db);
-    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 15);
+    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 16);
     assert.equal((db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys, 1);
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     const row = db.prepare(`SELECT * FROM automations WHERE automation_id='auto1'`).get() as Record<string, unknown>;

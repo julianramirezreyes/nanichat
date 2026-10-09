@@ -22,6 +22,7 @@ Documento de referencia para quien mantiene o audita Social Desk. Describe la ar
 16. [Fase 0 del follow gate (experimental)](#16-fase-0-del-follow-gate-experimental)
 17. [Pedir que me sigan (follow gate de confianza) — RETIRADA](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo)
 18. [Adjunto del recurso por URL — RETIRADA](#18-adjunto-del-recurso-por-url--retirada-código-inactivo)
+19. [Moderación de comentarios](#19-moderación-de-comentarios)
 
 ## 1. Arquitectura
 
@@ -100,7 +101,7 @@ Respalda siempre la carpeta completa (base **y** llave) con la aplicación deten
 
 ## 3. Esquema y migraciones
 
-`src/db/migrations.ts` aplica en **una sola transacción** todas las migraciones pendientes al arrancar y deja la versión en `PRAGMA user_version`. La versión actual es **13**. Una base con versión mayor que la soportada se rechaza (`Database schema version N is newer than supported version 13`), así que no hay vuelta atrás sin una copia de seguridad.
+`src/db/migrations.ts` aplica en **una sola transacción** todas las migraciones pendientes al arrancar y deja la versión en `PRAGMA user_version`. La versión actual es **16**. Una base con versión mayor que la soportada se rechaza (`Database schema version N is newer than supported version 16`), así que no hay vuelta atrás sin una copia de seguridad.
 
 | Versión | Cambio |
 | --- | --- |
@@ -118,6 +119,8 @@ Respalda siempre la carpeta completa (base **y** llave) con la aplicación deten
 | v12 | Fase 0 del follow gate (experimental, solo aditiva): `comments.author_igsid` (anulable; ID opaco del autor tomado de `from.id`), `automations.interactive_mode` (`'none'` por defecto, `CHECK` en `none`/`quick_reply`/`postback`) e `automations.interactive_titles_json` (`'[]'` por defecto). No reconstruye tablas. Ver [sección 16](#16-fase-0-del-follow-gate-experimental). |
 | v13 | «Pedir que me sigan» (solo aditiva): `automations.follow_gate_enabled` (`0` por defecto, `CHECK` 0/1), `follow_gate_message` (`''`), `follow_gate_button_title` (`'Ya te sigo'`); tablas `gate_sessions` y `gate_events` (solo inserción, a lo sumo un `tap_detected` y un `resource_accepted` por sesión). Las automatizaciones existentes quedan con la opción apagada. Ver [sección 17](#17-pedir-que-me-sigan-follow-gate-de-confianza--retirada-código-inactivo). |
 | v14 | Adjunto del recurso (solo aditiva): `automations.resource_attachment_kind` y `gate_sessions.resource_attachment_kind` (`''` por defecto, `CHECK` en `''`/`image`/`audio`/`video`/`file`), `automations.resource_attachment_url` y `gate_sessions.resource_attachment_url` (`''`); tabla `gate_part_events` (solo inserción, a lo sumo un `accepted` por sesión y parte). Filas existentes: sin adjunto, sin cambios. Ver [sección 18](#18-adjunto-del-recurso-por-url--retirada-código-inactivo). |
+| v15 | `media.thumbnail_url` (solo aditiva): URL de imagen de miniatura. |
+| v16 | Moderación de comentarios (solo aditiva): tablas `moderation_settings`, `moderation_flags` y `moderation_actions` (solo inserción). Ver [sección 19](#19-moderación-de-comentarios). |
 
 > **Importante:** respalda la carpeta de datos antes del primer arranque de cada versión que traiga migraciones.
 
@@ -487,3 +490,79 @@ Al encolar, el adjunto se congela en `payload.followGate.attachment` (solo si ex
 - Que los dos mensajes lleguen en orden: Meta no documenta una garantía de orden; la aplicación solo garantiza el orden de envío y la separación mínima de 1 s.
 - Adjuntos dentro de la respuesta privada al comentario: no documentado, **fuera de alcance** (allí solo texto y la plantilla del botón).
 
+
+## 19. Moderación de comentarios
+
+Marca comentarios ofensivos o spam de las publicaciones de la cuenta según reglas locales y **sugiere** qué hacer con ellos: la persona decide si ocultarlos, mostrarlos, borrarlos o descartarlos. Lo único automático es **ocultar** (opcional, confirmado y solo en modo real): **nada se borra nunca automáticamente**. En Dry Run todas las acciones se simulan.
+
+### Categorías y umbrales
+
+Un comentario recibe como máximo una marca; si coinciden varias reglas gana la de mayor prioridad (en este orden) y todas las razones quedan en `reasons_json`. Los comentarios de la propia cuenta nunca se marcan; las respuestas dentro de un hilo sí.
+
+| Categoría | Regla |
+| --- | --- |
+| `blocked_term` | Contiene una palabra o frase de la lista de la cuenta (sin distinguir mayúsculas ni tildes, por palabra completa; máximo 200 términos de 1 a 60 caracteres). |
+| `spam_link` | Contiene un enlace (`http://`, `https://`, `www.`, `bit.ly`, `t.me/`, `wa.me/`). |
+| `spam_phone` | Secuencia tipo teléfono de **7 o más dígitos** (admite espacios, guiones y `+`). |
+| `spam_mentions` | **3 o más** `@menciones` distintas. |
+| `spam_emoji` | El **mismo emoji 6 o más veces**, o un comentario hecho **solo de emojis con 10 o más**. Desactivado por defecto. |
+
+El escaneo (Monitoreo y Revisión pendiente) solo clasifica e inserta marcas `PENDING` (`INSERT OR IGNORE`, una por comentario) cuando la moderación de la cuenta está activa; **nunca** oculta ni borra (el escáner no tiene acceso a esas operaciones del proveedor).
+
+### Estados y transiciones
+
+| Desde | Acción | Hacia |
+| --- | --- | --- |
+| `PENDING`, `VISIBLE`, `FAILED`, `SIMULATED` | ocultar (`hide`) | `HIDE_INTENT` → `HIDDEN` |
+| `HIDDEN`, `FAILED` | mostrar (`unhide`) | `UNHIDE_INTENT` → `VISIBLE` |
+| `PENDING`, `HIDDEN`, `VISIBLE`, `FAILED`, `SIMULATED` | borrar (`delete`, confirmado) | `DELETE_INTENT` → `DELETED` |
+| `PENDING`, `FAILED`, `SIMULATED` | descartar (`dismiss`, individual o masivo) | `DISMISSED` |
+| `UNKNOWN_OUTCOME` | descartar **solo individual** | `DISMISSED` |
+
+- **Dry Run:** cualquier acción permitida deja la marca en `SIMULATED` (con `last_action`) y registra `outcome = 'simulated'`, sin llamar a Meta. Desde `SIMULATED` solo se permite ocultar, borrar o descartar: **nunca mostrar**, porque nada real se ocultó.
+- **Resultado de Meta:** aceptado → `HIDDEN` / `VISIBLE` / `DELETED`; rechazado → `FAILED` con código seguro; ambiguo (5xx, timeout, error de red, 2xx sin `success: true`) → `UNKNOWN_OUTCOME`. Si el proveedor **lanza una excepción** después de registrar la intención, la marca queda `UNKNOWN_OUTCOME` con `moderation_ambiguous` (y una fila `ambiguous`).
+- **`UNKNOWN_OUTCOME` nunca se reintenta.** La persona revisa el comentario en Instagram y lo resuelve con «Descartar» uno por uno; la acción masiva no lo acepta (decisión consciente, caso por caso).
+- `DELETED`, `DISMISSED` y los `*_INTENT` no admiten acciones. La interfaz solo muestra los botones de las acciones permitidas para el estado de cada marca (las mismas tablas, en `app/moderation-labels.ts`).
+- **Descartar queda auditado:** nunca llama a Meta, pero cada descarte (individual o masivo) escribe una fila en `moderation_actions` con `action = 'dismiss'`, `actor = 'operator'`, `outcome = 'accepted'` y `mode` según Dry Run (`dry_run` o `real`), en la misma transacción que cambia el estado. Un descarte rechazado no escribe nada.
+- **Intención durable con estado esperado:** en modo real, una transacción `BEGIN IMMEDIATE` comprueba Dry Run desactivado, cuenta y conexión válidas y sin retención (`account_send_holds`), y pasa la marca a `*_INTENT` **solo si sigue en un estado permitido** (`AND state IN (…)`); si no cambia exactamente una fila, se revierte y no se llama a Meta. El resultado se guarda **solo si la marca sigue en su estado de intención** (`AND state = '<X>_INTENT'`); si algo la movió entretanto, la marca no cambia y el resultado de Meta queda solo en `moderation_actions`.
+- **Recuperación al arrancar:** el Scheduler (`createScheduler`, usado por `server.ts`) pasa toda marca `*_INTENT` a `UNKNOWN_OUTCOME` al iniciar, junto a la recuperación de la cola.
+
+### Ocultar automáticamente
+
+- Opcional por cuenta, con categorías permitidas (subconjunto de las cinco). Activarlo **o agregar una categoría** exige `confirmed: true`; guardar otros cambios o quitar categorías con el auto-ocultar ya activo no lo exige.
+- **El auto-ocultar no es retroactivo:** al activarlo se guarda `auto_hide_since` (momento de activación; se conserva mientras siga activo y vuelve a `NULL` al apagarlo) y solo se toman marcas con `created_at >= auto_hide_since`. Las marcas anteriores siguen como sugerencias.
+- Se ejecuta en cada ciclo del Monitoreo (con el Monitoreo encendido), **solo en modo real** (en Dry Run no hace nada, ni simula), **solo `hide`** (nunca borra), como máximo **una marca por ciclo** y con al menos **10 s** entre acciones automáticas (`app_state.moderation_last_auto_at`).
+- Elige la marca `PENDING` más antigua cuya categoría está permitida (filtrado en SQL, así una categoría no permitida no bloquea a las demás), de una cuenta con moderación y auto-ocultar activos, válida, **con el Monitoreo de la cuenta en marcha** (`social_accounts.monitoring_paused = 0`: una cuenta pausada nunca se oculta sola), con conexión válida y sin retención. Las acciones quedan con `actor = 'auto'`.
+
+### Llamadas a Meta y permisos
+
+- Ocultar / mostrar: `POST /{comment-id}` con cuerpo JSON `{ "hide": true }` o `{ "hide": false }`. Borrar: `DELETE /{comment-id}`. Ambas responden `{ "success": true }`.
+- Host según el tipo de conexión: `graph.instagram.com` (Instagram Login, permiso `instagram_business_manage_comments`) o `graph.facebook.com` (Facebook Login, permiso `instagram_manage_comments`).
+- Antes de llamar se comprueba que el comentario pertenece a la cuenta en la base local; si no, se rechaza (`comment_not_owned`) sin llamada HTTP.
+- Errores: 429 o códigos 4, 17, 32, 613 → `moderation_rate_limited`; códigos 3, 10, 102 o 190, o de la familia 200 (200-299) → `moderation_permission_denied`; 404 o código 100 → `moderation_not_found`; otros 4xx → `moderation_rejected`.
+- **Limitación de Meta:** no se pueden ocultar ni borrar comentarios de transmisiones en vivo (ni sus respuestas).
+
+### API de moderación
+
+Todas exigen `accountId` y comprueban que la marca pertenece a esa cuenta; las escrituras pasan por las guardas de origen, CSRF y JSON. `confirmed` se acepta solo si es exactamente `true` (`"no"`, `1` o `"true"` se rechazan).
+
+- `GET /api/moderation/settings?accountId=` → configuración (valores por defecto si no hay fila).
+- `PUT /api/moderation/settings` `{ accountId, enabled, blockedTerms[], detectLinks, detectPhones, detectMentions, detectEmoji, autoHideEnabled, autoHideCategories[], confirmed? }`.
+- `GET /api/moderation/flags?accountId=&state=&limit=&offset=` → `{ items, total }` (límite por defecto 50, máximo 100; `state` debe ser un estado conocido u omitirse para «Todos»).
+- `POST /api/moderation/flags/{flagId}/hide`, `/unhide`, `/dismiss` `{ accountId }` y `/delete` `{ accountId, confirmed: true }`.
+- `POST /api/moderation/flags/bulk` `{ accountId, flagIds, action: 'hide' | 'unhide' | 'delete' | 'dismiss', confirmed? }`:
+  - `flagIds`: de 1 a 100 IDs **únicos**. `delete` exige `confirmed: true`.
+  - **Todo o nada en la pertenencia:** si un solo ID no existe o es de otra cuenta → 404 `not_found` y no se actúa sobre ninguno.
+  - Cada marca pasa por la misma lógica individual (su propia intención y filas de auditoría). Un `invalid_state` en una marca se informa y el lote **continúa**.
+  - En modo real hay **1 s** entre llamadas a Meta. Un `moderation_rate_limited` **detiene el lote**, y también lo detiene `account_invalid_or_held` (cuenta o conexión no válida, o cuenta retenida) o cualquier otro rechazo (`operation_rejected`); las marcas restantes se informan con `error: 'not_attempted'`. En Dry Run todas quedan `SIMULATED` sin llamadas.
+  - Respuesta: `{ "results": [{ "flagId", "state", "safeErrorCode"?, "error"? }] }` (`state` es el estado actual de la marca; `error` es `invalid_state`, `not_attempted`, `account_invalid_or_held` u `operation_rejected`). La interfaz resume el resultado (p. ej. «3 ocultados, 1 sin cambios»).
+
+Códigos de error: 400 `confirmation_required`, `blocked_term_invalid` o `invalid_request` (categorías no válidas, IDs repetidos o fuera de rango, acción desconocida); 404 `not_found` (marca inexistente o de otra cuenta); 409 `invalid_state` (transición no permitida), `account_invalid_or_held` (cuenta o conexión no válida, o cuenta retenida) y `operation_rejected` (otro rechazo por estado o seguridad).
+
+### Esquema (v16)
+
+| Tabla | Columnas |
+| --- | --- |
+| `moderation_settings` | `account_id` (PK), `enabled`, `blocked_terms_json`, `detect_links`, `detect_phones`, `detect_mentions`, `detect_emoji`, `auto_hide_enabled`, `auto_hide_categories_json`, `auto_hide_since` (inicio del auto-ocultar; `NULL` si está apagado), `version` (sube en cada guardado), `updated_at`. Sin fila = valores por defecto (desactivada; enlaces, teléfonos y menciones activos; emojis inactivo). |
+| `moderation_flags` | `flag_id` (PK), `account_id`, `media_id`, `comment_id`, `category`, `source` (`rules`; `ai` reservado), `reasons_json`, `state`, `last_action`, `safe_error_code`, `settings_version`, `created_at`, `updated_at`; `UNIQUE(account_id, comment_id)`. |
+| `moderation_actions` | `action_id`, `flag_id`, `account_id`, `comment_id`, `action` (`hide`/`unhide`/`delete`/`dismiss`), `actor` (`operator`/`auto`), `mode` (`dry_run`/`real`), `outcome` (`simulated`/`intent`/`accepted`/`rejected`/`ambiguous`), `safe_error_code`, `created_at`. **Solo inserción:** triggers que abortan UPDATE y DELETE. |

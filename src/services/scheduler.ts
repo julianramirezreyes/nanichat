@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { AccountRef } from '../core/domain.ts';
+import type { AccountRef, SocialProvider } from '../core/domain.ts';
+import { moderationEngine } from './moderation.ts';
 import { QueueService } from './queue.ts';
 import { Scanner } from './scanner.ts';
 
@@ -29,6 +30,8 @@ export type SchedulerOptions = {
   generalMaxMediaScansPerTick?: number;
   /** Follow gate engine (FollowGateService in production): recovered at startup, run after the reply steps on each tick. */
   followGate?: { recoverInterrupted(): number; processDue(): Promise<number> };
+  /** Moderation engine: recovered at startup, run after the reply steps on each tick. */
+  moderation?: { recoverInterrupted(): void; processAutoHide(): Promise<void> };
 };
 
 export class Scheduler {
@@ -48,6 +51,7 @@ export class Scheduler {
     this.database.prepare(`UPDATE social_accounts SET monitoring_paused=1`).run();
     this.queue.recoverInterrupted();
     this.options.followGate?.recoverInterrupted();
+    this.options.moderation?.recoverInterrupted();
     this.queue.expireStale();
   }
 
@@ -129,6 +133,13 @@ export class Scheduler {
           await this.options.followGate.processDue();
         } catch {
           // Gate errors are isolated: they never stop monitoring or the reply steps.
+        }
+      }
+      if (this.options.moderation) {
+        try {
+          await this.options.moderation.processAutoHide();
+        } catch {
+          // Isolated error
         }
       }
     } finally {
@@ -245,4 +256,23 @@ export class Scheduler {
     this.timer = undefined;
     this.setGlobalMonitor(false);
   }
+}
+
+/**
+ * Production wiring of the scheduler (used by server.ts and its tests): media refresher, follow gate and the
+ * moderation engine (startup recovery of *_INTENT flags and one auto-hide step per tick).
+ */
+export function createScheduler(
+  database: DatabaseSync,
+  scanner: Scanner,
+  queue: QueueService,
+  deps: { provider: SocialProvider; mediaRefresher?: SchedulerOptions['mediaRefresher']; followGate?: SchedulerOptions['followGate'] },
+  options: Omit<SchedulerOptions, 'mediaRefresher' | 'followGate' | 'moderation'> = {},
+): Scheduler {
+  return new Scheduler(database, scanner, queue, {
+    ...options,
+    ...(deps.mediaRefresher ? { mediaRefresher: deps.mediaRefresher } : {}),
+    ...(deps.followGate ? { followGate: deps.followGate } : {}),
+    moderation: moderationEngine(database, deps.provider),
+  });
 }

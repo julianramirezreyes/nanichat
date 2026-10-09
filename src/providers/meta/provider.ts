@@ -19,6 +19,7 @@ import type {
   SocialProvider,
   TapResult,
   TapSearch,
+  ModerationResult,
   UserProfileProbe,
 } from '../../core/domain.ts';
 import {
@@ -298,6 +299,50 @@ export class MetaProvider implements SocialProvider {
       return { outcome: 'accepted', replyId, usageHeaders };
     } catch (error) {
       return publicReplyFailure(error);
+    }
+  }
+
+  async setCommentHidden(account: AccountRef, commentId: string, hidden: boolean): Promise<ModerationResult> {
+    try {
+      this.assertCommentBelongsToAccount(account.accountId, commentId);
+    } catch {
+      return { status: 'rejected', safeErrorCode: 'comment_not_owned' };
+    }
+    const { connection, token } = this.accountContext(account);
+    try {
+      const result = await this.request(
+        connection.loginKind,
+        connection.graphVersion,
+        `/${encodeURIComponent(commentId)}`,
+        token,
+        { method: 'POST', body: JSON.stringify({ hide: hidden }) },
+      );
+      if (result.success === true) return { status: 'accepted' };
+      return { status: 'ambiguous', safeErrorCode: 'meta_ambiguous_success' };
+    } catch (error) {
+      return moderationFailure(error);
+    }
+  }
+
+  async deleteComment(account: AccountRef, commentId: string): Promise<ModerationResult> {
+    try {
+      this.assertCommentBelongsToAccount(account.accountId, commentId);
+    } catch {
+      return { status: 'rejected', safeErrorCode: 'comment_not_owned' };
+    }
+    const { connection, token } = this.accountContext(account);
+    try {
+      const result = await this.request(
+        connection.loginKind,
+        connection.graphVersion,
+        `/${encodeURIComponent(commentId)}`,
+        token,
+        { method: 'DELETE' },
+      );
+      if (result.success === true) return { status: 'accepted' };
+      return { status: 'ambiguous', safeErrorCode: 'meta_ambiguous_success' };
+    } catch (error) {
+      return moderationFailure(error);
     }
   }
 
@@ -821,6 +866,20 @@ function publicReplyFailure(error: unknown): PublicReplyResult {
   return { outcome: 'definitive_rejection', safeErrorCode, httpStatus: status, metaCode: code, usageHeaders: safeError.usageHeaders };
 }
 
+
+function moderationFailure(error: unknown): ModerationResult {
+  const safeError = error instanceof MetaSafeError ? error : undefined;
+  const status = safeError?.httpStatus;
+  const code = safeError?.metaCode;
+  if (!status || status < 400 || status >= 500 || safeError.code !== 'meta_api_error') {
+    return { status: 'ambiguous', safeErrorCode: safeError?.code ?? 'meta_error' };
+  }
+  const safeErrorCode = status === 404 || code === 100 ? 'moderation_not_found'
+    : code !== undefined && (PERMISSION_CODES.has(code) || (code >= 200 && code <= 299)) ? 'moderation_permission_denied'
+    : status === 429 || (code !== undefined && RATE_LIMIT_CODES.has(code)) ? 'moderation_rate_limited'
+    : 'moderation_rejected';
+  return { status: 'rejected', safeErrorCode };
+}
 function readSafeUsageHeaders(headers: Headers): { appUsage?: string; pageUsage?: string; retryAfter?: string } {
   const appUsage = sanitizeUsageValue(headers.get('x-app-usage'));
   const pageUsage = sanitizeUsageValue(headers.get('x-page-usage'));

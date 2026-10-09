@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-const VERSION = 15;
+const VERSION = 16;
 
 const INITIAL_SCHEMA = `
 CREATE TABLE connections (
@@ -177,6 +177,7 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
     if (current < 13 && target >= 13) migrateFollowGate(database);
     if (current < 14 && target >= 14) migrateResourceAttachment(database);
     if (current < 15 && target >= 15) migrateMediaThumbnail(database);
+    if (current < 16 && target >= 16) migrateCommentModeration(database);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -489,4 +490,58 @@ function migrateQueueUniqueness(database: DatabaseSync): void {
 function migrateMediaThumbnail(database: DatabaseSync): void {
   database.exec(`ALTER TABLE media ADD COLUMN thumbnail_url TEXT;
     PRAGMA user_version = 15;`);
+}
+
+function migrateCommentModeration(database: DatabaseSync): void {
+  database.exec(`
+    CREATE TABLE moderation_settings (
+      account_id TEXT PRIMARY KEY REFERENCES social_accounts(account_id),
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+      blocked_terms_json TEXT NOT NULL DEFAULT '[]',
+      detect_links INTEGER NOT NULL DEFAULT 1 CHECK (detect_links IN (0,1)),
+      detect_phones INTEGER NOT NULL DEFAULT 1 CHECK (detect_phones IN (0,1)),
+      detect_mentions INTEGER NOT NULL DEFAULT 1 CHECK (detect_mentions IN (0,1)),
+      detect_emoji INTEGER NOT NULL DEFAULT 0 CHECK (detect_emoji IN (0,1)),
+      auto_hide_enabled INTEGER NOT NULL DEFAULT 0 CHECK (auto_hide_enabled IN (0,1)),
+      auto_hide_categories_json TEXT NOT NULL DEFAULT '[]',
+      auto_hide_since TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE moderation_flags (
+      flag_id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      media_id TEXT NOT NULL,
+      comment_id TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN ('blocked_term','spam_link','spam_phone','spam_mentions','spam_emoji')),
+      source TEXT NOT NULL CHECK (source IN ('rules','ai')),
+      reasons_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('PENDING','DISMISSED','SIMULATED','HIDE_INTENT','HIDDEN','UNHIDE_INTENT','VISIBLE','DELETE_INTENT','DELETED','FAILED','UNKNOWN_OUTCOME')),
+      last_action TEXT CHECK (last_action IN ('hide','unhide','delete')),
+      safe_error_code TEXT,
+      settings_version INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(account_id, comment_id)
+    );
+
+    CREATE TABLE moderation_actions (
+      action_id TEXT PRIMARY KEY,
+      flag_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      comment_id TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('hide','unhide','delete','dismiss')),
+      actor TEXT NOT NULL CHECK (actor IN ('operator','auto')),
+      mode TEXT NOT NULL CHECK (mode IN ('dry_run','real')),
+      outcome TEXT NOT NULL CHECK (outcome IN ('simulated','intent','accepted','rejected','ambiguous')),
+      safe_error_code TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TRIGGER moderation_actions_no_update BEFORE UPDATE ON moderation_actions BEGIN SELECT RAISE(ABORT, 'moderation_actions is append-only'); END;
+    CREATE TRIGGER moderation_actions_no_delete BEFORE DELETE ON moderation_actions BEGIN SELECT RAISE(ABORT, 'moderation_actions is append-only'); END;
+    
+    PRAGMA user_version = 16;
+  `);
 }

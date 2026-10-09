@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AccountRef, ProviderComment, SocialProvider } from '../core/domain.ts';
 import { claimingAutomations, classifyComment, ownerRepliedParentIds } from './automations.ts';
+import { getSettings } from './moderation.ts';
+import { classifyForModeration } from './moderation-rules.ts';
 
 export type ScanKind = 'monitor' | 'catch_up' | 'backlog';
 export type ScanCandidate = { commentId: string; automationId: string; eligible: boolean; reason: string; matchedKeywords: string[] };
@@ -254,6 +256,23 @@ export class Scanner {
       cursor = page.nextCursor;
     }
     classifyPersisted();
+    const modSettings = getSettings(this.database, account.accountId);
+    if (modSettings.enabled) {
+      for (const commentId of persistedIds) {
+        const commentRow = this.database.prepare(`SELECT text, username FROM comments WHERE account_id=? AND comment_id=?`).get(account.accountId, commentId) as any;
+        if (!commentRow) continue;
+        const comment = { commentId, text: commentRow.text ?? undefined, username: commentRow.username ?? undefined };
+        const classification = classifyForModeration(comment, owner.username, modSettings);
+        if (classification.flagged) {
+          const now = new Date().toISOString();
+          this.database.prepare(`
+            INSERT OR IGNORE INTO moderation_flags
+            (flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, created_at, updated_at, settings_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(randomUUID(), account.accountId, mediaId ?? null, commentId, String(classification.category), 'rules', JSON.stringify(classification.reasons), 'PENDING', now, now, Number(modSettings.version ?? 1));
+        }
+      }
+    }
     if (!complete && !stopReason) stopReason = 'scanner_page_limit';
     const finishedAt = new Date().toISOString();
     const status = stopReason === 'scan_cancelled' ? 'cancelled' : complete ? 'complete' : 'incomplete';

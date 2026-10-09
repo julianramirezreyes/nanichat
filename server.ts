@@ -10,7 +10,7 @@ import { createVault } from './src/security/vault.ts';
 import { MetaProvider } from './src/providers/meta/provider.ts';
 import { QueueService } from './src/services/queue.ts';
 import { Scanner } from './src/services/scanner.ts';
-import { Scheduler } from './src/services/scheduler.ts';
+import { createScheduler } from './src/services/scheduler.ts';
 import { ConnectionService } from './src/services/connections.ts';
 import { AutomationService } from './src/services/automations.ts';
 import { BacklogService } from './src/services/backlog.ts';
@@ -33,13 +33,15 @@ const connections = new ConnectionService(database, vault, provider);
 // General (account-wide) automations refresh the account's publication list through the same provider path as the UI.
 // Follow gate (honor system): polls for the tap on the gate button and sends the resource once; never in Dry Run.
 const followGate = new FollowGateService(database, provider, legacyInterlock ? { legacyInterlock } : {});
-const scheduler = new Scheduler(database, scanner, queue, { mediaRefresher: connections, followGate });
+// Moderation: *_INTENT flags become UNKNOWN_OUTCOME at startup; auto-hide (real mode only) runs once per tick.
+const scheduler = createScheduler(database, scanner, queue, { provider, mediaRefresher: connections, followGate });
 const automations = new AutomationService(database);
 const backlog = new BacklogService(database, scanner, queue);
 // Opt-in (SOCIAL_DESK_IMPORT_ENV_PATH): without it the explicit .env import endpoint is unavailable.
 const importEnvPath = config.importEnvPath;
 const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue,
   // EXPERIMENTAL read-only conversation/profile diagnostics (GET requests only; never sends).
+  provider: provider,
   diagnostics: provider,
   ...(legacyInterlock ? { legacy: legacyInterlock } : {}),
   ...(importEnvPath ? { importEnvironment: async () => readImportedEnvironment(importEnvPath) } : {}) });

@@ -13,6 +13,7 @@ import { FollowGateConfigError, InteractiveModeRetiredError, assertInteractiveRe
 import { ResourceAttachmentError, storedResourceAttachment } from '../services/resource-attachment.ts';
 import { followGateAvailable } from '../services/follow-gate-rules.ts';
 import type { ImportedMetaEnvironment } from '../security/env-import.ts';
+import * as moderation from '../services/moderation.ts';
 
 const BODY_LIMIT = 64 * 1024;
 const PAGE_LIMIT = 100;
@@ -27,6 +28,7 @@ export type ApiDependencies = {
   scheduler?: Scheduler;
   backlog?: BacklogService;
   queue?: QueueService;
+  provider?: SocialProvider;
   /** Server clock (ms); injectable for deterministic expiry tests. */
   clock?: () => number;
   importEnvironment?: () => Promise<ImportedMetaEnvironment>;
@@ -70,6 +72,11 @@ export function createApiHandler(deps: ApiDependencies) {
       if (mutation) body = await readJson(request);
       await route(request, response, url, method, body, deps, jobs, csrfToken, diagnosticsCalls);
     } catch (error) {
+      if (error instanceof Error) {
+        if (error.message === 'confirmation_required' || error.message === 'blocked_term_invalid') error = new ApiError(400, error.message);
+        else if (error.message === 'not_found') error = new ApiError(404, error.message);
+        else if (error.message === 'invalid_state' || error.message === 'account_invalid_or_held') error = new ApiError(409, error.message);
+      }
       if (error instanceof QueueReadbackError) return send(response, error.status, { error: error.code });
       const status = error instanceof ApiError ? error.status : error instanceof TypeError ? 400 : 409;
       const code = error instanceof ApiError ? error.code
@@ -367,8 +374,67 @@ async function route(
     db.prepare(`DELETE FROM account_send_holds WHERE account_id=? AND reason_code LIKE 'legacy_%'`).run(account);
     return send(response, 200, { acknowledged: true, username, counterVersion: expectedVersion });
   }
+
+  if (path === '/api/moderation/settings' && method === 'GET') {
+    return send(response, 200, moderation.getSettings(db, accountId(url.searchParams.get('accountId'), db)));
+  }
+  if (path === '/api/moderation/settings' && method === 'PUT') {
+    moderation.updateSettings(db, accountId(body.accountId, db), {
+      enabled: Boolean(body.enabled),
+      blockedTerms: Array.isArray(body.blockedTerms) ? body.blockedTerms.map(String) : [],
+      detectLinks: Boolean(body.detectLinks),
+      detectPhones: Boolean(body.detectPhones),
+      detectMentions: Boolean(body.detectMentions),
+      detectEmoji: Boolean(body.detectEmoji),
+      autoHideEnabled: Boolean(body.autoHideEnabled),
+      autoHideCategories: Array.isArray(body.autoHideCategories) ? body.autoHideCategories.map(String) : []
+    }, body.confirmed === true);
+    return send(response, 200, moderation.getSettings(db, accountId(body.accountId, db)));
+  }
+  if (path === '/api/moderation/flags' && method === 'GET') {
+    return send(response, 200, moderation.listFlags(db, accountId(url.searchParams.get('accountId'), db), {
+      state: url.searchParams.get('state') ?? undefined,
+      limit: Number(url.searchParams.get('limit')) || 50,
+      offset: Number(url.searchParams.get('offset')) || 0
+    }));
+  }
+  if (path === '/api/moderation/flags/bulk' && method === 'POST') {
+    const flagIds = body.flagIds;
+    if (!Array.isArray(flagIds) || flagIds.length < 1 || flagIds.length > moderation.BULK_MAX_FLAGS
+      || flagIds.some((id) => typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(id)) || new Set(flagIds).size !== flagIds.length) {
+      throw new TypeError('Expected 1..100 unique flag IDs');
+    }
+    const action = body.action;
+    if (action !== 'hide' && action !== 'unhide' && action !== 'delete' && action !== 'dismiss') throw new TypeError('Invalid moderation action');
+    if (action === 'delete' && body.confirmed !== true) throw new Error('confirmation_required');
+    const result = await moderation.executeBulkAction(db, requireService(deps.provider, 'provider'), accountId(body.accountId, db),
+      flagIds as string[], action, { confirmed: body.confirmed === true });
+    return send(response, 200, result);
+  }
+  const modHideMatch = /^\/api\/moderation\/flags\/([^\/]+)\/hide$/.exec(path);
+  if (modHideMatch && method === 'POST') {
+    await moderation.act(db, requireService(deps.provider, 'provider'), accountId(body.accountId, db), modHideMatch[1], 'hide', 'operator');
+    return send(response, 200, { success: true });
+  }
+  const modUnhideMatch = /^\/api\/moderation\/flags\/([^\/]+)\/unhide$/.exec(path);
+  if (modUnhideMatch && method === 'POST') {
+    await moderation.act(db, requireService(deps.provider, 'provider'), accountId(body.accountId, db), modUnhideMatch[1], 'unhide', 'operator');
+    return send(response, 200, { success: true });
+  }
+  const modDeleteMatch = /^\/api\/moderation\/flags\/([^\/]+)\/delete$/.exec(path);
+  if (modDeleteMatch && method === 'POST') {
+    await moderation.act(db, requireService(deps.provider, 'provider'), accountId(body.accountId, db), modDeleteMatch[1], 'delete', 'operator', body.confirmed === true);
+    return send(response, 200, { success: true });
+  }
+  const modDismissMatch = /^\/api\/moderation\/flags\/([^\/]+)\/dismiss$/.exec(path);
+  if (modDismissMatch && method === 'POST') {
+    moderation.dismiss(db, accountId(body.accountId, db), modDismissMatch[1]);
+    return send(response, 200, { success: true });
+  }
+
   send(response, 404, { error: 'not_found' });
 }
+
 
 function dashboard(db: DatabaseSync, selected?: string) {
   if (selected) accountId(selected, db);
@@ -377,13 +443,14 @@ function dashboard(db: DatabaseSync, selected?: string) {
   const accounts = selected ? listAccounts(db, selected) : listAccounts(db);
   const queue = db.prepare(`SELECT state, COUNT(*) AS count FROM queue_items ${where} GROUP BY state`).all(...params) as Array<{ state: string; count: number }>;
   const automations = db.prepare(`SELECT status, COUNT(*) AS count FROM automations ${where} GROUP BY status`).all(...params) as Array<{ status: string; count: number }>;
+  const moderation = db.prepare(`SELECT state, COUNT(*) AS count FROM moderation_flags ${where} GROUP BY state`).all(...params) as Array<{ state: string; count: number }>;
   const scans = db.prepare(`SELECT account_id, MAX(finished_at) AS last_sync,
       (SELECT stop_reason FROM scan_runs latest WHERE latest.account_id=scan_runs.account_id ORDER BY started_at DESC LIMIT 1) AS last_error,
       (SELECT status FROM scan_runs latest WHERE latest.account_id=scan_runs.account_id ORDER BY started_at DESC LIMIT 1) AS coverage
       FROM scan_runs ${where} GROUP BY account_id`).all(...params) as Array<{ account_id: string; last_sync: string | null; last_error: string | null; coverage: string | null }>;
   const dryRunRow = db.prepare(`SELECT state_value FROM app_state WHERE state_key='dry_run'`).get() as { state_value: string } | undefined;
   const monitor = db.prepare(`SELECT state_value FROM app_state WHERE state_key='monitoring_enabled'`).get() as { state_value: string } | undefined;
-  return { accounts: accounts.map((account) => ({ ...account, ...scans.find((scan) => scan.account_id === account.accountId) })), queue, automations, dryRun: dryRunRow?.state_value !== 'false', monitoringEnabled: monitor?.state_value === 'true' };
+  return { accounts: accounts.map((account) => ({ ...account, ...scans.find((scan) => scan.account_id === account.accountId) })), queue, automations, moderation, dryRun: dryRunRow?.state_value !== 'false', monitoringEnabled: monitor?.state_value === 'true' };
 }
 
 function listAccounts(db: DatabaseSync, selected?: string): Array<Record<string, unknown> & { accountId: string }> {

@@ -10,6 +10,7 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 
 - [Qué hace y qué no hace](#qué-hace-y-qué-no-hace)
 - [Estado y límites](#estado-y-límites)
+- [Moderación de comentarios](#moderación-de-comentarios)
 - [Funciones probadas y retiradas](#funciones-probadas-y-retiradas)
 - [Instalador para Windows](#instalador-para-windows)
 - [Requisitos](#requisitos)
@@ -33,6 +34,7 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - Guarda conexiones de Meta (Instagram Login o Facebook Login) con el token **cifrado** en tu disco.
 - Lista tus publicaciones y te deja crear **automatizaciones**: palabras clave + texto de respuesta + hasta dos botones con enlace HTTPS. Pueden aplicar a una publicación o a todas las publicaciones de la cuenta (automatización general).
 - **Monitoreo** de comentarios nuevos (cada 60 segundos) que pone en cola las respuestas de los comentarios elegibles.
+- **Moderación de comentarios**: marca comentarios con palabras prohibidas, enlaces, teléfonos, menciones masivas o emojis repetidos y te **sugiere** ocultarlos, borrarlos o descartarlos. Ver [Moderación de comentarios](#moderación-de-comentarios).
 - **Revisión pendiente**: analiza comentarios anteriores (últimas 2 h, 24 h, 3 días, 7 días o un rango propio) **sin enviar nada**, para que tú elijas cuáles procesar.
 - **Cola e historial**: muestra cada respuesta (simulada, enviada, fallida, expirada o con resultado desconocido) y su historial de intentos.
 - Respuesta pública opcional bajo el comentario, con variantes que rotan para no repetir siempre el mismo texto.
@@ -58,6 +60,16 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - **Permisos de comentarios:** no sabrás si tu token tiene permiso para responder públicamente hasta el primer intento real. Si falta, verás `public_reply_permission_denied` y la respuesta privada no se ve afectada.
 - **Sistema operativo:** el código es multiplataforma (Linux, macOS y Windows nativo, además de Windows con WSL2), pero solo **Linux** se verificó en una ejecución real. macOS y Windows nativo están **verificados solo por pruebas automáticas con una sonda de plataforma simulada; no se probaron en un equipo real**. Detalles en [Sistemas operativos](docs/INSTALACION-CON-IA.md#sistemas-operativos).
 - **Proyecto en evolución:** el comportamiento real de Meta (permisos, cómo se ven los botones, límites de volumen) debe comprobarse con un comentario de prueba controlado antes de usarlo en serio.
+
+## Moderación de comentarios
+
+- **Qué hace:** cuando la activas en una cuenta, cada escaneo marca los comentarios con tus palabras o frases prohibidas, enlaces, teléfonos, 3 o más menciones o emojis repetidos. Escanear nunca oculta ni borra nada.
+- **Por defecto solo sugiere:** tú decides en la pestaña «Moderación» si ocultas, muestras, borras o descartas cada comentario (o varios a la vez). Borrar es permanente y siempre pide confirmación.
+- **Dry Run simula:** en modo prueba las acciones quedan como simuladas y no se llama a Meta.
+- **Nada se borra nunca automáticamente.** Lo único automático es «Ocultar automáticamente» (opcional, por categorías, con confirmación), que solo actúa en modo real, con el Monitoreo encendido y en cuentas que no estén pausadas, de a un comentario cada 10 segundos como mínimo. No es retroactivo: solo oculta comentarios marcados desde que lo activas.
+- **Todo queda registrado:** cada acción, incluido descartar, queda en el historial de moderación.
+- **Resultado dudoso:** si Meta no responde con claridad, el comentario queda «Por revisar»; revísalo en Instagram y descártalo a mano. No se reintenta solo.
+- **Dónde se configura:** pestaña «Moderación» → «Reglas de moderación», con una cuenta elegida. Detalles técnicos en [REFERENCIA-TECNICA.md](docs/REFERENCIA-TECNICA.md#19-moderación-de-comentarios).
 
 ## Funciones probadas y retiradas
 

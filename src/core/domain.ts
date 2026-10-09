@@ -128,6 +128,11 @@ export type MessageReadback = {
   observedAt: string;
 };
 
+export type ModerationResult =
+  | { status: 'accepted' }
+  | { status: 'rejected'; safeErrorCode?: string }
+  | { status: 'ambiguous'; safeErrorCode?: string };
+
 export interface SocialProvider {
   validateConnection(connectionId: string): Promise<ConnectionValidation>;
   discoverAccounts(connectionId: string): Promise<DiscoveredAccount[]>;
@@ -137,6 +142,8 @@ export interface SocialProvider {
   sendPrivateReply(account: AccountRef, commentId: string, payload: PrivateReplyPayload): Promise<SendResult>;
   readMessage(account: AccountRef, messageId: string): Promise<MessageReadback>;
   replyToComment(account: AccountRef, commentId: string, message: string): Promise<PublicReplyResult>;
+  setCommentHidden?(account: AccountRef, commentId: string, hidden: boolean): Promise<ModerationResult>;
+  deleteComment?(account: AccountRef, commentId: string): Promise<ModerationResult>;
   diagnoseConversation?(account: AccountRef, igsid: string): Promise<ConversationDiagnostics>;
   getUserProfile?(account: AccountRef, igsid: string): Promise<UserProfileProbe>;
   /** Follow gate: `POST /{ig-id}/messages` with `recipient.id` (only inside the 24 h window after the user's message). */

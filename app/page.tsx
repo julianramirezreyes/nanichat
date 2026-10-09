@@ -3,6 +3,7 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { autoSelectAccount } from './account-filter';
 import { mediaLabel, mediaTypeLabel, shortCaption, shortId } from './media-label';
+import { availableActions, bulkAllowed, bulkSummary, categoryLabel, reasonsText, stateLabel as moderationStateLabel, type BulkResultView } from './moderation-labels';
 import { autoPickAutomation, describeQueuePayload, type PendingItem, type PendingPage } from './pending-review';
 import { GENERAL_MEDIA_OPTION, automationTargetLabel, automationTargetPayload } from './automation-scope';
 import { deriveOnboarding, showOnboarding as shouldShowOnboarding } from './onboarding';
@@ -14,7 +15,7 @@ import { ATTACHMENT_ERROR_LABELS, attachmentErrorHint, attachmentPartStateLabel,
 import {
   FOLLOW_GATE_RETIRED_LABEL, MEDIA_LINK_TIP, followGateErrorHint, followGateEventLabel, followGateStateLabel, showFollowGateDetail,
 } from './follow-gate';
-import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff } from 'lucide-react';
 import { PUBLIC_REPLY_SAMPLE_USERNAME, describePublicReply, parseVariantLines, previewExamples, publicReplyErrorHint, type PublicReplyDto, variantCountLabel } from './public-reply';
 
 type Account = { accountId: string; connectionId: string; username: string; status: string; monitoringPaused: boolean; sendHoldReason?: string | null; last_sync?: string; last_error?: string; coverage?: string };
@@ -30,7 +31,7 @@ type QueueItem = { id: string; accountId: string; username: string; commentId: s
 type Dashboard = { accounts: Account[]; queue: Array<{ state: string; count: number }>; automations: Array<{ status: string; count: number }>; dryRun: boolean; monitoringEnabled: boolean };
 type Api = (path: string, method?: string, body?: Record<string, unknown>) => Promise<any>;
 /** Runs an operation, shows feedback, refreshes data. Resolves true only when the operation succeeded. */
-type Act = (operation: () => Promise<unknown>, message: string) => Promise<boolean>;
+type Act = (operation: () => Promise<unknown>, message: string | (() => string)) => Promise<boolean>;
 type ConfirmOptions = { title: string; body: string; confirmLabel: string; danger?: boolean };
 type Confirm = (options: ConfirmOptions) => Promise<boolean>;
 type Tone = 'good' | 'neutral' | 'warn' | 'danger';
@@ -39,7 +40,7 @@ type Tone = 'good' | 'neutral' | 'warn' | 'danger';
 class Cancelled extends Error {}
 
 
-const TAB_ICONS: Record<string, any> = { dashboard: LayoutDashboard, connections: PlugZap, media: Images, automations: Zap, monitor: Radar, backlog: Inbox, queue: History, settings: Settings };
+const TAB_ICONS: Record<string, any> = { dashboard: LayoutDashboard, connections: PlugZap, media: Images, automations: Zap, moderation: ShieldAlert, monitor: Radar, backlog: Inbox, queue: History, settings: Settings };
 
 function RingAvatar({ username }: { username?: string | null }) {
   return <div className="ring-avatar"><div className="ring-avatar-inner">{username ? username[0].toUpperCase() : 'V'}</div></div>;
@@ -50,6 +51,7 @@ const sections = [
   ['connections', 'Conexiones', 'Conecte su token de Meta y elija la cuenta de Instagram que desea administrar.'],
   ['media', 'Publicaciones', 'Publicaciones de la cuenta elegida; se usan para crear automatizaciones.'],
   ['automations', 'Automatizaciones', 'Reglas que responden por mensaje privado a los comentarios con ciertas palabras clave.'],
+  ['moderation', 'Moderación', 'Oculte o borre comentarios ofensivos o spam de sus publicaciones; por defecto solo se sugieren.'],
   ['monitor', 'Monitoreo', 'Encienda o apague la vigilancia de comentarios nuevos, por cuenta.'],
   ['backlog', 'Revisión pendiente', 'Revise comentarios anteriores y elija cuáles añadir a la cola; analizar no envía nada.'],
   ['queue', 'Cola e historial', 'Historial de cada respuesta: simulada, enviada, fallida o por revisar.'],
@@ -152,7 +154,7 @@ export default function HomePage() {
 
   const act = useCallback<Act>(async (operation, message) => {
     setError(''); setNotice('');
-    try { await operation(); setNotice(message); await refresh(); return true; }
+    try { await operation(); setNotice(typeof message === 'function' ? message() : message); await refresh(); return true; }
     catch (cause) {
       if (cause instanceof Cancelled) return false;
       setError(cause instanceof Error ? cause.message : 'operation_failed');
@@ -215,6 +217,7 @@ export default function HomePage() {
         {section === 'connections' && <ConnectionsView connections={connections} accounts={accounts} candidates={candidates} setCandidates={setCandidates} api={api} act={act} confirm={confirm} features={features} />}
         {section === 'media' && <MediaView accounts={accounts} allAccounts={allAccounts} onSelectAccount={chooseAccount} media={media} selected={accountFilter} onNavigate={setSection} api={api} act={act} />}
         {section === 'automations' && <AutomationView accounts={accounts} media={media} rows={automations} selected={accountFilter} api={api} act={act} confirm={confirm} />}
+        {section === 'moderation' && <ModerationView accountFilter={accountFilter} allAccounts={allAccounts} onSelectAccount={chooseAccount} onNavigate={setSection} api={api} act={act} confirm={confirm} mode={mode} />}
         {section === 'monitor' && <MonitorView accounts={accounts} status={dashboard?.monitoringEnabled ?? false} onNavigate={setSection} api={api} act={act} />}
         {section === 'backlog' && <BacklogView allAccounts={allAccounts} accounts={accounts} onSelectAccount={chooseAccount} selected={accountFilter} job={scanJob} setJob={setScanJob} rows={automations} api={api} act={act} confirm={confirm} />}
         {section === 'queue' && <QueueView items={queue} total={queueTotal} offset={queueOffset} setOffset={setQueueOffset} state={queueState} setState={(value) => { setQueueOffset(0); setQueueState(value); }} onNavigate={setSection} api={api} act={act} />}
@@ -796,3 +799,293 @@ function ConnectionBadge({ status }: { status: string }) {
 function Empty({ title, detail, action, actionLabel, primary }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean }) { return <div className="empty-state"><div className="empty-icon"><Circle size={24} strokeWidth={2} aria-hidden="true" /></div><strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }); }
 function safeErrorLabel(code: string) { const labels: Record<string, string> = { account_not_found: 'La cuenta indicada no existe.', connection_not_found: 'La conexión indicada no existe.', invalid_request: 'Revise los campos e inténtelo de nuevo.', origin_or_csrf_rejected: 'La solicitud local no superó la protección de origen.', operation_rejected: 'La operación fue rechazada por una condición de seguridad o estado.', account_scan_failed: 'No se pudo completar el análisis para una cuenta.', follow_gate_invalid: 'La opción «Pedir primero que me sigan» no es válida.', follow_gate_message_invalid: 'Revise el «Mensaje previo»: es obligatorio, de hasta 640 caracteres y solo admite las variables indicadas.', follow_gate_button_title_invalid: 'Revise el «Título del botón»: de 1 a 20 caracteres, sin enlaces ni saltos de línea.', follow_gate_retired: FOLLOW_GATE_RETIRED_LABEL, interactive_mode_retired: INTERACTIVE_RETIRED_LABEL, ...ATTACHMENT_ERROR_LABELS }; return labels[code] ?? 'Revise el estado de la cuenta y vuelva a intentarlo.'; }
+
+export function ModerationView({ accountFilter, allAccounts, onSelectAccount, onNavigate, api, act, confirm, mode }: { accountFilter: string; allAccounts: any[]; onSelectAccount: (id: string) => void; onNavigate: (id: string) => void; api: any; act: any; confirm: any; mode: string }) {
+  const [settings, setSettings] = useState<any>(null);
+  const [flags, setFlags] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [flagState, setFlagState] = useState('all');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  
+  // Form fields
+  const [enabled, setEnabled] = useState(false);
+  const [blockedTerms, setBlockedTerms] = useState('');
+  const [detectLinks, setDetectLinks] = useState(true);
+  const [detectPhones, setDetectPhones] = useState(true);
+  const [detectMentions, setDetectMentions] = useState(true);
+  const [detectEmoji, setDetectEmoji] = useState(false);
+  const [autoHideEnabled, setAutoHideEnabled] = useState(false);
+  const [autoHideCategories, setAutoHideCategories] = useState<string[]>([]);
+
+  const loadSettings = useCallback(async () => {
+    if (accountFilter === 'all') return;
+    try {
+      const data = await api(`/api/moderation/settings?accountId=${encodeURIComponent(accountFilter)}`);
+      setSettings(data);
+      setEnabled(data.enabled);
+      setBlockedTerms(data.blockedTerms.join('\n'));
+      setDetectLinks(data.detectLinks);
+      setDetectPhones(data.detectPhones);
+      setDetectMentions(data.detectMentions);
+      setDetectEmoji(data.detectEmoji);
+      setAutoHideEnabled(data.autoHideEnabled);
+      setAutoHideCategories(data.autoHideCategories);
+    } catch {
+      // Ignored
+    }
+  }, [api, accountFilter]);
+
+  const loadFlags = useCallback(async () => {
+    if (accountFilter === 'all') return;
+    try {
+      const query = new URLSearchParams({ accountId: accountFilter, limit: '50', offset: String(offset) });
+      if (flagState !== 'all') query.set('state', flagState);
+      const data = await api(`/api/moderation/flags?${query}`);
+      setFlags(data.items);
+      setTotal(data.total);
+      setSelectedIds([]);
+    } catch {
+      // Ignored
+    }
+  }, [api, accountFilter, offset, flagState]);
+
+  useEffect(() => {
+    loadSettings();
+    loadFlags();
+  }, [loadSettings, loadFlags]);
+
+  async function saveSettings(e: React.FormEvent) {
+    e.preventDefault();
+    const terms = blockedTerms.split(/[\n,]+/).map(t => t.trim()).filter(Boolean);
+    let confirmed = false;
+    // Confirmation only when auto-hide escalates: enabled from disabled, or a new category is allowed.
+    const autoHideEscalates = autoHideEnabled && (!settings?.autoHideEnabled
+      || autoHideCategories.some((category) => !(settings?.autoHideCategories ?? []).includes(category)));
+    if (autoHideEscalates) {
+      if (!(await confirm({ title: 'Ocultar automáticamente', body: 'Los comentarios marcados en estas categorías se ocultarán solos cuando el modo real esté activo. Solo se aplica a comentarios marcados desde ahora. Nunca se borran solos.', confirmLabel: 'Autorizar' }))) {
+        if (!settings?.autoHideEnabled) setAutoHideEnabled(false);
+        return;
+      }
+      confirmed = true;
+    }
+    await act(async () => {
+      await api('/api/moderation/settings', 'PUT', {
+        accountId: accountFilter,
+        enabled,
+        blockedTerms: terms,
+        detectLinks,
+        detectPhones,
+        detectMentions,
+        detectEmoji,
+        autoHideEnabled,
+        autoHideCategories,
+        confirmed
+      });
+      await loadSettings();
+    }, 'Reglas de moderación guardadas.');
+  }
+
+  function toggleAutoCategory(cat: string) {
+    setAutoHideCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
+  }
+
+  
+  const selectedStates = flags.filter((flag) => selectedIds.includes(flag.flagId)).map((flag) => String(flag.state));
+
+  async function bulkAction(action: 'dismiss' | 'hide' | 'unhide' | 'delete') {
+    if (!selectedIds.length) return;
+    const confirmation = action === 'delete'
+      ? { title: 'Borrar comentarios', body: `Vas a borrar ${selectedIds.length} comentarios. Borrar es permanente y no se puede deshacer.`, confirmLabel: 'Borrar', danger: true }
+      : { title: `${{ dismiss: 'Descartar', hide: 'Ocultar', unhide: 'Mostrar' }[action]} comentarios`, body: `¿${{ dismiss: 'Descartar', hide: 'Ocultar', unhide: 'Mostrar' }[action]} ${selectedIds.length} comentarios seleccionados?${mode === 'dry' ? ' En modo prueba la acción solo se simula.' : ''}`, confirmLabel: { dismiss: 'Descartar', hide: 'Ocultar', unhide: 'Mostrar' }[action] };
+    if (!(await confirm(confirmation))) return;
+    let summary = 'Acción masiva aplicada.';
+    const ok = await act(async () => {
+      const data = await api('/api/moderation/flags/bulk', 'POST', { accountId: accountFilter, flagIds: selectedIds, action, confirmed: action === 'delete' });
+      summary = bulkSummary(Array.isArray(data?.results) ? data.results as BulkResultView[] : []);
+    }, () => summary);
+    if (ok) {
+      setSelectedIds([]);
+      loadFlags();
+    }
+  }
+
+  async function hideFlag(flagId: string) {
+    await act(async () => {
+      await api(`/api/moderation/flags/${flagId}/hide`, 'POST', { accountId: accountFilter });
+      await loadFlags();
+    }, 'Intento de ocultar registrado.');
+  }
+
+  async function unhideFlag(flagId: string) {
+    await act(async () => {
+      await api(`/api/moderation/flags/${flagId}/unhide`, 'POST', { accountId: accountFilter });
+      await loadFlags();
+    }, 'Intento de mostrar registrado.');
+  }
+
+  async function deleteFlag(flagId: string) {
+    if (!(await confirm({ title: 'Borrar comentario', body: 'Borrar es permanente y no se puede deshacer. ¿Borrar este comentario?', confirmLabel: 'Borrar', danger: true }))) return;
+    await act(async () => {
+      await api(`/api/moderation/flags/${flagId}/delete`, 'POST', { accountId: accountFilter, confirmed: true });
+      await loadFlags();
+    }, 'Intento de borrar registrado.');
+  }
+
+  async function dismissFlag(flagId: string) {
+    await act(async () => {
+      await api(`/api/moderation/flags/${flagId}/dismiss`, 'POST', { accountId: accountFilter });
+      await loadFlags();
+    }, 'Comentario descartado.');
+  }
+
+  if (accountFilter === 'all') {
+    return <div className="panel">
+      <div className="panel-heading">
+        <div><h3>Reglas de moderación</h3><p className="muted">Elija una cuenta para configurar sus reglas.</p></div>
+      </div>
+      {allAccounts.length ? <div className="account-prompt" role="group" aria-labelledby="mod-account-prompt">
+        <strong id="mod-account-prompt">Elija una cuenta para moderar</strong>
+        <p className="muted">Las reglas se aplican individualmente.</p>
+        <div className="account-prompt-chips">
+          {allAccounts.map((account) => <button key={account.accountId} className="account-chip" onClick={() => onSelectAccount(account.accountId)}><RingAvatar username={account.username} /> @{account.username}</button>)}
+        </div>
+      </div> : <Empty title="Aún no hay cuentas" detail="Conecte Meta y elija una cuenta antes de configurar moderación." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}
+    </div>;
+  }
+
+  return <div className="mod-layout">
+    <div>
+      <form className="panel form-panel mod-rules" onSubmit={saveSettings}>
+        <div className="panel-heading">
+          <div>
+            <h3>Reglas de moderación</h3>
+            <p className="muted">Defina qué comentarios se marcan en esta cuenta. Marcar no oculta nada por sí solo.</p>
+          </div>
+        </div>
+        <div className="mod-rules-body">
+          <label className="toggle-row">
+            <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+            <span className="toggle-row-text"><strong>Activar moderación en esta cuenta</strong><span>Cada escaneo revisa los comentarios nuevos con estas reglas.</span></span>
+          </label>
+          <Field label="Palabras o frases prohibidas">
+            <textarea value={blockedTerms} onChange={e => setBlockedTerms(e.target.value)} placeholder="estafa, ladrones..." rows={3} />
+          </Field>
+          <p className="hint mod-hint">Una por línea o separadas por coma. No importan mayúsculas ni tildes.</p>
+          <div>
+            <strong>Detectores automáticos</strong>
+            <div className="mod-detectors">
+              <label className="toggle-row">
+                <input type="checkbox" checked={detectLinks} onChange={e => setDetectLinks(e.target.checked)} />
+                <span className="toggle-row-text"><strong>Enlaces</strong><span>Detecta URLs (http, www, bit.ly)</span></span>
+              </label>
+              <label className="toggle-row">
+                <input type="checkbox" checked={detectPhones} onChange={e => setDetectPhones(e.target.checked)} />
+                <span className="toggle-row-text"><strong>Teléfonos</strong><span>Detecta secuencias de números</span></span>
+              </label>
+              <label className="toggle-row">
+                <input type="checkbox" checked={detectMentions} onChange={e => setDetectMentions(e.target.checked)} />
+                <span className="toggle-row-text"><strong>Menciones</strong><span>Detecta 3 o más cuentas @mencionadas</span></span>
+              </label>
+              <label className="toggle-row">
+                <input type="checkbox" checked={detectEmoji} onChange={e => setDetectEmoji(e.target.checked)} />
+                <span className="toggle-row-text"><strong>Emojis</strong><span>Detecta spam visual o emojis repetidos</span></span>
+              </label>
+            </div>
+          </div>
+          <div className="mod-auto">
+            <label className="toggle-row">
+              <input type="checkbox" disabled={!enabled} checked={enabled && autoHideEnabled} onChange={e => setAutoHideEnabled(e.target.checked)} />
+              <span className="toggle-row-text"><strong>Ocultar automáticamente</strong><span>Solo con el modo real activo. Nunca se borra nada solo.</span></span>
+            </label>
+            {enabled && autoHideEnabled && <div className="mod-auto-cats">
+              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('blocked_term')} onChange={() => toggleAutoCategory('blocked_term')} /> Palabras prohibidas</label>
+              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_link')} onChange={() => toggleAutoCategory('spam_link')} /> Enlaces</label>
+              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_phone')} onChange={() => toggleAutoCategory('spam_phone')} /> Teléfonos</label>
+              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_mentions')} onChange={() => toggleAutoCategory('spam_mentions')} /> Menciones</label>
+              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_emoji')} onChange={() => toggleAutoCategory('spam_emoji')} /> Emojis</label>
+            </div>}
+          </div>
+        </div>
+        <div>
+          <button className="btn-main" type="submit">Guardar reglas</button>
+        </div>
+      </form>
+    </div>
+    <div>
+      <div className="panel mod-flags">
+        <div className="panel-heading">
+          <div>
+            <h3>Comentarios marcados <span className="count-badge">{total}</span></h3>
+            {mode === 'dry' && <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={14} /> Modo prueba: las acciones se simulan, no se ocultan ni borran comentarios reales.</p>}
+          </div>
+        </div>
+        <div className="filters-row mod-filters">
+          <label className="mod-select-all">
+            <input type="checkbox" checked={flags.length > 0 && selectedIds.length === flags.length} onChange={e => setSelectedIds(e.target.checked ? flags.map(f => f.flagId) : [])} />
+            Seleccionar todo
+          </label>
+          <select value={flagState} onChange={e => { setFlagState(e.target.value); setOffset(0); }}>
+            <option value="all">Todos los estados</option>
+            <option value="PENDING">Pendientes</option>
+            <option value="HIDDEN">Ocultos</option>
+            <option value="SIMULATED">Simulados</option>
+            <option value="FAILED">Fallidos</option>
+            <option value="UNKNOWN_OUTCOME">Por revisar</option>
+            <option value="DISMISSED">Descartados</option>
+            <option value="DELETED">Borrados</option>
+            <option value="VISIBLE">Visibles</option>
+          </select>
+          <button className="btn icon-only" onClick={() => loadFlags()} title="Actualizar" aria-label="Actualizar"><RefreshCw size={16} /></button>
+        </div>
+        {selectedIds.length > 0 && <div className="mod-bulkbar" role="toolbar" aria-label="Acciones para los seleccionados">
+          <strong>{selectedIds.length} seleccionados</strong>
+          <div className="mod-bulkbar-actions">
+            {bulkAllowed('dismiss', selectedStates) && <button className="btn small" onClick={() => bulkAction('dismiss')}>Descartar</button>}
+            {bulkAllowed('hide', selectedStates) && <button className="btn small" onClick={() => bulkAction('hide')}><EyeOff size={16} /> Ocultar</button>}
+            {bulkAllowed('unhide', selectedStates) && <button className="btn small" onClick={() => bulkAction('unhide')}><Eye size={16} /> Mostrar</button>}
+            {bulkAllowed('delete', selectedStates) && <button className="btn small danger" onClick={() => bulkAction('delete')}><Trash2 size={16} /> Borrar</button>}
+          </div>
+        </div>}
+        {!flags.length ? <Empty title="No hay comentarios marcados" detail="Active la moderación y defina palabras prohibidas; los comentarios marcados aparecerán aquí tras el próximo escaneo." /> : 
+          <div className="list-group">
+            {flags.map(flag => (
+              <div className="mod-row" key={flag.flagId}>
+                <div className="mod-row-check">
+                  <input type="checkbox" aria-label={`Seleccionar comentario de @${flag.comment?.username || 'usuario'}`} checked={selectedIds.includes(flag.flagId)} onChange={e => setSelectedIds(e.target.checked ? [...selectedIds, flag.flagId] : selectedIds.filter(id => id !== flag.flagId))} />
+                </div>
+                <MiniThumb size="mid" item={flag.media} />
+                <div className="mod-row-body">
+                  <div className="mod-row-head">
+                    <RingAvatar username={flag.comment?.username} />
+                    <strong>@{flag.comment?.username || 'Usuario'}</strong>
+                    <span className="muted">{formatDate(flag.createdAt)}</span>
+                  </div>
+                  <p className="comment-clamp">{flag.comment?.text}</p>
+                  <div className="mod-row-meta">
+                    <span className="kw-chip">{categoryLabel(flag.category)}</span>
+                    <span className="muted text-small">{reasonsText(flag.reasons)}</span>
+                    <Status value={moderationStateLabel(flag.state)} tone={flag.state === 'PENDING' ? 'warn' : flag.state === 'HIDDEN' || flag.state === 'DELETED' || flag.state === 'DISMISSED' ? 'good' : flag.state === 'SIMULATED' ? 'neutral' : 'danger'} />
+                    {flag.safeErrorCode && <span className="muted text-small">({flag.safeErrorCode})</span>}
+                  </div>
+                </div>
+                {(() => { const allowed = availableActions(flag.state); return <div className="row-actions mod-row-actions">
+                  {allowed.unhide && <button className="btn small" onClick={() => unhideFlag(flag.flagId)} title="Mostrar" aria-label="Mostrar"><Eye size={16} /> Mostrar</button>}
+                  {allowed.hide && <button className="btn small" onClick={() => hideFlag(flag.flagId)} title="Ocultar" aria-label="Ocultar"><EyeOff size={16} /> Ocultar</button>}
+                  {allowed.delete && <button className="btn-icon danger" onClick={() => deleteFlag(flag.flagId)} title="Borrar" aria-label="Borrar"><Trash2 size={16} /></button>}
+                  {allowed.dismiss && <button className="btn-icon" onClick={() => dismissFlag(flag.flagId)} title="Descartar" aria-label="Descartar"><XCircle size={16} /></button>}
+                  {flag.media?.permalink && <a href={flag.media.permalink} target="_blank" rel="noreferrer" className="btn-icon" title="Ver en Instagram" aria-label="Ver en Instagram"><ExternalLink size={16} /></a>}
+                </div>; })()}
+              </div>
+            ))}
+          </div>
+        }
+        {total > 50 && <div className="pagination">
+          <button className="btn" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Anteriores</button>
+          <span>Mostrando {offset + 1} - {Math.min(offset + 50, total)} de {total}</span>
+          <button className="btn" disabled={offset + 50 >= total} onClick={() => setOffset(offset + 50)}>Siguientes</button>
+        </div>}
+      </div>
+    </div>
+  </div>;
+}
