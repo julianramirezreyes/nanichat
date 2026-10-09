@@ -89,7 +89,7 @@ Si usas Windows y no quieres instalar Node.js ni usar la terminal, usa el instal
 
 Necesitas **tus propias credenciales de Meta**; el instalador no incluye ninguna. Igual que siempre, la aplicación arranca en Dry Run y con el Monitoreo apagado.
 
-El instalador se compila y se **prueba automáticamente en un Windows de GitHub** (instalación silenciosa, arranque, cierre, reinicio y desinstalación). PENDIENTE DE CONFIRMAR tras la primera ejecución correcta del flujo `Windows installer`: esa prueba automática ya pasó; todavía no se probó a mano en un equipo Windows de una persona usuaria. Detalles técnicos: [packaging/windows/README.md](packaging/windows/README.md).
+El instalador se compila y se **prueba automáticamente en un Windows de GitHub** (instalación silenciosa, arranque, cierre, reinicio y desinstalación). Esa prueba automática pasó por completo en la versión 0.1.0 (56 comprobaciones). Todavía no se probó a mano en un equipo Windows de una persona usuaria, y las pruebas unitarias de la app no terminan aún en Windows (se agota el tiempo), así que Windows está verificado para el instalador, no para ejecutar el código fuente. Detalles técnicos: [packaging/windows/README.md](packaging/windows/README.md).
 
 ## Requisitos
 
