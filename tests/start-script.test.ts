@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -29,4 +29,25 @@ test('the portable start script sets NODE_ENV=production before loading the Type
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /mode=production cycle=ab/u);
+});
+
+test('tsx is a runtime dependency because the production start script loads it (npm ci --omit=dev must keep it)', () => {
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
+    dependencies?: Record<string, string>; devDependencies?: Record<string, string>;
+  };
+  assert.ok(manifest.dependencies?.tsx, 'tsx must be listed in dependencies');
+  assert.equal(manifest.devDependencies?.tsx, undefined, 'tsx must not also be a devDependency');
+  assert.match(readFileSync('scripts/start.mjs', 'utf8'), /import\('tsx\//u);
+  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8')) as {
+    packages: Record<string, { dev?: boolean; dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>;
+  };
+  assert.equal(lock.packages['']?.dependencies?.tsx, manifest.dependencies.tsx, 'package-lock.json must match package.json');
+  assert.notEqual(lock.packages['node_modules/tsx']?.dev, true, 'the lockfile must not mark tsx as dev-only');
+});
+
+test('the Next.js config is plain JavaScript so the production runtime never needs the native SWC binary', () => {
+  // A next.config.ts is transpiled with SWC on every start; without the binary Next.js downloads it from the network.
+  // The Windows installer omits SWC (about 100 MB) and must start offline.
+  assert.equal(existsSync('next.config.ts'), false, 'next.config.ts must not exist');
+  assert.equal(existsSync('next.config.mjs'), true, 'next.config.mjs must exist');
 });
