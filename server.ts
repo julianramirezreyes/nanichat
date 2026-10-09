@@ -14,6 +14,7 @@ import { createScheduler } from './src/services/scheduler.ts';
 import { ConnectionService } from './src/services/connections.ts';
 import { AutomationService } from './src/services/automations.ts';
 import { BacklogService } from './src/services/backlog.ts';
+import { ModerationAiService } from './src/services/moderation-ai.ts';
 import { FollowGateService } from './src/services/follow-gate.ts';
 import { createApiHandler } from './src/http/router.ts';
 import { legacyInterlockFromConfig } from './src/services/legacy-interlock.ts';
@@ -37,15 +38,18 @@ const followGate = new FollowGateService(database, provider, legacyInterlock ? {
 const scheduler = createScheduler(database, scanner, queue, { provider, mediaRefresher: connections, followGate });
 const automations = new AutomationService(database);
 const backlog = new BacklogService(database, scanner, queue);
+// AI comment review (off by default): only creates flags, never calls Meta. A job cannot survive a restart.
+const moderationAi = new ModerationAiService(database, vault);
+moderationAi.recoverInterrupted();
 // Opt-in (SOCIAL_DESK_IMPORT_ENV_PATH): without it the explicit .env import endpoint is unavailable.
 const importEnvPath = config.importEnvPath;
-const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue,
+const apiHandler = createApiHandler({ database, csrfToken: randomBytes(32).toString('base64url'), connections, automations, scheduler, backlog, queue, moderationAi,
   // EXPERIMENTAL read-only conversation/profile diagnostics (GET requests only; never sends).
   provider: provider,
   diagnostics: provider,
   ...(legacyInterlock ? { legacy: legacyInterlock } : {}),
   ...(importEnvPath ? { importEnvironment: async () => readImportedEnvironment(importEnvPath) } : {}) });
-export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog, followGate };
+export const engine = { database, vault, provider, queue, scanner, scheduler, connections, automations, backlog, followGate, moderationAi };
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 const app = next({ dev: isDevelopment, hostname: config.host, port: config.port });

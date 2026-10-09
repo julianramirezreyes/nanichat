@@ -14,6 +14,7 @@ import { ResourceAttachmentError, storedResourceAttachment } from '../services/r
 import { followGateAvailable } from '../services/follow-gate-rules.ts';
 import type { ImportedMetaEnvironment } from '../security/env-import.ts';
 import * as moderation from '../services/moderation.ts';
+import { ModerationAiServiceError, type ModerationAiService } from '../services/moderation-ai.ts';
 
 const BODY_LIMIT = 64 * 1024;
 const PAGE_LIMIT = 100;
@@ -29,6 +30,8 @@ export type ApiDependencies = {
   backlog?: BacklogService;
   queue?: QueueService;
   provider?: SocialProvider;
+  /** AI comment review (off by default per account); never calls Meta. */
+  moderationAi?: ModerationAiService;
   /** Server clock (ms); injectable for deterministic expiry tests. */
   clock?: () => number;
   importEnvironment?: () => Promise<ImportedMetaEnvironment>;
@@ -77,6 +80,7 @@ export function createApiHandler(deps: ApiDependencies) {
         else if (error.message === 'not_found') error = new ApiError(404, error.message);
         else if (error.message === 'invalid_state' || error.message === 'account_invalid_or_held') error = new ApiError(409, error.message);
       }
+      if (error instanceof ModerationAiServiceError) return send(response, error.status, { error: error.code });
       if (error instanceof QueueReadbackError) return send(response, error.status, { error: error.code });
       const status = error instanceof ApiError ? error.status : error instanceof TypeError ? 400 : 409;
       const code = error instanceof ApiError ? error.code
@@ -394,6 +398,7 @@ async function route(
   if (path === '/api/moderation/flags' && method === 'GET') {
     return send(response, 200, moderation.listFlags(db, accountId(url.searchParams.get('accountId'), db), {
       state: url.searchParams.get('state') ?? undefined,
+      source: url.searchParams.get('source') ?? undefined,
       limit: Number(url.searchParams.get('limit')) || 50,
       offset: Number(url.searchParams.get('offset')) || 0
     }));
@@ -410,6 +415,30 @@ async function route(
     const result = await moderation.executeBulkAction(db, requireService(deps.provider, 'provider'), accountId(body.accountId, db),
       flagIds as string[], action, { confirmed: body.confirmed === true });
     return send(response, 200, result);
+  }
+  if (path === '/api/moderation/ai-settings' && method === 'GET') {
+    return send(response, 200, requireService(deps.moderationAi, 'moderation_ai').getSettings(accountId(url.searchParams.get('accountId'), db)));
+  }
+  if (path === '/api/moderation/ai-settings' && method === 'PUT') {
+    const service = requireService(deps.moderationAi, 'moderation_ai');
+    return send(response, 200, service.updateSettings(accountId(body.accountId, db), {
+      engine: body.engine, model: body.model, apiKey: body.apiKey, confirmed: body.confirmed,
+    }));
+  }
+  if (path === '/api/moderation/ai-settings/test' && method === 'POST') {
+    return send(response, 200, await requireService(deps.moderationAi, 'moderation_ai').testKey(accountId(body.accountId, db)));
+  }
+  if (path === '/api/moderation/ai-review' && method === 'POST') {
+    const service = requireService(deps.moderationAi, 'moderation_ai');
+    const account = accountId(body.accountId, db);
+    service.start(account, body.window);
+    return send(response, 202, service.status(account));
+  }
+  if (path === '/api/moderation/ai-review' && method === 'GET') {
+    return send(response, 200, requireService(deps.moderationAi, 'moderation_ai').status(accountId(url.searchParams.get('accountId'), db)));
+  }
+  if (path === '/api/moderation/ai-review/stop' && method === 'POST') {
+    return send(response, 200, requireService(deps.moderationAi, 'moderation_ai').stop(accountId(body.accountId, db)));
   }
   const modHideMatch = /^\/api\/moderation\/flags\/([^\/]+)\/hide$/.exec(path);
   if (modHideMatch && method === 'POST') {

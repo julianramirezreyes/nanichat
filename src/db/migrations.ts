@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-const VERSION = 16;
+const VERSION = 17;
 
 const INITIAL_SCHEMA = `
 CREATE TABLE connections (
@@ -178,6 +178,7 @@ export function migrateDatabase(database: DatabaseSync, targetVersion: number = 
     if (current < 14 && target >= 14) migrateResourceAttachment(database);
     if (current < 15 && target >= 15) migrateMediaThumbnail(database);
     if (current < 16 && target >= 16) migrateCommentModeration(database);
+    if (current < 17 && target >= 17) migrateModerationAi(database);
     database.exec('COMMIT');
   } catch (error) {
     database.exec('ROLLBACK');
@@ -543,5 +544,72 @@ function migrateCommentModeration(database: DatabaseSync): void {
     CREATE TRIGGER moderation_actions_no_delete BEFORE DELETE ON moderation_actions BEGIN SELECT RAISE(ABORT, 'moderation_actions is append-only'); END;
     
     PRAGMA user_version = 16;
+  `);
+}
+
+/**
+ * v17 (AI comment review): moderation_flags is rebuilt (SQLite cannot alter a CHECK) so `category` also accepts the
+ * four AI categories; every row is copied unchanged. Nothing references moderation_flags, so the rebuild needs no
+ * foreign-key juggling. Two new tables: per-account AI settings (engine off by default, API key encrypted with the
+ * vault, consent timestamp) and the AI review jobs (at most one running per account, enforced by a partial index).
+ */
+function migrateModerationAi(database: DatabaseSync): void {
+  database.exec(`
+    CREATE TABLE moderation_flags_v17 (
+      flag_id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      media_id TEXT NOT NULL,
+      comment_id TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN ('blocked_term','spam_link','spam_phone','spam_mentions','spam_emoji','ai_insult','ai_hate','ai_spam','ai_complaint')),
+      source TEXT NOT NULL CHECK (source IN ('rules','ai')),
+      reasons_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('PENDING','DISMISSED','SIMULATED','HIDE_INTENT','HIDDEN','UNHIDE_INTENT','VISIBLE','DELETE_INTENT','DELETED','FAILED','UNKNOWN_OUTCOME')),
+      last_action TEXT CHECK (last_action IN ('hide','unhide','delete')),
+      safe_error_code TEXT,
+      settings_version INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(account_id, comment_id)
+    );
+    INSERT INTO moderation_flags_v17 (flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, last_action,
+      safe_error_code, settings_version, created_at, updated_at)
+    SELECT flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, last_action,
+      safe_error_code, settings_version, created_at, updated_at FROM moderation_flags;
+    DROP TABLE moderation_flags;
+    ALTER TABLE moderation_flags_v17 RENAME TO moderation_flags;
+
+    CREATE TABLE moderation_ai_settings (
+      account_id TEXT PRIMARY KEY REFERENCES social_accounts(account_id),
+      engine TEXT NOT NULL DEFAULT 'off' CHECK (engine IN ('off','gemini','local')),
+      model TEXT,
+      api_key_nonce TEXT,
+      api_key_ciphertext TEXT,
+      api_key_tag TEXT,
+      api_key_hint TEXT,
+      consent_at TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE moderation_ai_jobs (
+      job_id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES social_accounts(account_id),
+      state TEXT NOT NULL CHECK (state IN ('running','completed','failed','stopped')),
+      review_window TEXT NOT NULL CHECK (review_window IN ('24h','3d','7d','30d')),
+      chunks_total INTEGER NOT NULL DEFAULT 0,
+      chunks_done INTEGER NOT NULL DEFAULT 0,
+      chunks_failed INTEGER NOT NULL DEFAULT 0,
+      comments_total INTEGER NOT NULL DEFAULT 0,
+      comments_sent INTEGER NOT NULL DEFAULT 0,
+      truncated INTEGER NOT NULL DEFAULT 0 CHECK (truncated IN (0,1)),
+      flagged INTEGER NOT NULL DEFAULT 0,
+      invalid_output INTEGER NOT NULL DEFAULT 0,
+      error_code TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT
+    );
+    CREATE UNIQUE INDEX moderation_ai_jobs_one_running ON moderation_ai_jobs(account_id) WHERE state = 'running';
+    CREATE INDEX moderation_ai_jobs_account_started ON moderation_ai_jobs(account_id, started_at);
+
+    PRAGMA user_version = 17;
   `);
 }

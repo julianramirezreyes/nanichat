@@ -34,7 +34,7 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - Guarda conexiones de Meta (Instagram Login o Facebook Login) con el token **cifrado** en tu disco.
 - Lista tus publicaciones y te deja crear **automatizaciones**: palabras clave + texto de respuesta + hasta dos botones con enlace HTTPS. Pueden aplicar a una publicación o a todas las publicaciones de la cuenta (automatización general).
 - **Monitoreo** de comentarios nuevos (cada 60 segundos) que pone en cola las respuestas de los comentarios elegibles.
-- **Moderación de comentarios**: marca comentarios con palabras prohibidas, enlaces, teléfonos, menciones masivas o emojis repetidos y te **sugiere** ocultarlos, borrarlos o descartarlos. Ver [Moderación de comentarios](#moderación-de-comentarios).
+- **Moderación de comentarios**: marca comentarios con palabras prohibidas, enlaces, teléfonos, menciones masivas o emojis repetidos y te **sugiere** ocultarlos, borrarlos o descartarlos. Opcionalmente, una **revisión con IA** (desactivada por defecto) marca insultos, odio, spam y quejas. Ver [Moderación de comentarios](#moderación-de-comentarios).
 - **Revisión pendiente**: analiza comentarios anteriores (últimas 2 h, 24 h, 3 días, 7 días o un rango propio) **sin enviar nada**, para que tú elijas cuáles procesar.
 - **Cola e historial**: muestra cada respuesta (simulada, enviada, fallida, expirada o con resultado desconocido) y su historial de intentos.
 - Respuesta pública opcional bajo el comentario, con variantes que rotan para no repetir siempre el mismo texto.
@@ -66,10 +66,19 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - **Qué hace:** cuando la activas en una cuenta, cada escaneo marca los comentarios con tus palabras o frases prohibidas, enlaces, teléfonos, 3 o más menciones o emojis repetidos. Escanear nunca oculta ni borra nada.
 - **Por defecto solo sugiere:** tú decides en la pestaña «Moderación» si ocultas, muestras, borras o descartas cada comentario (o varios a la vez). Borrar es permanente y siempre pide confirmación.
 - **Dry Run simula:** en modo prueba las acciones quedan como simuladas y no se llama a Meta.
-- **Nada se borra nunca automáticamente.** Lo único automático es «Ocultar automáticamente» (opcional, por categorías, con confirmación), que solo actúa en modo real, con el Monitoreo encendido y en cuentas que no estén pausadas, de a un comentario cada 10 segundos como mínimo. No es retroactivo: solo oculta comentarios marcados desde que lo activas.
+- **Nada se borra nunca automáticamente.** Lo único automático es «Ocultar automáticamente» (opcional, por categorías, con confirmación), que solo actúa en modo real, con el Monitoreo encendido y en cuentas que no estén pausadas, de a un comentario cada 10 segundos como mínimo. No es retroactivo: solo oculta comentarios **publicados** desde que lo activas (aunque una revisión con IA marque hoy comentarios más viejos, esos no se ocultan solos).
 - **Todo queda registrado:** cada acción, incluido descartar, queda en el historial de moderación.
 - **Resultado dudoso:** si Meta no responde con claridad, el comentario queda «Por revisar»; revísalo en Instagram y descártalo a mano. No se reintenta solo.
 - **Dónde se configura:** pestaña «Moderación» → «Reglas de moderación», con una cuenta elegida. Detalles técnicos en [REFERENCIA-TECNICA.md](docs/REFERENCIA-TECNICA.md#19-moderación-de-comentarios).
+
+### Revisión con IA
+
+- **Desactivada por defecto.** En la pestaña «Moderación», el panel «Revisión con IA» permite elegir **Gemini** con tu propia API key gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey). El «Modelo local» llegará más adelante.
+- **Aviso de privacidad:** con la API gratuita, Google puede usar el contenido enviado para mejorar sus productos, y los comentarios de tus clientes salen de este equipo. Por eso activarla pide confirmación. Para que nada salga del equipo habrá que usar el modelo local.
+- **Cómo se usa:** «Revisar comentarios negativos» envía a Gemini los comentarios de la ventana elegida (de 24 horas a 30 días) que aún no tienen marca, en lotes pequeños y espaciados, y marca insultos, odio, spam y quejas. **Solo marca:** después tú ocultas, borras o descartas con las mismas herramientas. Las quejas legítimas llevan el aviso «conviene responder, no ocultar» y nunca se ocultan solas.
+- **La key se guarda cifrada** en este equipo y nunca se muestra completa. «Probar key» envía un único comentario de prueba.
+- **Apagar la IA o borrar la key detiene la revisión en curso.** Mientras una revisión corre, el selector de motor queda bloqueado: primero «Detener».
+- Detalles técnicos en [REFERENCIA-TECNICA.md](docs/REFERENCIA-TECNICA.md#revisión-con-ia).
 
 ## Funciones probadas y retiradas
 

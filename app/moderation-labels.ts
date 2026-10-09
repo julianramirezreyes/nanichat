@@ -6,7 +6,76 @@ export const MODERATION_CATEGORY_LABELS: Record<string, string> = {
   spam_phone: 'Teléfono',
   spam_mentions: 'Menciones masivas',
   spam_emoji: 'Emojis repetidos',
+  ai_insult: 'Insulto o acoso',
+  ai_hate: 'Odio o discriminación',
+  ai_spam: 'Spam o estafa',
+  ai_complaint: 'Queja legítima',
 };
+
+/** Shown on every `ai_complaint` flag: it is never auto-hidden. */
+export const AI_COMPLAINT_HINT = 'Queja legítima: conviene responder, no ocultar';
+
+export const AI_PRIVACY_NOTICE = 'Con la API gratuita, Google puede usar el contenido enviado para mejorar sus productos. Los comentarios de sus clientes saldrán de este equipo. Para que nada salga del equipo use el modelo local.';
+
+/** Auto-hide checkboxes. `ai_complaint` is deliberately absent (src/services/moderation.ts AUTO_HIDE_CATEGORIES). */
+export const AUTO_HIDE_OPTIONS: ReadonlyArray<{ value: string; label: string; ai: boolean }> = [
+  { value: 'blocked_term', label: 'Palabras prohibidas', ai: false },
+  { value: 'spam_link', label: 'Enlaces', ai: false },
+  { value: 'spam_phone', label: 'Teléfonos', ai: false },
+  { value: 'spam_mentions', label: 'Menciones', ai: false },
+  { value: 'spam_emoji', label: 'Emojis', ai: false },
+  { value: 'ai_insult', label: 'Insultos (IA)', ai: true },
+  { value: 'ai_hate', label: 'Odio (IA)', ai: true },
+  { value: 'ai_spam', label: 'Spam o estafa (IA)', ai: true },
+];
+
+export const AI_WINDOW_LABELS: Record<string, string> = { '24h': '24 h', '3d': '3 días', '7d': '7 días', '30d': '30 días' };
+
+export const AI_ERROR_LABELS: Record<string, string> = {
+  ai_disabled: 'Active la revisión con IA para usar este botón.',
+  ai_key_missing: 'Guarde una API key de Gemini antes de revisar.',
+  ai_key_invalid: 'La API key no tiene un formato válido.',
+  ai_model_invalid: 'Ese modelo no está disponible.',
+  ai_engine_unavailable: 'El modelo local todavía no está disponible.',
+  ai_job_running: 'Ya hay una revisión en curso para esta cuenta.',
+  ai_job_not_running: 'No hay ninguna revisión en curso.',
+  ai_rate_limited: 'Gemini alcanzó el límite de uso gratuito. Espere unos minutos y vuelva a intentarlo.',
+  ai_auth_failed: 'Gemini rechazó la API key. Revísela o genere una nueva.',
+  ai_request_rejected: 'Gemini rechazó la solicitud. Pruebe con otro modelo.',
+  ai_unavailable: 'Gemini no respondió. Inténtelo más tarde.',
+  ai_invalid_output: 'Gemini respondió algo que no se pudo leer.',
+  ai_engine_error: 'La revisión se detuvo por un error inesperado.',
+  ai_interrupted: 'La revisión se interrumpió porque la aplicación se reinició.',
+  moderation_ai_unavailable: 'La revisión con IA no está disponible.',
+};
+
+export type AiProgressView = { chunksDone: number; chunksTotal: number; commentsSent: number; flagged: number; invalidOutput: number; chunksFailed?: number; commentsTotal?: number; truncated?: boolean };
+
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+/** "Lote 3 de 10 · 120 comentarios enviados · 7 marcados" */
+export function aiProgressText(progress: AiProgressView): string {
+  return `Lote ${progress.chunksDone} de ${progress.chunksTotal} · ${plural(progress.commentsSent, 'comentario enviado', 'comentarios enviados')} · ${plural(progress.flagged, 'marcado', 'marcados')}`;
+}
+
+export function aiProgressPercent(progress: { chunksDone: number; chunksTotal: number }): number {
+  if (!progress.chunksTotal) return 0;
+  return Math.min(100, Math.round((progress.chunksDone / progress.chunksTotal) * 100));
+}
+
+/** One summary line for a finished job. */
+export function aiJobSummary(job: { state: string; errorCode?: string; progress: AiProgressView }): string {
+  const { progress } = job;
+  const parts = [
+    progress.truncated && progress.commentsTotal ? `${progress.commentsSent} de ${progress.commentsTotal} comentarios revisados (máximo por revisión)` : plural(progress.commentsSent, 'comentario revisado', 'comentarios revisados'),
+    plural(progress.flagged, 'marcado', 'marcados'),
+  ];
+  if (progress.chunksFailed) parts.push(plural(progress.chunksFailed, 'lote sin respuesta', 'lotes sin respuesta'));
+  if (progress.invalidOutput) parts.push(plural(progress.invalidOutput, 'respuesta ignorada', 'respuestas ignoradas'));
+  const lead = job.state === 'completed' ? 'Revisión terminada' : job.state === 'stopped' ? 'Revisión detenida' : 'Revisión fallida';
+  const reason = job.errorCode ? ` ${AI_ERROR_LABELS[job.errorCode] ?? ''}`.trimEnd() : '';
+  return `${lead}: ${parts.join(' · ')}.${reason}`;
+}
 
 export const MODERATION_STATE_LABELS: Record<string, string> = {
   PENDING: 'Pendiente',

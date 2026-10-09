@@ -47,11 +47,17 @@ function previousSince(database: DatabaseSync, accountId: string): string | null
   return row?.auto_hide_since ?? null;
 }
 
+/**
+ * Categories auto-hide may act on. AI categories only when the operator ticks them; `ai_complaint` (a legitimate
+ * complaint) is never allowed: it deserves an answer, not to be hidden.
+ */
+export const AUTO_HIDE_CATEGORIES = ['blocked_term', 'spam_link', 'spam_phone', 'spam_mentions', 'spam_emoji', 'ai_insult', 'ai_hate', 'ai_spam'] as const;
+
 export function updateSettings(database: DatabaseSync, accountId: string, input: ModerationSettingsInput, confirmed: boolean): void {
   const previous = getSettings(database, accountId);
   if (autoHideEscalates(previous, input) && confirmed !== true) throw new Error('confirmation_required');
   if (input.blockedTerms.length > 200) throw new TypeError('Too many blocked terms');
-  const VALID_CATEGORIES = new Set(['blocked_term', 'spam_link', 'spam_phone', 'spam_mentions', 'spam_emoji']);
+  const VALID_CATEGORIES = new Set<string>(AUTO_HIDE_CATEGORIES);
   for (const c of input.autoHideCategories) {
     if (!VALID_CATEGORIES.has(c)) throw new TypeError('invalid_category');
   }
@@ -102,7 +108,7 @@ export function updateSettings(database: DatabaseSync, accountId: string, input:
   );
 }
 
-export function listFlags(database: DatabaseSync, accountId: string, options: { state?: string, limit?: number, offset?: number }) {
+export function listFlags(database: DatabaseSync, accountId: string, options: { state?: string, source?: string, limit?: number, offset?: number }) {
   const limit = Math.min(100, Math.max(1, options.limit || 50));
   const offset = Math.max(0, options.offset || 0);
 
@@ -113,6 +119,11 @@ export function listFlags(database: DatabaseSync, accountId: string, options: { 
     if (!VALID_STATES.has(options.state)) throw new TypeError('invalid_request');
     where += ` AND f.state = ?`;
     params.push(options.state);
+  }
+  if (options.source) {
+    if (options.source !== 'rules' && options.source !== 'ai') throw new TypeError('invalid_request');
+    where += ` AND f.source = ?`;
+    params.push(options.source);
   }
 
   const countRow = database.prepare(`SELECT COUNT(*) as total FROM moderation_flags f WHERE ${where}`).get(...params) as { total: number };
@@ -131,7 +142,7 @@ export function listFlags(database: DatabaseSync, accountId: string, options: { 
   return {
     items: items.map(row => ({
       flagId: row.flag_id, accountId: row.account_id, mediaId: row.media_id, commentId: row.comment_id,
-      category: row.category, reasons: JSON.parse(row.reasons_json), state: row.state, lastAction: row.last_action,
+      category: row.category, source: row.source, reasons: JSON.parse(row.reasons_json), state: row.state, lastAction: row.last_action,
       safeErrorCode: row.safe_error_code, createdAt: row.created_at, updatedAt: row.updated_at,
       comment: { text: row.c_text, username: row.c_username, createdAt: row.c_created_at, parentId: row.c_parent_id },
       media: { permalink: row.m_permalink, thumbnailUrl: row.m_thumbnail_url, caption: row.m_caption?.slice(0, 100) }
@@ -302,6 +313,15 @@ export function recoverInterrupted(database: DatabaseSync): void {
   `).run(new Date().toISOString());
 }
 
+/**
+ * SQL expression with the julianday of a stored comment time, or NULL when it is not an ISO date-time. Meta writes
+ * `+0000`, which SQLite only parses as `+00:00`; a bare number such as '2026' would otherwise read as a julian day.
+ */
+export function commentTimeSql(column: string): string {
+  return `(CASE WHEN ${column} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*' THEN julianday(CASE WHEN ${column} LIKE '%+0000'
+    THEN substr(${column}, 1, length(${column}) - 5) || '+00:00' ELSE ${column} END) END)`;
+}
+
 export async function processAutoHide(database: DatabaseSync, provider: SocialProvider): Promise<void> {
   const isDryRun = database.prepare(`SELECT 1 FROM app_state WHERE state_key='dry_run' AND state_value='true'`).get();
   if (isDryRun) return;
@@ -315,9 +335,13 @@ export async function processAutoHide(database: DatabaseSync, provider: SocialPr
     SELECT f.flag_id, f.account_id
     FROM moderation_flags f
     JOIN moderation_settings s ON f.account_id = s.account_id
+    JOIN comments cm ON cm.account_id = f.account_id AND cm.comment_id = f.comment_id
     WHERE f.state = 'PENDING' AND s.enabled = 1 AND s.auto_hide_enabled = 1
-      AND s.auto_hide_since IS NOT NULL AND f.created_at >= s.auto_hide_since
+      -- Not retroactive by COMMENT date: only comments published after auto-hide was switched on (an AI review of old
+      -- comments creates new flags, but those comments stay suggestions). A flag without a stored comment never qualifies.
+      AND s.auto_hide_since IS NOT NULL AND ${commentTimeSql('cm.created_at')} >= julianday(s.auto_hide_since)
       AND (SELECT value FROM json_each(s.auto_hide_categories_json) WHERE value = f.category) IS NOT NULL
+      AND f.category <> 'ai_complaint'
       AND NOT EXISTS (SELECT 1 FROM account_send_holds h WHERE h.account_id = f.account_id)
       AND EXISTS (SELECT 1 FROM social_accounts a JOIN connections c ON a.connection_id = c.id WHERE a.account_id = f.account_id AND a.status = 'valid' AND a.monitoring_paused = 0 AND c.status = 'valid')
     ORDER BY f.created_at ASC

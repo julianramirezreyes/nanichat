@@ -58,7 +58,7 @@ test('moderation DB migration and actions', () => {
       INSERT OR REPLACE INTO app_state(state_key, state_value, updated_at) VALUES ('dry_run', 'false', '2026');
     `);
 
-    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 16);
+    assert.equal((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 17);
     db.exec(`INSERT INTO moderation_actions(action_id, flag_id, account_id, comment_id, action, actor, mode, outcome, created_at)
       VALUES ('a0', 'f0', 'acc1', 'c1', 'hide', 'operator', 'dry_run', 'simulated', '2026')`);
     assert.throws(() => db.exec(`UPDATE moderation_actions SET outcome='accepted' WHERE action_id='a0'`), /append-only/);
@@ -79,6 +79,8 @@ test('moderation DB migration and actions', () => {
       VALUES ('f1', 'acc1', 'm1', 'c1', 'spam_link', 'rules', '[]', 'PENDING', '${new Date(Date.now() + 1000).toISOString()}', '2026', 1);
     `);
 
+    // Auto-hide compares the comment date: c1 is published after auto-hide was switched on.
+    db.prepare(`UPDATE comments SET created_at=? WHERE comment_id='c1'`).run(new Date(Date.now() + 1000).toISOString());
     let hideCalled = 0;
     const provider: SocialProvider = {
       async setCommentHidden() { hideCalled++; return { status: 'accepted' }; },
@@ -292,8 +294,8 @@ test('processAutoHide head-of-line blocking and spacing', async () => {
       INSERT INTO social_accounts(account_id, connection_id, provider_account_id, username, normalized_username, status, created_at, updated_at)
         VALUES ('acc1', 'conn1', 'ig1', 'u1', 'u1', 'valid', '2026', '2026');
       INSERT INTO media(media_id, account_id, permalink, published_at, last_seen_at) VALUES ('m1', 'acc1', 'p', '2026', '2026');
-      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c1', 'acc1', 'm1', 't', 'u', '2026', '2026', '2026');
-      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c2', 'acc1', 'm1', 't', 'u', '2026', '2026', '2026');
+      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c1', 'acc1', 'm1', 't', 'u', '2026-01-01T00:00:00+0000', '2026', '2026');
+      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c2', 'acc1', 'm1', 't', 'u', '2026-01-01T00:00:00+0000', '2026', '2026');
       INSERT OR REPLACE INTO app_state(state_key, state_value, updated_at) VALUES ('dry_run', 'false', '2026');
       UPDATE social_accounts SET monitoring_paused=0;
       INSERT INTO moderation_settings(account_id, enabled, auto_hide_enabled, auto_hide_categories_json, auto_hide_since, updated_at)
@@ -322,7 +324,7 @@ test('processAutoHide head-of-line blocking and spacing', async () => {
 
     // Call 2: should do nothing because of 10s spacing
     db.exec(`
-      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c3', 'acc1', 'm1', 't', 'u', '2026', '2026', '2026');
+      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c3', 'acc1', 'm1', 't', 'u', '2026-01-01T00:00:00+0000', '2026', '2026');
       INSERT INTO moderation_flags(flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, created_at, updated_at, settings_version)
         VALUES ('f3', 'acc1', 'm1', 'c3', 'spam_link', 'rules', '[]', 'PENDING', '2026-01-03T00:00:00.000Z', '2026', 1);
     `);
@@ -418,7 +420,7 @@ test('provider: fake fetch HTTP mapping for moderation', async () => {
       INSERT INTO social_accounts(account_id, connection_id, provider_account_id, username, normalized_username, status, created_at, updated_at)
         VALUES ('acc1', 'conn1', 'ig1', 'u1', 'u1', 'valid', '2026', '2026');
       INSERT INTO media(media_id, account_id, permalink, published_at, last_seen_at) VALUES ('m1', 'acc1', 'p', '2026', '2026');
-      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c1', 'acc1', 'm1', 't', 'u', '2026', '2026', '2026');
+      INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at) VALUES ('c1', 'acc1', 'm1', 't', 'u', '2026-01-01T00:00:00+0000', '2026', '2026');
     `);
 
     let responseStatus = 200;

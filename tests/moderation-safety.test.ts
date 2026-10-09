@@ -43,8 +43,9 @@ function seed(db: DatabaseSync, options: { dryRun?: boolean; flags?: FlagSeed[] 
     const account = flag.account ?? 'acc1';
     const media = account === 'acc1' ? 'm1' : 'm2';
     const commentId = `c_${flag.id}`;
+    // Auto-hide compares the COMMENT date: the seeded comment is published when its flag was created.
     db.prepare(`INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at)
-      VALUES (?, ?, ?, 'text', 'commenter', '2026', '2026', '2026')`).run(commentId, account, media);
+      VALUES (?, ?, ?, 'text', 'commenter', ?, '2026', '2026')`).run(commentId, account, media, flag.createdAt ?? '2026-01-01T00:00:00.000Z');
     db.prepare(`INSERT INTO moderation_flags(flag_id, account_id, media_id, comment_id, category, source, reasons_json, state,
       created_at, updated_at, settings_version) VALUES (?, ?, ?, ?, ?, 'rules', '[]', ?, ?, '2026', 1)`)
       .run(flag.id, account, media, commentId, flag.category ?? 'spam_link', flag.state ?? 'PENDING', flag.createdAt ?? '2026-01-01T00:00:00.000Z');
@@ -437,11 +438,14 @@ test('Docs: README, REFERENCIA-TECNICA and AGENTS describe the moderation rules'
   assert.match(readme, /Nada se borra nunca automáticamente/);
   const reference = read('../docs/REFERENCIA-TECNICA.md');
   for (const fragment of ['nada se borra nunca automáticamente', 'not_attempted', 'confirmation_required', 'account_invalid_or_held',
-    '7 o más dígitos', '3 o más', '10 s', 'DELETE /{comment-id}', 'transmisiones en vivo', 'Esquema (v16)', 'moderation_rate_limited']) {
+    '7 o más dígitos', '3 o más', '10 s', 'DELETE /{comment-id}', 'transmisiones en vivo', 'Esquema (v16, ampliado en v17)', 'moderation_rate_limited',
+    '### Revisión con IA', 'x-goog-api-key', 'ai_rate_limited', 'ai_job_running', 'moderation_ai_jobs', 'confirmed: true']) {
     assert.ok(reference.includes(fragment), fragment);
   }
   const agents = read('../AGENTS.md');
-  assert.match(agents, /esquema v1\.\.v16/);
+  assert.match(agents, /esquema v1\.\.v17/);
+  assert.match(agents, /moderation-ai/);
+  assert.match(readme, /### Revisión con IA/);
   assert.match(agents, /moderation-rules/);
 });
 
@@ -479,7 +483,7 @@ test('R4-2: auto-hide never acts on an account whose monitoring is paused', asyn
   });
 });
 
-test('R4-3: auto-hide is not retroactive (only flags created since it was enabled)', async () => {
+test('R4-3: auto-hide is not retroactive (only comments published since it was enabled)', async () => {
   await withDb(async (db) => {
     const before = new Date(Date.now() - 60_000).toISOString();
     seed(db, { flags: [{ id: 'old', createdAt: before }] });
@@ -496,7 +500,7 @@ test('R4-3: auto-hide is not retroactive (only flags created since it was enable
     assert.equal(state(db, 'old'), 'PENDING');
 
     db.prepare(`INSERT INTO comments(comment_id, account_id, media_id, text, username, created_at, first_seen_at, last_seen_at)
-      VALUES ('c_new', 'acc1', 'm1', 'text', 'commenter', '2026', '2026', '2026')`).run();
+      VALUES ('c_new', 'acc1', 'm1', 'text', 'commenter', ?, '2026', '2026')`).run(new Date(Date.now() + 1000).toISOString());
     db.prepare(`INSERT INTO moderation_flags(flag_id, account_id, media_id, comment_id, category, source, reasons_json, state, created_at, updated_at, settings_version)
       VALUES ('new', 'acc1', 'm1', 'c_new', 'spam_link', 'rules', '[]', 'PENDING', ?, '2026', 1)`).run(new Date(Date.now() + 1000).toISOString());
     await moderation.processAutoHide(db, provider);
@@ -509,7 +513,7 @@ test('R4-3: auto-hide is not retroactive (only flags created since it was enable
 
 test('R4-3: the auto-hide confirmation says it only applies from now on', () => {
   const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
-  assert.ok(page.includes('Solo se aplica a comentarios marcados desde ahora.'));
+  assert.ok(page.includes('Solo se aplica a comentarios publicados desde ahora.'));
 });
 
 test('R4-4: single and bulk dismiss write an audit row', async () => {

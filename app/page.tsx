@@ -3,7 +3,7 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { autoSelectAccount } from './account-filter';
 import { mediaLabel, mediaTypeLabel, shortCaption, shortId } from './media-label';
-import { availableActions, bulkAllowed, bulkSummary, categoryLabel, reasonsText, stateLabel as moderationStateLabel, type BulkResultView } from './moderation-labels';
+import { AI_COMPLAINT_HINT, AI_ERROR_LABELS, AI_PRIVACY_NOTICE, AI_WINDOW_LABELS, AUTO_HIDE_OPTIONS, aiJobSummary, aiProgressPercent, aiProgressText, availableActions, bulkAllowed, bulkSummary, categoryLabel, reasonsText, stateLabel as moderationStateLabel, type BulkResultView } from './moderation-labels';
 import { autoPickAutomation, describeQueuePayload, type PendingItem, type PendingPage } from './pending-review';
 import { GENERAL_MEDIA_OPTION, automationTargetLabel, automationTargetPayload } from './automation-scope';
 import { deriveOnboarding, showOnboarding as shouldShowOnboarding } from './onboarding';
@@ -15,7 +15,7 @@ import { ATTACHMENT_ERROR_LABELS, attachmentErrorHint, attachmentPartStateLabel,
 import {
   FOLLOW_GATE_RETIRED_LABEL, MEDIA_LINK_TIP, followGateErrorHint, followGateEventLabel, followGateStateLabel, showFollowGateDetail,
 } from './follow-gate';
-import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff } from 'lucide-react';
+import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff, Sparkles, KeyRound } from 'lucide-react';
 import { PUBLIC_REPLY_SAMPLE_USERNAME, describePublicReply, parseVariantLines, previewExamples, publicReplyErrorHint, type PublicReplyDto, variantCountLabel } from './public-reply';
 
 type Account = { accountId: string; connectionId: string; username: string; status: string; monitoringPaused: boolean; sendHoldReason?: string | null; last_sync?: string; last_error?: string; coverage?: string };
@@ -798,7 +798,7 @@ function ConnectionBadge({ status }: { status: string }) {
 }
 function Empty({ title, detail, action, actionLabel, primary }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean }) { return <div className="empty-state"><div className="empty-icon"><Circle size={24} strokeWidth={2} aria-hidden="true" /></div><strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }); }
-function safeErrorLabel(code: string) { const labels: Record<string, string> = { account_not_found: 'La cuenta indicada no existe.', connection_not_found: 'La conexión indicada no existe.', invalid_request: 'Revise los campos e inténtelo de nuevo.', origin_or_csrf_rejected: 'La solicitud local no superó la protección de origen.', operation_rejected: 'La operación fue rechazada por una condición de seguridad o estado.', account_scan_failed: 'No se pudo completar el análisis para una cuenta.', follow_gate_invalid: 'La opción «Pedir primero que me sigan» no es válida.', follow_gate_message_invalid: 'Revise el «Mensaje previo»: es obligatorio, de hasta 640 caracteres y solo admite las variables indicadas.', follow_gate_button_title_invalid: 'Revise el «Título del botón»: de 1 a 20 caracteres, sin enlaces ni saltos de línea.', follow_gate_retired: FOLLOW_GATE_RETIRED_LABEL, interactive_mode_retired: INTERACTIVE_RETIRED_LABEL, ...ATTACHMENT_ERROR_LABELS }; return labels[code] ?? 'Revise el estado de la cuenta y vuelva a intentarlo.'; }
+function safeErrorLabel(code: string) { const labels: Record<string, string> = { account_not_found: 'La cuenta indicada no existe.', connection_not_found: 'La conexión indicada no existe.', invalid_request: 'Revise los campos e inténtelo de nuevo.', origin_or_csrf_rejected: 'La solicitud local no superó la protección de origen.', operation_rejected: 'La operación fue rechazada por una condición de seguridad o estado.', account_scan_failed: 'No se pudo completar el análisis para una cuenta.', follow_gate_invalid: 'La opción «Pedir primero que me sigan» no es válida.', follow_gate_message_invalid: 'Revise el «Mensaje previo»: es obligatorio, de hasta 640 caracteres y solo admite las variables indicadas.', follow_gate_button_title_invalid: 'Revise el «Título del botón»: de 1 a 20 caracteres, sin enlaces ni saltos de línea.', follow_gate_retired: FOLLOW_GATE_RETIRED_LABEL, interactive_mode_retired: INTERACTIVE_RETIRED_LABEL, ...ATTACHMENT_ERROR_LABELS, ...AI_ERROR_LABELS }; return labels[code] ?? 'Revise el estado de la cuenta y vuelva a intentarlo.'; }
 
 export function ModerationView({ accountFilter, allAccounts, onSelectAccount, onNavigate, api, act, confirm, mode }: { accountFilter: string; allAccounts: any[]; onSelectAccount: (id: string) => void; onNavigate: (id: string) => void; api: any; act: any; confirm: any; mode: string }) {
   const [settings, setSettings] = useState<any>(null);
@@ -806,6 +806,7 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [flagState, setFlagState] = useState('all');
+  const [flagSource, setFlagSource] = useState('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
   // Form fields
@@ -841,6 +842,7 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
     try {
       const query = new URLSearchParams({ accountId: accountFilter, limit: '50', offset: String(offset) });
       if (flagState !== 'all') query.set('state', flagState);
+      if (flagSource !== 'all') query.set('source', flagSource);
       const data = await api(`/api/moderation/flags?${query}`);
       setFlags(data.items);
       setTotal(data.total);
@@ -848,7 +850,13 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
     } catch {
       // Ignored
     }
-  }, [api, accountFilter, offset, flagState]);
+  }, [api, accountFilter, offset, flagState, flagSource]);
+
+  function showAiFlags() {
+    setFlagSource('ai');
+    setFlagState('PENDING');
+    setOffset(0);
+  }
 
   useEffect(() => {
     loadSettings();
@@ -863,7 +871,7 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
     const autoHideEscalates = autoHideEnabled && (!settings?.autoHideEnabled
       || autoHideCategories.some((category) => !(settings?.autoHideCategories ?? []).includes(category)));
     if (autoHideEscalates) {
-      if (!(await confirm({ title: 'Ocultar automáticamente', body: 'Los comentarios marcados en estas categorías se ocultarán solos cuando el modo real esté activo. Solo se aplica a comentarios marcados desde ahora. Nunca se borran solos.', confirmLabel: 'Autorizar' }))) {
+      if (!(await confirm({ title: 'Ocultar automáticamente', body: 'Los comentarios marcados en estas categorías se ocultarán solos cuando el modo real esté activo. Solo se aplica a comentarios publicados desde ahora. Nunca se borran solos.', confirmLabel: 'Autorizar' }))) {
         if (!settings?.autoHideEnabled) setAutoHideEnabled(false);
         return;
       }
@@ -999,11 +1007,8 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
               <span className="toggle-row-text"><strong>Ocultar automáticamente</strong><span>Solo con el modo real activo. Nunca se borra nada solo.</span></span>
             </label>
             {enabled && autoHideEnabled && <div className="mod-auto-cats">
-              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('blocked_term')} onChange={() => toggleAutoCategory('blocked_term')} /> Palabras prohibidas</label>
-              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_link')} onChange={() => toggleAutoCategory('spam_link')} /> Enlaces</label>
-              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_phone')} onChange={() => toggleAutoCategory('spam_phone')} /> Teléfonos</label>
-              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_mentions')} onChange={() => toggleAutoCategory('spam_mentions')} /> Menciones</label>
-              <label className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes('spam_emoji')} onChange={() => toggleAutoCategory('spam_emoji')} /> Emojis</label>
+              {AUTO_HIDE_OPTIONS.map((option) => <label key={option.value} className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes(option.value)} onChange={() => toggleAutoCategory(option.value)} /> {option.label}</label>)}
+              <p className="hint mod-auto-note">Las categorías «(IA)» vienen de la revisión con IA. IA puede equivocarse: active estas solo si revisó varios resultados. Las quejas legítimas nunca se ocultan solas.</p>
             </div>}
           </div>
         </div>
@@ -1011,6 +1016,7 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
           <button className="btn-main" type="submit">Guardar reglas</button>
         </div>
       </form>
+      <AiReviewPanel key={accountFilter} accountId={accountFilter} api={api} act={act} confirm={confirm} onShowAiFlags={showAiFlags} onFlagsChanged={loadFlags} />
     </div>
     <div>
       <div className="panel mod-flags">
@@ -1035,6 +1041,11 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
             <option value="DISMISSED">Descartados</option>
             <option value="DELETED">Borrados</option>
             <option value="VISIBLE">Visibles</option>
+          </select>
+          <select value={flagSource} aria-label="Origen de la marca" onChange={e => { setFlagSource(e.target.value); setOffset(0); }}>
+            <option value="all">Todas</option>
+            <option value="rules">Reglas</option>
+            <option value="ai">IA</option>
           </select>
           <button className="btn icon-only" onClick={() => loadFlags()} title="Actualizar" aria-label="Actualizar"><RefreshCw size={16} /></button>
         </div>
@@ -1063,11 +1074,13 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
                   </div>
                   <p className="comment-clamp">{flag.comment?.text}</p>
                   <div className="mod-row-meta">
+                    {flag.source === 'ai' && <span className="ai-chip"><Sparkles size={12} aria-hidden="true" /> IA</span>}
                     <span className="kw-chip">{categoryLabel(flag.category)}</span>
                     <span className="muted text-small">{reasonsText(flag.reasons)}</span>
                     <Status value={moderationStateLabel(flag.state)} tone={flag.state === 'PENDING' ? 'warn' : flag.state === 'HIDDEN' || flag.state === 'DELETED' || flag.state === 'DISMISSED' ? 'good' : flag.state === 'SIMULATED' ? 'neutral' : 'danger'} />
                     {flag.safeErrorCode && <span className="muted text-small">({flag.safeErrorCode})</span>}
                   </div>
+                  {flag.category === 'ai_complaint' && <p className="ai-complaint-hint">{AI_COMPLAINT_HINT}</p>}
                 </div>
                 {(() => { const allowed = availableActions(flag.state); return <div className="row-actions mod-row-actions">
                   {allowed.unhide && <button className="btn small" onClick={() => unhideFlag(flag.flagId)} title="Mostrar" aria-label="Mostrar"><Eye size={16} /> Mostrar</button>}
@@ -1088,4 +1101,172 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
       </div>
     </div>
   </div>;
+}
+
+type AiJobView = { state: string; errorCode?: string; progress?: { chunksDone: number; chunksTotal: number; commentsSent: number; flagged: number; invalidOutput: number; chunksFailed?: number; commentsTotal?: number; truncated?: boolean } };
+
+/** "Revisión con IA": engine selector (off by default), Gemini key/model, privacy notice and the batch review job. */
+function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsChanged }: { accountId: string; api: Api; act: Act; confirm: Confirm; onShowAiFlags(): void; onFlagsChanged(): void }) {
+  const [settings, setSettings] = useState<{ engine: string; model: string; hasApiKey: boolean; apiKeyHint: string | null; consentAt: string | null; availableModels: string[] } | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [reviewWindow, setReviewWindow] = useState('7d');
+  const [job, setJob] = useState<AiJobView | null>(null);
+  const [testMessage, setTestMessage] = useState('');
+  const wasRunning = useRef(false);
+
+  const loadAll = useCallback(async () => {
+    try {
+      const [nextSettings, nextJob] = await Promise.all([
+        api(`/api/moderation/ai-settings?accountId=${encodeURIComponent(accountId)}`),
+        api(`/api/moderation/ai-review?accountId=${encodeURIComponent(accountId)}`),
+      ]);
+      setSettings(nextSettings);
+      setJob(nextJob?.state && nextJob.state !== 'idle' ? nextJob : null);
+    } catch {
+      // The panel stays in its last known state.
+    }
+  }, [api, accountId]);
+
+  useEffect(() => { void loadAll(); }, [loadAll]);
+
+  const running = job?.state === 'running';
+  useEffect(() => {
+    if (!running) {
+      if (wasRunning.current) onFlagsChanged();
+      wasRunning.current = false;
+      return;
+    }
+    wasRunning.current = true;
+    const timer = setInterval(async () => {
+      try { setJob(await api(`/api/moderation/ai-review?accountId=${encodeURIComponent(accountId)}`)); } catch { /* keep polling */ }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [running, api, accountId, onFlagsChanged]);
+
+  async function chooseEngine(engine: string) {
+    if (!settings || engine === settings.engine) return;
+    let confirmed = false;
+    if (engine === 'gemini' && !settings.consentAt) {
+      if (!(await confirm({ title: 'Activar revisión con Gemini', body: AI_PRIVACY_NOTICE, confirmLabel: 'Entiendo, activar' }))) return;
+      confirmed = true;
+    }
+    await act(async () => {
+      setSettings(await api('/api/moderation/ai-settings', 'PUT', { accountId, engine, confirmed }));
+    }, engine === 'off' ? 'Revisión con IA desactivada.' : 'Revisión con Gemini activada.');
+  }
+
+  async function saveKey(event: FormEvent) {
+    event.preventDefault();
+    if (!settings || !apiKey.trim()) return;
+    const ok = await act(async () => {
+      setSettings(await api('/api/moderation/ai-settings', 'PUT', { accountId, engine: settings.engine, apiKey: apiKey.trim() }));
+    }, 'API key guardada (cifrada en este equipo).');
+    if (ok) { setApiKey(''); setTestMessage(''); }
+  }
+
+  async function removeKey() {
+    if (!settings) return;
+    if (!(await confirm({ title: 'Borrar API key', body: 'Se borrará la API key guardada para esta cuenta.', confirmLabel: 'Borrar', danger: true }))) return;
+    await act(async () => {
+      setSettings(await api('/api/moderation/ai-settings', 'PUT', { accountId, engine: settings.engine, apiKey: '' }));
+    }, 'API key borrada.');
+  }
+
+  async function chooseModel(model: string) {
+    if (!settings) return;
+    await act(async () => {
+      setSettings(await api('/api/moderation/ai-settings', 'PUT', { accountId, engine: settings.engine, model }));
+    }, 'Modelo guardado.');
+  }
+
+  async function testKey() {
+    setTestMessage('Probando…');
+    try {
+      const result = await api('/api/moderation/ai-settings/test', 'POST', { accountId });
+      setTestMessage(result.ok ? 'La key funciona.' : (AI_ERROR_LABELS[result.errorCode] ?? 'La key no funcionó.'));
+    } catch (cause) {
+      setTestMessage(AI_ERROR_LABELS[cause instanceof Error ? cause.message : ''] ?? 'No se pudo probar la key.');
+    }
+  }
+
+  async function startReview() {
+    await act(async () => {
+      setJob(await api('/api/moderation/ai-review', 'POST', { accountId, window: reviewWindow }));
+    }, 'Revisión con IA iniciada.');
+  }
+
+  async function stopReview() {
+    await act(async () => {
+      setJob(await api('/api/moderation/ai-review/stop', 'POST', { accountId }));
+    }, 'Deteniendo la revisión…');
+  }
+
+  const engine = settings?.engine ?? 'off';
+  const canReview = engine === 'gemini' && Boolean(settings?.hasApiKey) && !running;
+  const disabledHint = engine === 'off' ? 'Active la revisión con IA para usar este botón.'
+    : !settings?.hasApiKey ? 'Guarde una API key de Gemini antes de revisar.' : '';
+  const engines: Array<{ value: string; label: string; disabled?: boolean }> = [
+    { value: 'off', label: 'Desactivada' },
+    { value: 'gemini', label: 'Gemini' },
+    { value: 'local', label: 'Modelo local (próximamente)', disabled: true },
+  ];
+
+  return <section className="panel ai-panel" aria-labelledby="ai-review-title">
+    <div className="panel-heading">
+      <div>
+        <h3 id="ai-review-title"><Sparkles size={18} aria-hidden="true" /> Revisión con IA</h3>
+        <p className="muted">Marca insultos, odio, spam y quejas. Solo marca: ocultar o borrar sigue siendo su decisión.</p>
+      </div>
+    </div>
+    <div className="ai-engines" role="radiogroup" aria-label="Motor de IA">
+      {engines.map((option) => <button key={option.value} type="button" role="radio" aria-checked={engine === option.value} disabled={option.disabled || !settings || running}
+        className={engine === option.value ? 'ai-engine active' : 'ai-engine'} onClick={() => chooseEngine(option.value)}>{option.label}</button>)}
+    </div>
+    {running && <p className="hint ai-engine-locked">Detenga la revisión para cambiar el motor.</p>}
+    <p className="ai-privacy" role="note">{AI_PRIVACY_NOTICE}</p>
+    {engine === 'gemini' && settings && <div className="ai-gemini">
+      <form className="ai-key-row" onSubmit={saveKey}>
+        <Field label="API key de Gemini">
+          <input type="password" autoComplete="off" spellCheck={false} value={apiKey} onChange={(event) => setApiKey(event.target.value)}
+            placeholder={settings.hasApiKey ? `Guardada (${settings.apiKeyHint ?? '…'})` : 'Pegue aquí su API key'} />
+        </Field>
+        <div className="ai-key-actions">
+          <button className="btn small" type="submit" disabled={!apiKey.trim()}><KeyRound size={14} aria-hidden="true" /> Guardar key</button>
+          <button className="btn small" type="button" disabled={!settings.hasApiKey} onClick={testKey}>Probar key</button>
+          {settings.hasApiKey && <button className="btn-link" type="button" onClick={removeKey} disabled={running}>Borrar key</button>}
+        </div>
+      </form>
+      <p className="hint"><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer">Obtener una key gratis</a> en Google AI Studio. La key se guarda cifrada en este equipo y nunca se muestra completa; pegue otra para reemplazarla.</p>
+      {testMessage && <p className="hint" role="status">{testMessage}</p>}
+      <Field label="Modelo">
+        <select value={settings.model} onChange={(event) => chooseModel(event.target.value)}>
+          {settings.availableModels.map((model) => <option key={model} value={model}>{model}</option>)}
+        </select>
+      </Field>
+    </div>}
+    <div className="ai-run">
+      <button className="btn-main" type="button" disabled={!canReview} onClick={startReview}><Sparkles size={16} aria-hidden="true" /> Revisar comentarios negativos</button>
+      <label className="ai-window">
+        <span>Comentarios de</span>
+        <select value={reviewWindow} onChange={(event) => setReviewWindow(event.target.value)} disabled={running}>
+          {Object.entries(AI_WINDOW_LABELS).map(([value, label]) => <option key={value} value={value}>Últimos {label}</option>)}
+        </select>
+      </label>
+    </div>
+    {!canReview && !running && disabledHint && <p className="hint">{disabledHint}</p>}
+    {running && job?.progress && <div className="scan-progress">
+      <div className="progress-track" role="progressbar" aria-label="Progreso de la revisión con IA" aria-valuemin={0} aria-valuemax={100} aria-valuenow={aiProgressPercent(job.progress)} aria-valuetext={aiProgressText(job.progress)}>
+        <div className="progress-fill" style={{ width: `${aiProgressPercent(job.progress)}%` }} />
+      </div>
+      <div className="ai-progress-row">
+        <p className="progress-text"><strong>{aiProgressText(job.progress)}</strong></p>
+        <button className="btn small" type="button" onClick={stopReview}><Pause size={14} aria-hidden="true" /> Detener</button>
+      </div>
+      <p className="hint">Se envía un lote cada pocos segundos para respetar el límite gratuito.</p>
+    </div>}
+    {job && !running && job.progress && <div className="ai-summary">
+      <p>{aiJobSummary({ state: job.state, errorCode: job.errorCode, progress: job.progress })}</p>
+      {job.progress.flagged > 0 && <button className="btn small" type="button" onClick={onShowAiFlags}>Ver solo los marcados por IA</button>}
+    </div>}
+  </section>;
 }

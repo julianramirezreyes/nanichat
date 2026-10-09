@@ -41,7 +41,7 @@ scripts/start.mjs            Arranque de producción portable (NODE_ENV=producti
 src/core/                    config.ts (variables de entorno), application-lock.ts (una instancia por carpeta,
                              sonda de plataforma inyectable: kill(pid, 0) en todos los sistemas, /proc en Linux),
                              domain.ts (tipos compartidos), errors.ts.
-src/db/                      database.ts (SQLite, WAL, foreign keys), migrations.ts (esquema v1..v16),
+src/db/                      database.ts (SQLite, WAL, foreign keys), migrations.ts (esquema v1..v17),
                              repositories.ts (consultas compartidas).
 src/security/                vault.ts (AES-256-GCM, vault.key), redact.ts (borra secretos de textos),
                              env-import.ts (importación explícita del .env de SOCIAL_DESK_IMPORT_ENV_PATH).
@@ -52,7 +52,9 @@ src/services/                connections, automations (clasificación y plantill
                              follow-gate + follow-gate-rules («Pedir que me sigan», RETIRADO: código inactivo detrás de
                              FOLLOW_GATE_AVAILABLE = false), resource-attachment (adjunto del recurso, RETIRADO e inactivo),
                              moderation-rules (clasificación pura de comentarios para moderar) + moderation (marcas,
-                             ocultar/mostrar/borrar con intención durable, acciones masivas y auto-ocultar solo en modo real).
+                             ocultar/mostrar/borrar con intención durable, acciones masivas y auto-ocultar solo en modo real),
+                             moderation-ai + moderation-ai-gemini + moderation-ai-prompt + moderation-ai-engine (revisión con IA:
+                             desactivada por defecto, key de Gemini cifrada, lotes que solo crean marcas, nunca llaman a Meta).
 src/http/router.ts           API JSON /api/*: guardas de host, origen y CSRF; DTOs con campos permitidos.
 app/                         Interfaz Next.js (page.tsx) y funciones puras de presentación con pruebas propias.
 tests/                       Pruebas node:test (bases de datos temporales, proveedores simulados).

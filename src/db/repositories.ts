@@ -116,7 +116,11 @@ export function listEncryptedCredentials(database: DatabaseSync): StoredEncrypte
     UNION ALL
     SELECT 'account:' || account_id AS context_id, page_token_nonce AS nonce,
       page_token_ciphertext AS ciphertext, page_token_tag AS tag
-    FROM social_accounts WHERE page_token_ciphertext IS NOT NULL`).all().map((row) => {
+    FROM social_accounts WHERE page_token_ciphertext IS NOT NULL
+    UNION ALL
+    SELECT 'moderation-ai:gemini:' || account_id AS context_id, api_key_nonce AS nonce,
+      api_key_ciphertext AS ciphertext, api_key_tag AS tag
+    FROM moderation_ai_settings WHERE api_key_ciphertext IS NOT NULL`).all().map((row) => {
     const credential = row as { context_id: string; nonce: string; ciphertext: string; tag: string };
     return {
       contextId: credential.context_id,

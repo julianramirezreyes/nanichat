@@ -138,7 +138,7 @@ test('migration v12 -> v13 adds follow gate columns and tables, preserving queue
         VALUES ('q1','acc','c1','a1','SENT',0,'{"text":"x"}','2026','2026','PENDING','Listo @u');
       INSERT INTO comment_classifications(account_id, comment_id, automation_id, result, reason, observed_at) VALUES ('acc','c1','a1','eligible','eligible','2026');`);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 16);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 17);
     assert.equal(one(db, 'PRAGMA foreign_keys').foreign_keys, 1);
     const automation = one(db, `SELECT * FROM automations WHERE automation_id='a1'`);
     assert.deepEqual([automation.follow_gate_enabled, automation.follow_gate_message, automation.follow_gate_button_title], [0, '', 'Ya te sigo']);
@@ -163,7 +163,7 @@ test('migration v12 -> v13 adds follow gate columns and tables, preserving queue
     assert.throws(() => db.exec(`UPDATE gate_events SET event_type='expired'`), /append-only/);
     assert.throws(() => db.exec(`DELETE FROM gate_events`), /append-only/);
     migrateDatabase(db);
-    assert.equal(one(db, 'PRAGMA user_version').user_version, 16);
+    assert.equal(one(db, 'PRAGMA user_version').user_version, 17);
   }, 12);
 });
 
