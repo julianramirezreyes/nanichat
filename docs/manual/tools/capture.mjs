@@ -456,8 +456,9 @@ async function phaseB(browser) {
   // 17-19 Mode: Dry Run, confirmation dialog, real mode, and back
   await browser.nav('Resumen');
   await browser.settle();
-  const header = await browser.eval(`(() => { const b = document.querySelector('.mode-banner').getBoundingClientRect(); const s = { right: 0 }; return { x: Math.round(s.right), bottom: Math.ceil(b.bottom) + 14 }; })()`);
-  const headerClip = { x: header.x, y: 0, width: VIEW_W - header.x, height: header.bottom };
+  // The mode shows in two places: the strip under the topbar and the mode button at the foot of the sidebar.
+  const header = await browser.eval(`(() => { const b = document.querySelector('.mode-banner').getBoundingClientRect(); const m = document.querySelector('.mode-block').getBoundingClientRect(); return { bottom: Math.min(innerHeight, Math.ceil(Math.max(b.bottom, m.bottom)) + 12) }; })()`);
+  const headerClip = { x: 0, y: 0, width: VIEW_W, height: header.bottom };
   await browser.shot('17-mode-dryrun-banner', { fit: false, clip: headerClip });
 
   await browser.click('button.mode-pill', 'Dry Run · Activo');

@@ -573,7 +573,7 @@ Códigos de error: 400 `confirmation_required`, `blocked_term_invalid` o `invali
 
 ### Revisión con IA
 
-Botón «Revisar comentarios negativos» en la pestaña «Moderación» (panel «Revisión con IA», entre las reglas y los comentarios marcados). **Desactivada por defecto.** Solo **crea marcas**: nunca llama a Meta; ocultar, borrar o descartar siguen siendo las acciones de arriba.
+Botón «Revisar comentarios negativos» en la barra superior de la sección «Moderación»; el motor, la key y los modelos se eligen en la pestaña «IA» del panel izquierdo, y el periodo, el progreso y el resumen aparecen sobre la lista de comentarios marcados. **Desactivada por defecto.** Solo **crea marcas**: nunca llama a Meta; ocultar, borrar o descartar siguen siendo las acciones de arriba.
 
 - **Motores:** `off` (por defecto), `gemini` (API key gratuita de Google AI Studio de la persona) y `local` (modelo que corre dentro de este proceso; ver [Modelo local](#modelo-local)). Cambiar de motor conserva la key y el modelo de Gemini.
 - **Privacidad:** antes de activar Gemini la interfaz muestra este aviso, que también queda junto al selector (salvo con el modelo local, que muestra «Todo se procesa en este equipo; ningún comentario sale de él.»), y la API exige `confirmed: true` (estricto) la primera vez: «Con la API gratuita, Google puede usar el contenido enviado para mejorar sus productos. Los comentarios de sus clientes saldrán de este equipo. Para que nada salga del equipo use el modelo local.» Se guarda `consent_at`.

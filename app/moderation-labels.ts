@@ -263,3 +263,25 @@ export function aiReviewGate(input: { savedEngine: string; localPicked: boolean;
   }
   return { canReview: false, hint: 'Active la revisión con IA para usar este botón.' };
 }
+
+export type ShortcutInput = {
+  key: string; repeat: boolean; modifier: boolean; typing: boolean; dialogOpen: boolean;
+  accountFilter: string; selectedId: string; visibleIds: readonly string[]; state: string;
+  busy: boolean; narrow: boolean; sheetOpen: boolean;
+};
+
+/**
+ * Moderation keyboard shortcuts (H hides, D dismisses). They act only on a flag the operator selected explicitly,
+ * that is still in the visible list of a single account, never while typing, with a dialog open, on key repeat, while
+ * an action for that row is in flight, or (on narrow screens) while the detail sheet is closed.
+ */
+export function shouldHandleShortcut(input: ShortcutInput): 'hide' | 'dismiss' | null {
+  if (input.repeat || input.modifier || input.typing || input.dialogOpen || input.busy) return null;
+  if (input.accountFilter === 'all' || !input.selectedId || !input.visibleIds.includes(input.selectedId)) return null;
+  if (input.narrow && !input.sheetOpen) return null;
+  const key = input.key.toLowerCase();
+  const allowed = availableActions(input.state);
+  if (key === 'h' && allowed.hide) return 'hide';
+  if (key === 'd' && allowed.dismiss) return 'dismiss';
+  return null;
+}

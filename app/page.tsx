@@ -1,9 +1,9 @@
 'use client';
 
-import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { autoSelectAccount } from './account-filter';
 import { mediaLabel, mediaTypeLabel, shortCaption, shortId } from './media-label';
-import { AI_COMPLAINT_HINT, AI_ERROR_LABELS, AI_LOCAL_PRIVACY_NOTE, AI_LOCAL_RESOURCE_NOTE, AI_PRIVACY_NOTICE, AI_WINDOW_LABELS, LOCAL_MODEL_INFO, aiReviewGate, localModelCardState, type DownloadView, type LocalModelEntryView, AUTO_HIDE_OPTIONS, aiJobSummary, aiProgressPercent, aiProgressText, availableActions, bulkAllowed, bulkSummary, categoryLabel, reasonsText, stateLabel as moderationStateLabel, type BulkResultView } from './moderation-labels';
+import { shouldHandleShortcut, AI_COMPLAINT_HINT, AI_ERROR_LABELS, AI_LOCAL_PRIVACY_NOTE, AI_LOCAL_RESOURCE_NOTE, AI_PRIVACY_NOTICE, AI_WINDOW_LABELS, LOCAL_MODEL_INFO, aiReviewGate, localModelCardState, type DownloadView, type LocalModelEntryView, AUTO_HIDE_OPTIONS, aiJobSummary, aiProgressPercent, aiProgressText, availableActions, bulkAllowed, bulkSummary, categoryLabel, reasonsText, stateLabel as moderationStateLabel, type BulkResultView } from './moderation-labels';
 import { autoPickAutomation, describeQueuePayload, type PendingItem, type PendingPage } from './pending-review';
 import { GENERAL_MEDIA_OPTION, automationTargetLabel, automationTargetPayload } from './automation-scope';
 import { deriveOnboarding, showOnboarding as shouldShowOnboarding } from './onboarding';
@@ -15,7 +15,8 @@ import { ATTACHMENT_ERROR_LABELS, attachmentErrorHint, attachmentPartStateLabel,
 import {
   FOLLOW_GATE_RETIRED_LABEL, MEDIA_LINK_TIP, followGateErrorHint, followGateEventLabel, followGateStateLabel, showFollowGateDetail,
 } from './follow-gate';
-import { LayoutDashboard, PlugZap, Images, Zap, Radar, Inbox, History, Settings, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff, Sparkles, KeyRound, Download, Cpu } from 'lucide-react';
+import { House, Plug, PlugZap, Images, Zap, Radio, Inbox, History, Settings2, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff, Sparkles, KeyRound, Download, Cpu, ChevronsUpDown, FlaskConical, MessageCircleHeart, Menu, X, Siren, ArrowRight, Send, Clock, Flag, Check, ScanEye, Undo2, ListFilter, FileDown, Lock, Rocket, ArrowLeft, BellDot, Users } from 'lucide-react';
+import { AiRowSlot, PageActions, SlotContext } from './components/slots';
 import { PUBLIC_REPLY_SAMPLE_USERNAME, describePublicReply, parseVariantLines, previewExamples, publicReplyErrorHint, type PublicReplyDto, variantCountLabel } from './public-reply';
 
 type Account = { accountId: string; connectionId: string; username: string; status: string; monitoringPaused: boolean; sendHoldReason?: string | null; last_sync?: string; last_error?: string; coverage?: string };
@@ -28,7 +29,9 @@ type AttachmentDto = { kind: string; url: string };
 type PartDto = { state: string; safeErrorCode: string | null; attempts: number };
 type FollowGateSession = { state: string; buttonTitle: string | null; gateSentAt: string | null; tapAt: string | null; windowExpiresAt: string | null; nextPollAt: string | null; pollCount: number; resourceMessageId: string | null; lastErrorCode: string | null; attachment?: AttachmentDto; parts?: { attachment: PartDto; text: PartDto } };
 type QueueItem = { id: string; accountId: string; username: string; commentId: string; commentUsername?: string | null; commentText?: string; payload?: { text?: string; buttons?: Array<{ title: string; url: string }>; followGate?: { buttonTitle: string; attachment?: AttachmentDto; resource: { text: string; buttons: Array<{ title: string; url: string }> } } }; state: string; attemptCount: number; messageId: string | null; safeErrorCode: string | null; createdAt: string; publicReply?: PublicReplyDto | null; followGate?: FollowGateSession | null };
-type Dashboard = { accounts: Account[]; queue: Array<{ state: string; count: number }>; automations: Array<{ status: string; count: number }>; dryRun: boolean; monitoringEnabled: boolean };
+type Dashboard = { accounts: Account[]; queue: Array<{ state: string; count: number }>; automations: Array<{ status: string; count: number }>; moderation?: Array<{ state: string; count: number }>; dryRun: boolean; monitoringEnabled: boolean };
+/** Moderation flag count for one state (or every state with 'all') from the dashboard payload. */
+function flagCount(rows: Dashboard['moderation'], state: string) { return (rows ?? []).filter((row) => state === 'all' || row.state === state).reduce((sum, row) => sum + row.count, 0); }
 type Api = (path: string, method?: string, body?: Record<string, unknown>) => Promise<any>;
 /** Runs an operation, shows feedback, refreshes data. Resolves true only when the operation succeeded. */
 type Act = (operation: () => Promise<unknown>, message: string | (() => string)) => Promise<boolean>;
@@ -40,10 +43,17 @@ type Tone = 'good' | 'neutral' | 'warn' | 'danger';
 class Cancelled extends Error {}
 
 
-const TAB_ICONS: Record<string, any> = { dashboard: LayoutDashboard, connections: PlugZap, media: Images, automations: Zap, moderation: ShieldAlert, monitor: Radar, backlog: Inbox, queue: History, settings: Settings };
+const TAB_ICONS: Record<string, any> = { dashboard: House, connections: Plug, media: Images, automations: Zap, moderation: ShieldCheck, monitor: Radio, backlog: Inbox, queue: History, settings: Settings2 };
+/** Sidebar grouping (presentational only; the labels of each section never change). */
+const NAV_GROUPS: ReadonlyArray<{ label: string | null; ids: readonly string[] }> = [
+  { label: null, ids: ['dashboard'] },
+  { label: 'Instagram', ids: ['media', 'automations', 'moderation'] },
+  { label: 'Actividad', ids: ['monitor', 'backlog', 'queue'] },
+  { label: 'Configuración', ids: ['connections', 'settings'] },
+];
 
-function RingAvatar({ username }: { username?: string | null }) {
-  return <div className="ring-avatar"><div className="ring-avatar-inner">{username ? username[0].toUpperCase() : 'V'}</div></div>;
+function RingAvatar({ username, size }: { username?: string | null; size?: 'sm' | 'lg' }) {
+  return <div className={size ? `ring-avatar ${size}` : 'ring-avatar'} aria-hidden="true"><div className="ring-avatar-inner">{username ? username[0]!.toUpperCase() : 'V'}</div></div>;
 }
 
 const sections = [
@@ -79,6 +89,39 @@ export default function HomePage() {
   const [scanJob, setScanJob] = useState<ScanJob | null>(null);
   const [dialog, setDialog] = useState<(ConfirmOptions & { resolve(value: boolean): void }) | null>(null);
   const [features, setFeatures] = useState<Features>(DISABLED_FEATURES);
+  // Presentational only: mobile drawer and the element that hosts each page's topbar actions.
+  const [navOpen, setNavOpen] = useState(false);
+  const [topbarSlot, setTopbarSlot] = useState<HTMLDivElement | null>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerWasOpen = useRef(false);
+  // Mobile drawer: focus moves in on open, Tab is trapped, Escape closes from anywhere, focus returns to the menu button.
+  useEffect(() => {
+    if (!navOpen) {
+      if (drawerWasOpen.current) menuButtonRef.current?.focus();
+      drawerWasOpen.current = false;
+      return;
+    }
+    drawerWasOpen.current = true;
+    const node = sidebarRef.current;
+    node?.querySelector<HTMLElement>('.nav-item')?.focus();
+    function onKey(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') { event.preventDefault(); setNavOpen(false); return; }
+      if (event.key !== 'Tab' || !node) return;
+      const items = focusableIn(node);
+      if (!items.length) return;
+      const first = items[0]!; const last = items[items.length - 1]!;
+      if (!node.contains(document.activeElement)) { event.preventDefault(); first.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    document.addEventListener('keydown', onKey);
+    // Growing past the mobile breakpoint closes the drawer so the page is never left inert.
+    const wide = window.matchMedia('(min-width: 761px)');
+    const onWide = () => { if (wide.matches) setNavOpen(false); };
+    wide.addEventListener('change', onWide);
+    return () => { document.removeEventListener('keydown', onKey); wide.removeEventListener('change', onWide); };
+  }, [navOpen]);
 
   const confirm = useCallback<Confirm>((options) => new Promise<boolean>((resolve) => setDialog({ ...options, resolve })), []);
   function settleDialog(value: boolean) { dialog?.resolve(value); setDialog(null); }
@@ -178,59 +221,76 @@ export default function HomePage() {
     await act(() => api('/api/settings/dry-run', 'POST', { enabled, confirmed: !enabled }), enabled ? 'Dry Run quedó activo.' : 'Modo real habilitado; no se procesó la cola simulada.');
   }
 
-  return <>
-    <header className="topbar">
-      <div className="topbar-inner">
-        <div className="brand">
-          <span className="brand-mark">S</span>
-          <div className="logo">Social Desk<small>Operación local</small></div>
-        </div>
-        <div className="spacer"></div>
-        <div className="head-pills">
-          <label className="account-picker"><span className="visually-hidden">Cuenta</span>
-            <RingAvatar username={accounts.find(a => a.accountId === accountFilter)?.username || allAccounts.find(a => a.accountId === accountFilter)?.username} />
-            <select aria-label="Filtrar por cuenta" value={accountFilter} onChange={(event) => chooseAccount(event.target.value)}><option value="all">Todas las cuentas</option>{(allAccounts.length ? allAccounts : accounts).map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select></label>
-          {mode === 'checking'
-            ? <button className="mode-pill checking-pill" disabled aria-disabled="true"><span className="state"><i></i></span>Verificando modo…</button>
-            : <button className={mode === 'dry' ? 'mode-pill dry-pill' : 'mode-pill real-pill'} title={mode === 'dry' ? 'Cambiar a modo real (pide confirmación)' : 'Volver a Dry Run'} onClick={() => void toggleDryRun()}><span className={mode === 'dry' ? 'state on' : 'state'}><i></i></span>{mode === 'dry' ? 'Dry Run · Activo' : 'Modo real · Activo'}</button>}
-        </div>
-      </div>
-    </header>
-    <nav className="tabs" aria-label="Navegación principal">
-      <div className="tabs-inner">
-        {sections.map(([id, label]) => {
-          const Icon = TAB_ICONS[id] || Circle;
-          return <button key={id} type="button" className={section === id ? 'tab active' : 'tab'} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}><Icon size={18} strokeWidth={1.75} aria-hidden="true" /><span>{label}</span></button>;
-        })}
-      </div>
-    </nav>
-    <main className="page">
-      <header className="welcome-row"><div><span className="eyebrow">Espacio de trabajo</span><h1>{current[1]}</h1><p className="page-desc">{current[2]}</p></div></header>
-      <div className={`mode-banner ${mode}`}>
-        {mode === 'checking' && <span>Verificando el modo de envío…</span>}
-        {mode === 'dry' && <><ShieldCheck size={20} /> <span><strong>Modo prueba:</strong> la app analiza y simula, no envía mensajes reales</span></>}
-        {mode === 'real' && <span><strong>Modo real:</strong> se enviarán mensajes privados reales en automatizaciones autorizadas</span>}
-      </div>
-      {loading && <div className="loading-line">Actualizando datos locales…</div>}
+  const selectedUsername = accounts.find((item) => item.accountId === accountFilter)?.username ?? allAccounts.find((item) => item.accountId === accountFilter)?.username;
+  const accountTotal = (allAccounts.length ? allAccounts : accounts).length;
+  function go(id: string) { setSection(id); setNavOpen(false); }
+  const pendingFlags = flagCount(dashboard?.moderation, 'PENDING');
 
-        {section === 'dashboard' && <DashboardView data={dashboard} accounts={accounts} connections={connections} automations={automations} accountFilter={accountFilter} accountCount={allAccounts.length} accountLabel={accountLabel} onNavigate={setSection} onRefresh={() => void refresh()} />}
-        {section === 'connections' && <ConnectionsView connections={connections} accounts={accounts} candidates={candidates} setCandidates={setCandidates} api={api} act={act} confirm={confirm} features={features} />}
-        {section === 'media' && <MediaView accounts={accounts} allAccounts={allAccounts} onSelectAccount={chooseAccount} media={media} selected={accountFilter} onNavigate={setSection} api={api} act={act} />}
-        {section === 'automations' && <AutomationView accounts={accounts} media={media} rows={automations} selected={accountFilter} api={api} act={act} confirm={confirm} />}
-        {section === 'moderation' && <ModerationView accountFilter={accountFilter} allAccounts={allAccounts} onSelectAccount={chooseAccount} onNavigate={setSection} api={api} act={act} confirm={confirm} mode={mode} />}
-        {section === 'monitor' && <MonitorView accounts={accounts} status={dashboard?.monitoringEnabled ?? false} onNavigate={setSection} api={api} act={act} />}
-        {section === 'backlog' && <BacklogView allAccounts={allAccounts} accounts={accounts} onSelectAccount={chooseAccount} selected={accountFilter} job={scanJob} setJob={setScanJob} rows={automations} api={api} act={act} confirm={confirm} />}
-        {section === 'queue' && <QueueView items={queue} total={queueTotal} offset={queueOffset} setOffset={setQueueOffset} state={queueState} setState={(value) => { setQueueOffset(0); setQueueState(value); }} onNavigate={setSection} api={api} act={act} />}
-        {section === 'settings' && <SettingsView mode={mode} act={act} api={api} confirm={confirm} features={features} />}
-      
-      <footer className="footer-note"><span><span className="status-dot" /> Solo en este equipo · Datos y credenciales permanecen en el servidor local.</span><button className="btn-link" onClick={() => void refresh()}>Actualizar</button></footer>
-    </main>
+  return <SlotContext.Provider value={{ topbar: topbarSlot, aiRow: null }}>
+    <div className={navOpen ? 'app nav-open' : 'app'}>
+      <aside className="sidebar" id="app-sidebar" ref={sidebarRef} aria-label="Menú">
+        <div className="brand"><span className="brand-mark" aria-hidden="true"><MessageCircleHeart size={16} strokeWidth={2} /></span><span className="brand-name">Social Desk</span>
+          <button type="button" className="btn-icon ghost drawer-close" aria-label="Cerrar menú" onClick={() => setNavOpen(false)}><X size={18} /></button></div>
+        <label className="account-switch">
+          <RingAvatar username={selectedUsername} />
+          <span className="account-switch-text"><b>{accountFilter === 'all' ? 'Todas las cuentas' : `@${selectedUsername ?? 'Cuenta'}`}</b><small>{accountTotal} {accountTotal === 1 ? 'cuenta' : 'cuentas'}</small></span>
+          <ChevronsUpDown size={16} aria-hidden="true" className="account-switch-icon" />
+          <select aria-label="Filtrar por cuenta" value={accountFilter} onChange={(event) => chooseAccount(event.target.value)}><option value="all">Todas las cuentas</option>{(allAccounts.length ? allAccounts : accounts).map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select>
+        </label>
+        <nav className="side-nav" aria-label="Navegación principal">
+          {NAV_GROUPS.map((group) => <div className="nav-group" key={group.label ?? 'top'}>
+            {group.label && <span className="nav-label">{group.label}</span>}
+            {group.ids.map((id) => {
+              const entry = sections.find(([sectionId]) => sectionId === id)!;
+              const Icon = TAB_ICONS[id] || Circle;
+              return <button key={id} type="button" className={section === id ? 'nav-item active' : 'nav-item'} aria-current={section === id ? 'page' : undefined} onClick={() => go(id)} aria-label={id === 'moderation' && pendingFlags > 0 ? `${entry[1]}, ${pendingFlags} pendientes` : undefined}><Icon size={17} strokeWidth={1.9} aria-hidden="true" /><span>{entry[1]}</span>{id === 'monitor' && <i className={dashboard?.monitoringEnabled ? 'nav-dot on' : 'nav-dot'} aria-hidden="true" />}{id === 'moderation' && pendingFlags > 0 && <i className="nav-count" data-count={pendingFlags > 99 ? '99+' : String(pendingFlags)} aria-hidden="true" />}</button>;
+            })}
+          </div>)}
+        </nav>
+        <div className={`mode-block ${mode}`}>
+          <span className="mode-block-icon" aria-hidden="true">{mode === 'real' ? <Siren size={16} /> : <FlaskConical size={16} />}</span>
+          <span className="mode-block-text">
+            {mode === 'checking'
+              ? <button className="mode-pill checking-pill" disabled aria-disabled="true">Verificando modo…</button>
+              : <button className={mode === 'dry' ? 'mode-pill dry-pill' : 'mode-pill real-pill'} title={mode === 'dry' ? 'Cambiar a modo real (pide confirmación)' : 'Volver a Dry Run'} onClick={() => void toggleDryRun()}>{mode === 'dry' ? 'Dry Run · Activo' : 'Modo real · Activo'}</button>}
+            <small>{mode === 'dry' ? 'Nada se envía' : mode === 'real' ? 'Envíos reales' : 'Un momento'}</small>
+          </span>
+          <span className={mode === 'real' ? 'mode-switch on' : 'mode-switch'} aria-hidden="true" />
+        </div>
+      </aside>
+      <button type="button" className="nav-scrim" aria-label="Cerrar menú" tabIndex={-1} onClick={() => setNavOpen(false)} />
+      <main className="page" inert={navOpen || undefined}>
+        <header className="topbar">
+          <button type="button" ref={menuButtonRef} className="btn-icon ghost menu-button" aria-label="Abrir menú" aria-controls="app-sidebar" aria-expanded={navOpen} onClick={() => setNavOpen(true)}><Menu size={18} /></button>
+          <div className="topbar-title"><h1>{current[1]}</h1><p className="topbar-sub">{current[2]}</p></div>
+          <div className="topbar-actions" ref={setTopbarSlot} />
+        </header>
+        <div className={`mode-banner ${mode}`}>
+          {mode === 'checking' && <span>Verificando el modo de envío…</span>}
+          {mode === 'dry' && <><ShieldCheck size={15} aria-hidden="true" /> <span><strong>Modo prueba:</strong> la app analiza y simula, no envía mensajes reales</span></>}
+          {mode === 'real' && <><Siren size={15} aria-hidden="true" /> <span><strong>Modo real:</strong> se enviarán mensajes privados reales en automatizaciones autorizadas</span></>}
+        </div>
+        {loading && <div className="loading-line" role="status"><span>Actualizando datos locales…</span></div>}
+        <div className={`content content-${section}`}>
+          {section === 'dashboard' && <DashboardView data={dashboard} accounts={accounts} connections={connections} automations={automations} media={media} accountFilter={accountFilter} accountCount={allAccounts.length} accountLabel={accountLabel} onNavigate={setSection} onRefresh={() => void refresh()} />}
+          {section === 'connections' && <ConnectionsView connections={connections} accounts={accounts} candidates={candidates} setCandidates={setCandidates} api={api} act={act} confirm={confirm} features={features} />}
+          {section === 'media' && <MediaView accounts={accounts} allAccounts={allAccounts} onSelectAccount={chooseAccount} media={media} selected={accountFilter} onNavigate={setSection} api={api} act={act} />}
+          {section === 'automations' && <AutomationView accounts={accounts} media={media} rows={automations} selected={accountFilter} api={api} act={act} confirm={confirm} />}
+          {section === 'moderation' && <ModerationView flagCounts={dashboard?.moderation} accountFilter={accountFilter} allAccounts={allAccounts} onSelectAccount={chooseAccount} onNavigate={setSection} api={api} act={act} confirm={confirm} mode={mode} />}
+          {section === 'monitor' && <MonitorView accounts={accounts} status={dashboard?.monitoringEnabled ?? false} onNavigate={setSection} api={api} act={act} />}
+          {section === 'backlog' && <BacklogView allAccounts={allAccounts} accounts={accounts} onSelectAccount={chooseAccount} selected={accountFilter} job={scanJob} setJob={setScanJob} rows={automations} api={api} act={act} confirm={confirm} />}
+          {section === 'queue' && <QueueView items={queue} total={queueTotal} offset={queueOffset} setOffset={setQueueOffset} state={queueState} setState={(value) => { setQueueOffset(0); setQueueState(value); }} onNavigate={setSection} api={api} act={act} />}
+          {section === 'settings' && <SettingsView mode={mode} act={act} api={api} confirm={confirm} features={features} />}
+        </div>
+        {section !== 'moderation' && <footer className="footer-note"><span><span className="status-dot" aria-hidden="true" /> Solo en este equipo · Datos y credenciales permanecen en el servidor local.</span><button className="btn-link" onClick={() => void refresh()}>Actualizar</button></footer>}
+      </main>
+    </div>
     <div className="toast-region">
       <div role="alert" aria-live="assertive" aria-atomic="true">{error && <div className="toast error"><div><strong>La acción no se completó</strong><span>{safeErrorLabel(error)}</span></div><button onClick={() => setError('')} aria-label="Cerrar aviso de error">×</button></div>}</div>
       <div role="status" aria-live="polite" aria-atomic="true">{notice && <div className="toast success"><div><span>{notice}</span></div><button onClick={() => setNotice('')} aria-label="Cerrar aviso">×</button></div>}</div>
     </div>
     {dialog && <ConfirmDialog options={dialog} onResult={settleDialog} />}
-  </>;
+  </SlotContext.Provider>;
 }
 
 /* ---------- Dialogs ---------- */
@@ -274,35 +334,74 @@ function ConfirmDialog({ options, onResult }: { options: ConfirmOptions; onResul
 
 /* ---------- Views ---------- */
 
-function DashboardView({ data, accounts, connections, automations, accountFilter, accountCount, accountLabel, onNavigate, onRefresh }: { data: Dashboard | null; accounts: Account[]; connections: Connection[]; automations: Automation[]; accountFilter: string; accountCount: number; accountLabel: string; onNavigate(id: string): void; onRefresh(): void }) {
+function greeting(now = new Date()) { const hour = now.getHours(); return hour < 12 ? 'Buenos días' : hour < 19 ? 'Buenas tardes' : 'Buenas noches'; }
+
+/** DM bubble text for previews: the same sample substitution the creation form uses. */
+function sampleReply(text: string | undefined, keyword?: string) {
+  return (text ?? '').replace(/{{username}}/g, 'ana').replace(/{{keyword}}/g, keyword || 'palabra');
+}
+
+function DashboardView({ data, accounts, connections, automations, media, accountFilter, accountCount, accountLabel, onNavigate, onRefresh }: { data: Dashboard | null; accounts: Account[]; connections: Connection[]; automations: Automation[]; media: Media[]; accountFilter: string; accountCount: number; accountLabel: string; onNavigate(id: string): void; onRefresh(): void }) {
   if (!data) return <Empty title="Cargando datos locales…" detail="Si este mensaje no desaparece, revise que la aplicación local siga en ejecución." />;
   const total = (states: string[]) => data.queue.filter((row) => states.includes(row.state)).reduce((sum, row) => sum + row.count, 0);
   const onboarding = deriveOnboarding({ connections, accounts, automations, monitoringEnabled: data.monitoringEnabled });
+  const next = onboarding.steps.find((step) => step.state === 'current');
+  const toReview = total(['UNKNOWN_OUTCOME', 'FAILED_PERMANENT']);
+  const queued = total(['QUEUED', 'FAILED_RETRYABLE']);
+  const recipes = automations.filter((row) => row.status !== 'archived').slice(0, 6);
+  const pendingFlags = flagCount(data.moderation, 'PENDING');
   return <>
-    <div className="welcome-row"><div><p className="eyebrow">Vista general · {accountLabel}</p><h2>Estado operativo</h2><p className="muted">Resumen basado en la información guardada en esta instalación.</p></div><button className="btn" onClick={onRefresh}>Actualizar datos</button></div>
-    {shouldShowOnboarding({ allDone: onboarding.allDone, filter: accountFilter, accountCount }) && <section className="panel onboarding" aria-labelledby="onboarding-title">
-      <div className="panel-heading"><div><h3 id="onboarding-title">Primeros pasos</h3><p className="muted">Cuatro pasos para empezar. Mientras Dry Run esté activo, nada se envía de verdad.</p></div><span className="count-badge">{onboarding.steps.filter((step) => step.state === 'done').length} de {onboarding.steps.length} listos</span></div>
+    <PageActions><button className="btn" aria-label="Actualizar datos" onClick={onRefresh}><RefreshCw size={15} aria-hidden="true" /> <span className="btn-label">Actualizar datos</span></button></PageActions>
+    <div className="hello">
+      <h2>{greeting()}</h2>
+      <p className="muted">{data.monitoringEnabled ? 'El monitoreo está encendido: los comentarios nuevos se revisan solos.' : 'El monitoreo está apagado: los comentarios nuevos no se responden.'} <span className="hello-scope">{accountLabel}</span></p>
+    </div>
+    <div className="metrics-strip">
+      <div className="metric-cell"><span className="metric-label"><Send size={14} aria-hidden="true" /> Enviadas</span><span className="metric-val">{total(['SENT'])}</span><small>Confirmadas por API</small></div>
+      <div className="metric-cell"><span className="metric-label"><Clock size={14} aria-hidden="true" /> En cola</span><span className="metric-val">{queued}</span><small>Pendientes</small></div>
+      <div className="metric-cell"><span className="metric-label"><AlertTriangle size={14} aria-hidden="true" /> Revisión</span><span className={toReview ? 'metric-val warn' : 'metric-val'}>{toReview}</span><small>Atención requerida</small></div>
+      <div className="metric-cell"><span className="metric-label"><History size={14} aria-hidden="true" /> Expirados</span><span className="metric-val">{total(['EXPIRED'])}</span><small>&gt; 7 días</small></div>
+    </div>
+    {shouldShowOnboarding({ allDone: onboarding.allDone, filter: accountFilter, accountCount }) && <section className="box onboarding" aria-labelledby="onboarding-title">
+      <div className="box-h"><Rocket size={16} aria-hidden="true" /><h3 id="onboarding-title">Primeros pasos</h3><span className="box-h-note">{onboarding.steps.filter((step) => step.state === 'done').length} de {onboarding.steps.length} listos · Mientras Dry Run esté activo, nada se envía de verdad.</span></div>
       <ol className="steps">{onboarding.steps.map((step, index) => <li key={step.id} className={`step ${step.state}`} aria-current={step.state === 'current' ? 'step' : undefined}>
-        <span className="num" aria-hidden="true">{step.state === 'done' ? '✓' : index + 1}</span>
-        <div className="step-text"><strong>{step.label}<span className="visually-hidden"> — {step.state === 'done' ? 'listo' : step.state === 'current' ? 'siguiente paso' : 'pendiente'}</span></strong><span className="muted">{step.detail}</span></div>
-        <button className={step.state === 'current' ? 'button primary' : 'button secondary'} onClick={() => onNavigate(step.target)}>{step.state === 'done' ? 'Revisar' : step.actionLabel}</button>
+        <span className="num" aria-hidden="true">{step.state === 'done' ? <Check size={13} strokeWidth={3} /> : index + 1}</span>
+        <div className="step-text"><strong>{step.label}<span className="visually-hidden"> — {step.state === 'done' ? 'listo' : step.state === 'current' ? 'siguiente paso' : 'pendiente'}</span></strong><span className="muted">{step.detail}</span>
+          <button className={step.state === 'current' ? 'button primary small' : 'btn-link text-button'} onClick={() => onNavigate(step.target)}>{step.state === 'done' ? 'Revisar' : step.actionLabel}</button></div>
       </li>)}</ol>
     </section>}
-    <div className="metrics-strip">
-      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><PlugZap size={18} strokeWidth={1.75}/></div><div className="metric-val">{accounts.length}</div></div><span>Cuentas</span><small>Seleccionadas</small></div>
-      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><History size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['QUEUED', 'FAILED_RETRYABLE'])}</div></div><span>En cola</span><small>Pendientes</small></div>
-      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><CheckCircle2 size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['SENT'])}</div></div><span>Enviadas</span><small>Confirmadas por API</small></div>
-      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><AlertTriangle size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['UNKNOWN_OUTCOME', 'FAILED_PERMANENT'])}</div></div><span>Revisión</span><small>Atención requerida</small></div>
-      <div className="metric-cell"><div className="metric-cell-top"><div className="metric-icon"><History size={18} strokeWidth={1.75}/></div><div className="metric-val">{total(['EXPIRED'])}</div></div><span>Expirados</span><small>&gt; 7 días</small></div>
+    <div className="home-grid">
+      <section className="box" aria-labelledby="todo-title">
+        <div className="box-h"><BellDot size={16} aria-hidden="true" /><h3 id="todo-title">Para hacer</h3></div>
+        <div className="todo">
+          <button className="todo-tile" onClick={() => onNavigate('moderation')}><span className={pendingFlags ? 'ic bad' : 'ic ok'}>{pendingFlags ? <ShieldAlert size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}</span><span><b>{pendingFlags ? `${pendingFlags} ${pendingFlags === 1 ? 'comentario marcado' : 'comentarios marcados'}` : 'Sin comentarios marcados'}</b><small>{pendingFlags ? 'Ocultar o descartar lo que marcaron las reglas' : 'Nada pendiente de moderar'}</small></span><ChevronRight size={16} aria-hidden="true" /></button>
+          <button className="todo-tile" onClick={() => onNavigate('queue')}><span className={toReview ? 'ic warn' : 'ic ok'}>{toReview ? <AlertTriangle size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</span><span><b>{toReview ? `${toReview} ${toReview === 1 ? 'envío por revisar' : 'envíos por revisar'}` : 'Nada por revisar'}</b><small>{toReview ? 'Resultado desconocido o fallido' : `${queued} en cola`}</small></span><ChevronRight size={16} aria-hidden="true" /></button>
+          {next ? <button className="todo-tile" onClick={() => onNavigate(next.target)}><span className="ic accent"><Rocket size={16} aria-hidden="true" /></span><span><b>{next.label}</b><small>{next.detail}</small></span><ChevronRight size={16} aria-hidden="true" /></button>
+            : <button className="todo-tile" onClick={() => onNavigate('backlog')}><span className="ic ok"><Inbox size={16} aria-hidden="true" /></span><span><b>Revisar pendientes</b><small>Analizar sin enviar</small></span><ChevronRight size={16} aria-hidden="true" /></button>}
+          <button className="todo-tile" onClick={() => onNavigate('moderation')}><span className="ic ai"><Sparkles size={16} aria-hidden="true" /></span><span><b>Revisión con IA</b><small>Marca insultos, spam y quejas</small></span><ChevronRight size={16} aria-hidden="true" /></button>
+        </div>
+      </section>
+      <section className="box" aria-labelledby="accounts-title">
+        <div className="box-h"><Radio size={16} aria-hidden="true" /><h3 id="accounts-title">Estado por cuenta</h3><button className="btn-link text-button box-h-end" onClick={() => onNavigate('monitor')}>Abrir monitoreo</button></div>
+        {!accounts.length ? <Empty title="No hay cuentas conectadas" detail="Añada una conexión y seleccione una cuenta descubierta." action={() => onNavigate('connections')} actionLabel="Configurar conexión" /> : <div className="account-tiles">{accounts.map((account) => <div className="account-tile" key={account.accountId}>
+          <RingAvatar username={account.username} />
+          <div className="account-tile-text"><strong>@{account.username}</strong>
+            <div className="meta">{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : account.status === 'valid' ? <Status value="Validada" tone="good" /> : <Status value="No validada" tone="warn" />}</div>
+            <small className="muted">{account.last_sync ? <>Última sincronización: <span className="mono">{formatDate(account.last_sync)}</span></> : 'Sin sincronización'}{account.coverage ? ` · ${account.coverage}` : ''}</small>
+            {account.last_error && <small className="tile-error">{account.last_error}</small>}
+          </div>
+        </div>)}</div>}
+      </section>
     </div>
-    <div className="panel"><div className="panel-heading"><div><h3>Estado por cuenta</h3><p className="muted">Sincronización, cobertura y monitoreo</p></div><button className="btn-link text-button" onClick={() => onNavigate('monitor')}>Abrir monitoreo →</button></div>
-      {!accounts.length ? <Empty title="No hay cuentas conectadas" detail="Añada una conexión y seleccione una cuenta descubierta." action={() => onNavigate('connections')} actionLabel="Configurar conexión" /> : <div>{accounts.map((account) => <div className="list-row" key={account.accountId}><div className="list-row-content"><RingAvatar username={account.username} /><div className="list-row-text"><strong>@{account.username}</strong><div className="meta">{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : account.status === 'valid' ? <Status value="Validada" tone="good" /> : <Status value="No validada" tone="warn" />}{account.last_sync ? <span>Última sincronización: {formatDate(account.last_sync)}</span> : <span>Sin sincronización</span>}{account.coverage && <span>{account.coverage}</span>}{account.last_error && <span style={{color: 'var(--red)'}}>{account.last_error}</span>}</div></div></div></div>)}</div>}
-    </div>
-    <div className="quick-actions">
-      <button className="action-card" onClick={() => onNavigate('connections')}><div className="action-card-icon"><PlugZap size={20} strokeWidth={2}/></div><div className="action-card-text"><strong>Administrar conexiones</strong><span>Validar credenciales</span></div><ChevronRight size={16} className="muted" /></button>
-      <button className="action-card" onClick={() => onNavigate('automations')}><div className="action-card-icon"><Zap size={20} strokeWidth={2}/></div><div className="action-card-text"><strong>Configurar reglas</strong><span>Elegir publicación y palabras</span></div><ChevronRight size={16} className="muted" /></button>
-      <button className="action-card" onClick={() => onNavigate('backlog')}><div className="action-card-icon"><Inbox size={20} strokeWidth={2}/></div><div className="action-card-text"><strong>Revisar pendientes</strong><span>Analizar sin enviar</span></div><ChevronRight size={16} className="muted" /></button>
-    </div>
+    <section className="box" aria-labelledby="recipes-title">
+      <div className="box-h"><Zap size={16} aria-hidden="true" /><h3 id="recipes-title">Automatizaciones</h3><button className="btn small box-h-end" onClick={() => onNavigate('automations')}><Plus size={14} aria-hidden="true" /> Nueva</button></div>
+      {recipes.length ? <div className="recipes">{recipes.map((row) => <button className="recipe" key={row.automationId} onClick={() => onNavigate('automations')}>
+        {row.scope === 'account' ? <span className="recipe-thumb ph"><Layers size={18} aria-hidden="true" /></span> : <MiniThumb size="recipe" item={media.find((item) => item.mediaId === row.mediaId)} />}
+        <ArrowRight size={16} className="recipe-arrow" aria-hidden="true" />
+        <span className="recipe-body"><b>{row.name}</b><span className="dm">{sampleReply(row.replyText, row.keywords[0]?.phrase) || 'Sin mensaje'}</span>
+          <span className="recipe-meta">{row.keywords.slice(0, 3).map((keyword) => <span className="kw-chip" key={keyword.phrase}>{keyword.phrase}</span>)}<Status value={row.status === 'enabled' ? 'Activa' : 'Pausada'} tone={row.status === 'enabled' ? 'good' : 'neutral'} />{row.realEnabled && <Status value="Real" tone="warn" />}</span></span>
+      </button>)}</div> : <Empty title="Aún no hay automatizaciones" detail="Cree una regla que responda por mensaje privado a ciertas palabras." action={() => onNavigate('automations')} actionLabel="Crear automatización" primary />}
+    </section>
   </>;
 }
 
@@ -331,21 +430,35 @@ function ConnectionsView({ connections, accounts, candidates, setCandidates, api
       await api('/api/settings/legacy/acknowledge', 'POST', { accountId: account.accountId, counterVersion: state.counterVersion, confirmed: true });
     }, 'Reconocimiento de seguridad guardado.');
   }
-  return <div className="two-col"><div className="col-main">
-    <div className="panel"><div className="panel-heading"><div><h3>Conexiones Meta</h3><p className="muted">Los tokens se cifran en el servidor y nunca se vuelven a mostrar.</p></div></div>
-      {!connections.length ? <Empty title="Aún no hay conexiones" detail="Guarde un token de Meta con el formulario «Nueva conexión»; después valídelo para descubrir sus cuentas." action={() => focusById('conn-name')} actionLabel="Crear la primera conexión" primary /> : connections.map((connection) => <div className="list-row" key={connection.id}><div className="list-row-content"><div className="metric-icon"><PlugZap size={20}/></div><div className="list-row-text"><strong>{connection.name}</strong><div className="meta"><span>{connection.login_kind === 'instagram_login' ? 'Instagram Login' : 'Facebook Login'} · {connection.graph_version}</span><ConnectionBadge status={connection.status} /></div></div></div><div className="row-actions"><button className="btn-main small" onClick={() => void discover(connection.id)}><Search size={14}/> Probar y descubrir</button>
-<button className="btn-icon" aria-label="Editar" title="Editar" onClick={() => { setEditing(connection); setEditName(connection.name); setEditAppId(connection.app_id ?? ''); setEditVersion(connection.graph_version); setEditToken(''); }}><Pencil size={16}/></button>
-<button className="btn-icon danger" aria-label="Desconectar" title="Desconectar" onClick={() => void disconnect(connection)}><Unplug size={16}/></button>
-<button className="btn-icon danger" aria-label="Eliminar" title="Eliminar" onClick={() => void remove(connection)}><Trash2 size={16}/></button></div></div>)}
+  return <div className="conn-page">
+    <PageActions><button className="button primary" aria-label="Nueva conexión" onClick={() => focusById('conn-name')}><Plus size={15} aria-hidden="true" /> <span className="btn-label">Nueva conexión</span></button></PageActions>
+    <section aria-labelledby="conn-title">
+      <div className="section-h"><h3 id="conn-title">Conexiones Meta</h3><p className="muted">Los tokens se cifran en el servidor y nunca se vuelven a mostrar.</p></div>
+      {!connections.length ? <Empty icon={PlugZap} title="Aún no hay conexiones" detail="Guarde un token de Meta con el formulario «Nueva conexión»; después valídelo para descubrir sus cuentas." action={() => focusById('conn-name')} actionLabel="Crear la primera conexión" primary /> : <div className="tile-grid">{connections.map((connection) => <article className="tile conn-tile" key={connection.id}>
+        <div className="tile-head"><span className="ic accent"><PlugZap size={17} aria-hidden="true" /></span><div className="tile-title"><strong>{connection.name}</strong><span className="muted">{connection.login_kind === 'instagram_login' ? 'Instagram Login' : 'Facebook Login'} · <span className="mono">{connection.graph_version}</span></span></div><ConnectionBadge status={connection.status} /></div>
+        <div className="tile-actions"><button className="btn-main small" onClick={() => void discover(connection.id)}><Search size={14} aria-hidden="true" /> Probar y descubrir</button>
+          <span className="tile-actions-icons">
+            <button className="btn-icon" aria-label="Editar" title="Editar" onClick={() => { setEditing(connection); setEditName(connection.name); setEditAppId(connection.app_id ?? ''); setEditVersion(connection.graph_version); setEditToken(''); }}><Pencil size={15}/></button>
+            <button className="btn-icon danger" aria-label="Desconectar" title="Desconectar" onClick={() => void disconnect(connection)}><Unplug size={15}/></button>
+            <button className="btn-icon danger" aria-label="Eliminar" title="Eliminar" onClick={() => void remove(connection)}><Trash2 size={15}/></button>
+          </span></div>
+      </article>)}</div>}
+    </section>
+    <div className="conn-columns">
+      <div className="conn-forms">
+        {editing && <form className="panel form-panel" onSubmit={(event) => void update(event)}><div className="panel-heading"><div><h3>Editar conexión</h3><p className="muted">Deje el token vacío para conservarlo. Si cambia, se invalida la validación anterior.</p></div></div><div className="form-grid"><Field label="Nombre"><input required value={editName} onChange={(event) => setEditName(event.target.value)} /></Field><Field label="App ID"><input value={editAppId} onChange={(event) => setEditAppId(event.target.value)} /></Field><Field label="Versión Graph"><input required pattern="v[0-9]+\.[0-9]+" value={editVersion} onChange={(event) => setEditVersion(event.target.value)} /></Field><Field label="Nuevo token · captura opcional"><input type="password" autoComplete="new-password" value={editToken} onChange={(event) => setEditToken(event.target.value)} /></Field></div><div className="row-actions"><button className="btn-main">Guardar cambios</button><button type="button" className="btn" onClick={() => { setEditToken(''); setEditing(null); }}>Cancelar</button></div></form>}
+        <form className="panel form-panel" onSubmit={(event) => void create(event)}><div className="panel-heading"><div><h3>Nueva conexión</h3><p className="muted">Use un token con acceso autorizado a la cuenta que desea administrar.</p></div></div>
+          <div className="form-grid"><Field label="Nombre"><input id="conn-name" required value={name} onChange={(event) => setName(event.target.value)} placeholder="Cuenta principal" /></Field><Field label="Tipo de acceso"><select value={loginKind} onChange={(event) => setLoginKind(event.target.value)}><option value="instagram_login">Instagram Login · token de Instagram</option><option value="facebook_login">Facebook Login · token de usuario y página vinculada</option></select></Field><Field label="App ID (opcional)"><input value={appId} onChange={(event) => setAppId(event.target.value)} /></Field><Field label="Versión Graph"><input required pattern="v[0-9]+\.[0-9]+" value={version} onChange={(event) => setVersion(event.target.value)} /></Field><Field label="Token de acceso · solo captura"><input required type="password" autoComplete="new-password" value={token} onChange={(event) => setToken(event.target.value)} /></Field></div>
+          <div><button className="btn-main" type="submit"><Lock size={15} aria-hidden="true" /> Guardar conexión cifrada</button></div>
+        </form>
+      </div>
+      <aside className="conn-side">
+        <section className="panel"><div className="panel-heading"><div><h3>Cuentas seleccionadas</h3><p className="muted">Los ID se obtienen de la respuesta oficial de Meta.</p></div></div>{accounts.length ? <div className="avatar-tiles">{accounts.map((account) => <div className="list-row avatar-tile" key={account.accountId}><RingAvatar username={account.username} /><div className="list-row-text"><strong>@{account.username}</strong><span className="muted">{account.status === 'valid' ? 'Validada' : account.status} · {account.accountId}</span></div></div>)}</div> : <p className="empty-inline">Aún no hay cuentas seleccionadas. Pruebe una conexión y pulse «Seleccionar» en la cuenta que desea usar.</p>}</section>
+        <section className="panel"><h3>Cuentas descubiertas</h3>{candidates.length ? <div className="avatar-tiles">{candidates.map((candidate) => <div className="list-row avatar-tile" key={candidate.providerAccountId}><RingAvatar username={candidate.username}/><div className="list-row-text"><strong>@{candidate.username}</strong><span className="muted">ID de proveedor: {candidate.providerAccountId}</span></div><button className="btn-main small" onClick={() => void act(() => api(`/api/connections/${candidate.connectionId}/select`, 'POST', { account: candidate }), 'Cuenta vinculada con su historial.')}>Seleccionar</button></div>)}</div> : <p className="empty-inline">Pulse «Probar y descubrir» en una conexión para listar las cuentas disponibles.</p>}</section>
+        {legacyAccounts.length > 0 && <section className="panel"><h3>Retención heredada</h3><p className="muted">{features.legacyInterlock ? 'Una cuenta usada antes con otra herramienta puede tener un bloqueo o historial de rechazos previos. La aplicación nunca borra ni modifica esos archivos.' : 'Esta cuenta conserva una retención de una configuración heredada anterior. Revísela y reconózcala para liberarla.'}</p><div className="avatar-tiles">{legacyAccounts.map((account) => <div className="list-row avatar-tile" key={`legacy-${account.accountId}`}><RingAvatar username={account.username} /><div className="list-row-text"><strong>@{account.username}</strong></div><button className="btn small" onClick={() => void acknowledgeLegacy(account)}>Revisar estado y reconocer</button></div>)}</div></section>}
+      </aside>
     </div>
-    <form className="panel form-panel" onSubmit={(event) => void create(event)}><div className="panel-heading"><div><h3>Nueva conexión</h3><p className="muted">Use un token con acceso autorizado a la cuenta que desea administrar.</p></div></div>
-      <div className="form-grid"><Field label="Nombre"><input id="conn-name" required value={name} onChange={(event) => setName(event.target.value)} placeholder="Cuenta principal" /></Field><Field label="Tipo de acceso"><select value={loginKind} onChange={(event) => setLoginKind(event.target.value)}><option value="instagram_login">Instagram Login · token de Instagram</option><option value="facebook_login">Facebook Login · token de usuario y página vinculada</option></select></Field><Field label="App ID (opcional)"><input value={appId} onChange={(event) => setAppId(event.target.value)} /></Field><Field label="Versión Graph"><input required pattern="v[0-9]+\.[0-9]+" value={version} onChange={(event) => setVersion(event.target.value)} /></Field><Field label="Token de acceso · solo captura"><input required type="password" autoComplete="new-password" value={token} onChange={(event) => setToken(event.target.value)} /></Field></div>
-      <div><button className="btn-main" type="submit">Guardar conexión cifrada</button></div>
-    </form>
-    {editing && <form className="panel form-panel" onSubmit={(event) => void update(event)}><div className="panel-heading"><div><h3>Editar conexión</h3><p className="muted">Deje el token vacío para conservarlo. Si cambia, se invalida la validación anterior.</p></div></div><div className="form-grid"><Field label="Nombre"><input required value={editName} onChange={(event) => setEditName(event.target.value)} /></Field><Field label="App ID"><input value={editAppId} onChange={(event) => setEditAppId(event.target.value)} /></Field><Field label="Versión Graph"><input required pattern="v[0-9]+\.[0-9]+" value={editVersion} onChange={(event) => setEditVersion(event.target.value)} /></Field><Field label="Nuevo token · captura opcional"><input type="password" autoComplete="new-password" value={editToken} onChange={(event) => setEditToken(event.target.value)} /></Field></div><div className="row-actions"><button className="btn-main">Guardar cambios</button><button type="button" className="btn" onClick={() => { setEditToken(''); setEditing(null); }}>Cancelar</button></div></form>}
-  </div><div className="col-main"><div className="panel"><div className="panel-heading"><div><h3>Cuentas seleccionadas</h3><p className="muted">Los ID se obtienen de la respuesta oficial de Meta.</p></div></div>{accounts.length ? accounts.map((account) => <div className="list-row" key={account.accountId}><div><strong>@{account.username}</strong><span className="muted">{account.status === 'valid' ? 'Validada' : account.status} · {account.accountId}</span></div></div>) : <p className="empty-inline">Aún no hay cuentas seleccionadas. Pruebe una conexión y pulse «Seleccionar» en la cuenta que desea usar.</p>}</div>
-    <div className="panel"><h3>Cuentas descubiertas</h3>{candidates.length ? candidates.map((candidate) => <div className="list-row" key={candidate.providerAccountId}><div className="list-row-content"><RingAvatar username={candidate.username}/> <div className="list-row-text"><strong>@{candidate.username}</strong><span className="muted">ID de proveedor: {candidate.providerAccountId}</span></div></div><button className="btn-main small" onClick={() => void act(() => api(`/api/connections/${candidate.connectionId}/select`, 'POST', { account: candidate }), 'Cuenta vinculada con su historial.')}>Seleccionar</button></div>) : <p className="empty-inline">Pulse «Probar y descubrir» en una conexión para listar las cuentas disponibles.</p>}</div>
-    {legacyAccounts.length > 0 && <div className="panel"><h3>Retención heredada</h3><p className="muted">{features.legacyInterlock ? 'Una cuenta usada antes con otra herramienta puede tener un bloqueo o historial de rechazos previos. La aplicación nunca borra ni modifica esos archivos.' : 'Esta cuenta conserva una retención de una configuración heredada anterior. Revísela y reconózcala para liberarla.'}</p>{legacyAccounts.map((account) => <div className="list-row" key={`legacy-${account.accountId}`}><strong>@{account.username}</strong><button className="btn small" onClick={() => void acknowledgeLegacy(account)}>Revisar estado y reconocer</button></div>)}</div>}</div></div>;
+  </div>;
 }
 
 function MediaView({ accounts, allAccounts, onSelectAccount, media, selected, onNavigate, api, act }: { accounts: Account[]; allAccounts: Account[]; onSelectAccount(id: string): void; media: Media[]; selected: string; onNavigate(id: string): void; api: Api; act: Act }) {
@@ -353,15 +466,26 @@ function MediaView({ accounts, allAccounts, onSelectAccount, media, selected, on
   const own = media.filter((item) => item.accountId === current);
   const choices = allAccounts.length ? allAccounts : accounts;
   const reload = () => void act(() => api(`/api/connections/${choices.find((item) => item.accountId === current)?.connectionId}/media`, 'POST', { accountId: current }), 'Publicaciones actualizadas.');
-  return <div className="panel"><div className="panel-heading"><div><h3>Publicaciones de la cuenta</h3><p className="muted">Elija una cuenta para cargar sus publicaciones autorizadas.</p></div>{current && <button className="btn" onClick={reload}><RefreshCw size={16} /> Actualizar publicaciones</button>}</div>
+  return <section aria-labelledby="media-title">
+    {current && <PageActions><button className="btn" aria-label="Actualizar publicaciones" onClick={reload}><RefreshCw size={15} aria-hidden="true" /> <span className="btn-label">Actualizar publicaciones</span></button></PageActions>}
+    <div className="section-h"><h3 id="media-title">Publicaciones de la cuenta</h3><p className="muted">{current && own.length ? `${own.length} ${own.length === 1 ? 'publicación' : 'publicaciones'} guardadas en este equipo.` : 'Elija una cuenta para cargar sus publicaciones autorizadas.'}</p></div>
     {current ? own.length ? <div className="media-grid">{own.map((item) => { const caption = shortCaption(item.caption, 80); return <article className="media-card" key={item.mediaId}><MediaThumb item={item} />
-<div>
+<div className="media-card-body">
   <strong className={caption ? 'media-caption' : 'media-caption muted-text'}>{caption ?? `Sin texto · ${shortId(item.mediaId)}`}</strong>
-  <div className="media-meta"><span>{item.publishedAt ? formatDate(item.publishedAt) : 'Sin fecha'}</span>{item.permalink && <a className="media-link" href={item.permalink} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" /> Ver en Instagram</a>}</div>
+  <div className="media-meta"><span className="mono">{item.publishedAt ? formatDate(item.publishedAt) : 'Sin fecha'}</span>{item.permalink && <a className="media-link" href={item.permalink} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" /> Ver en Instagram</a>}</div>
 </div></article>; })}</div>
-      : <Empty title="Sin publicaciones guardadas" detail="Descargue las publicaciones de esta cuenta para poder crear automatizaciones." action={reload} actionLabel="Actualizar publicaciones" primary />
-      : choices.length ? <div className="account-prompt" role="group" aria-labelledby="media-account-prompt"><strong id="media-account-prompt">Elija una cuenta para ver sus publicaciones</strong><p className="muted">Las publicaciones se cargan de una cuenta a la vez.</p><div className="account-prompt-chips">{choices.map((account) => <button key={account.accountId} className="account-chip" onClick={() => onSelectAccount(account.accountId)}><RingAvatar username={account.username} /> @{account.username}</button>)}</div></div>
-        : <Empty title="Aún no hay cuentas" detail="Conecte Meta y elija una cuenta antes de ver sus publicaciones." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}</div>;
+      : <Empty icon={Images} title="Sin publicaciones guardadas" detail="Descargue las publicaciones de esta cuenta para poder crear automatizaciones." action={reload} actionLabel="Actualizar publicaciones" primary />
+      : choices.length ? <AccountPrompt id="media-account-prompt" title="Elija una cuenta para ver sus publicaciones" detail="Las publicaciones se cargan de una cuenta a la vez." choices={choices} onSelect={onSelectAccount} />
+        : <Empty title="Aún no hay cuentas" detail="Conecte Meta y elija una cuenta antes de ver sus publicaciones." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}</section>;
+}
+
+/** "Choose an account" prompt shared by the account-scoped screens. */
+function AccountPrompt({ id, title, detail, choices, onSelect }: { id: string; title: string; detail: string; choices: Array<{ accountId: string; username: string }>; onSelect(id: string): void }) {
+  return <div className="account-prompt" role="group" aria-labelledby={id}>
+    <span className="empty-icon" aria-hidden="true"><Users size={20} /></span>
+    <strong id={id}>{title}</strong><p className="muted">{detail}</p>
+    <div className="account-prompt-chips">{choices.map((account) => <button key={account.accountId} className="account-chip" onClick={() => onSelect(account.accountId)}><RingAvatar username={account.username} /> @{account.username}</button>)}</div>
+  </div>;
 }
 
 function AutomationView({ accounts, media, rows, selected, api, act, confirm }: { accounts: Account[]; media: Media[]; rows: Automation[]; selected: string; api: Api; act: Act; confirm: Confirm }) {
@@ -380,44 +504,58 @@ function AutomationView({ accounts, media, rows, selected, api, act, confirm }: 
     if (!(await confirm({ title: `Archivar «${row.name}»`, body: 'Archivar detiene esta automatización y conserva el historial. No podrá reactivarla desde esta pantalla.', confirmLabel: 'Archivar', danger: true }))) return;
     await act(() => api(`/api/automations/${row.automationId}/delete`, 'POST', { accountId: row.accountId }), 'Automatización archivada.');
   }
-  return <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
-<div className="col-main" style={{ gridColumn: "1 / -1" }}>
-    <div className="panel"><h3>Tus automatizaciones</h3>{rows.length ? rows.map((row) => <article className="automation-row" key={row.automationId}><div className="list-row"><div className="list-row-content">
-  {row.scope === 'account' ? <div className="media-thumb-mid"><Zap size={24} /></div> : <MiniThumb size="mid" item={media.find(m => m.mediaId === row.mediaId)} />}
-  <div className="list-row-text">
-    <strong>{row.name}</strong>
-    <div className="meta"><RingAvatar username={accounts.find((item) => item.accountId === row.accountId)?.username} /> @{accounts.find((item) => item.accountId === row.accountId)?.username || 'Cuenta'} · {automationTargetLabel(row, media)}</div>
-    <div className="keyword-list">{row.keywords.length ? row.keywords.map((keyword) => <span className="kw-chip" key={keyword.phrase}>{keyword.phrase}</span>) : <span className="muted">Sin palabras clave</span>}</div>
-  </div>
-</div>
-<div className="row-actions">
-  {row.scope === 'account' && <Status value="General" tone="neutral" />}
-  <Status value={row.status === 'enabled' ? 'Activa' : 'Pausada'} tone={row.status === 'enabled' ? 'good' : 'neutral'} />
-  <Status value={row.realEnabled ? 'Real autorizado' : 'Solo prueba'} tone={row.realEnabled ? 'warn' : 'neutral'} />
-  {row.publicReplyEnabled && <Status value={`Respuesta pública · ${variantCountLabel(row.publicReplyVariants?.length ?? 0)}`} tone="neutral" />}
-  <div style={{width: '100%', height: '4px'}}></div>
-  <button className="btn-icon" title={row.status === 'enabled' ? 'Pausar' : 'Activar'} aria-label={row.status === 'enabled' ? 'Pausar' : 'Activar'} onClick={() => void act(() => api(`/api/automations/${row.automationId}/enabled`, 'PATCH', { accountId: row.accountId, enabled: row.status !== 'enabled' }), row.status === 'enabled' ? 'Automatización pausada.' : 'Automatización activada con corte desde ahora.')}>{row.status === 'enabled' ? <Pause size={16} /> : <Play size={16} />}</button>
-  <button className="btn-icon" title="Editar" aria-label="Editar" onClick={() => setEditing(row)}><Pencil size={16} /></button>
-  <button className={row.realEnabled ? 'btn small' : 'btn btn-danger small'} onClick={() => void toggleReal(row)}>{row.realEnabled ? <ShieldOff size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />} {row.realEnabled ? 'Quitar permiso real' : 'Autorizar real'}</button>
-  <button className="btn-icon danger" title="Archivar" aria-label="Archivar" onClick={() => void archive(row)}><Archive size={16} /></button>
-</div>
-</div></article>) : <Empty title="Aún no hay automatizaciones" detail="Cree una automatización asociada a una de sus publicaciones. Empieza en modo prueba." action={() => focusById('auto-account')} actionLabel="Crear la primera automatización" primary />}</div>
+  const previewUser = accounts.find((item) => item.accountId === accountId)?.username;
+  return <div className="auto-page">
+    <PageActions><button className="button primary" aria-label="Nueva automatización" onClick={() => focusById('auto-account')}><Plus size={15} aria-hidden="true" /> <span className="btn-label">Nueva automatización</span></button></PageActions>
+    <section aria-labelledby="auto-list-title">
+      <div className="section-h"><h3 id="auto-list-title">Tus automatizaciones</h3><p className="muted">Cada regla responde por mensaje privado cuando un comentario contiene sus palabras clave.</p></div>
+      {rows.length ? <div className="recipe-grid">{rows.map((row) => { const owner = accounts.find((item) => item.accountId === row.accountId)?.username; return <article className="automation-row tile" key={row.automationId}>
+        <div className="recipe-flow">
+          {row.scope === 'account' ? <span className="recipe-thumb ph"><Layers size={18} aria-hidden="true" /></span> : <MiniThumb size="recipe" item={media.find(m => m.mediaId === row.mediaId)} />}
+          <ArrowRight size={16} className="recipe-arrow" aria-hidden="true" />
+          <div className="recipe-body">
+            <strong>{row.name}</strong>
+            <span className="dm">{sampleReply(row.replyText, row.keywords[0]?.phrase) || 'Sin mensaje'}</span>
+            <div className="keyword-list">{row.keywords.length ? row.keywords.map((keyword) => <span className="kw-chip" key={keyword.phrase}>{keyword.phrase}</span>) : <span className="muted">Sin palabras clave</span>}</div>
+          </div>
+        </div>
+        <div className="recipe-scope muted"><RingAvatar username={owner} size="sm" /> <span className="recipe-scope-text">@{owner || 'Cuenta'} · {automationTargetLabel(row, media)}</span></div>
+        <div className="chip-row">
+          {row.scope === 'account' && <Status value="General" tone="neutral" />}
+          <Status value={row.status === 'enabled' ? 'Activa' : 'Pausada'} tone={row.status === 'enabled' ? 'good' : 'neutral'} />
+          <Status value={row.realEnabled ? 'Real autorizado' : 'Solo prueba'} tone={row.realEnabled ? 'warn' : 'neutral'} />
+          {row.publicReplyEnabled && <Status value={`Respuesta pública · ${variantCountLabel(row.publicReplyVariants?.length ?? 0)}`} tone="neutral" />}
+        </div>
+        <div className="tile-actions">
+          <button className={row.realEnabled ? 'btn small' : 'btn btn-danger small'} onClick={() => void toggleReal(row)}>{row.realEnabled ? <ShieldOff size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />} {row.realEnabled ? 'Quitar permiso real' : 'Autorizar real'}</button>
+          <span className="tile-actions-icons">
+            <button className="btn-icon" title={row.status === 'enabled' ? 'Pausar' : 'Activar'} aria-label={row.status === 'enabled' ? 'Pausar' : 'Activar'} onClick={() => void act(() => api(`/api/automations/${row.automationId}/enabled`, 'PATCH', { accountId: row.accountId, enabled: row.status !== 'enabled' }), row.status === 'enabled' ? 'Automatización pausada.' : 'Automatización activada con corte desde ahora.')}>{row.status === 'enabled' ? <Pause size={15} /> : <Play size={15} />}</button>
+            <button className="btn-icon" title="Editar" aria-label="Editar" onClick={() => setEditing(row)}><Pencil size={15} /></button>
+            <button className="btn-icon danger" title="Archivar" aria-label="Archivar" onClick={() => void archive(row)}><Archive size={15} /></button>
+          </span>
+        </div>
+      </article>; })}</div> : <Empty icon={Zap} title="Aún no hay automatizaciones" detail="Cree una automatización asociada a una de sus publicaciones. Empieza en modo prueba." action={() => focusById('auto-account')} actionLabel="Crear la primera automatización" primary />}
+    </section>
     {editing && <AutomationEditDialog row={editing} mediaOptions={media.filter((item) => item.accountId === editing.accountId).map((item) => ({ id: item.mediaId, label: mediaLabel(item) }))} onClose={() => setEditing(null)} onSave={async (values) => {
       const saved = await act(() => api(`/api/automations/${editing.automationId}`, 'PUT', { accountId: editing.accountId, mediaId: editing.scope === 'account' ? null : values.mediaId, name: values.name, replyText: values.replyText, matchMode: values.matchMode, buttons: editing.buttons ?? [], keywords: values.keywords.split(',').map((keyword) => keyword.trim()).filter(Boolean), publicReplyEnabled: values.publicReplyEnabled, publicReplyVariants: parseVariantLines(values.publicReplyVariants) }), 'Automatización actualizada; se invalidaron elementos con plantilla anterior.');
       if (saved) setEditing(null);
     }} />}
-  </div>
-<div className="two-col">
-<div className="col-main"><form className="panel form-panel" onSubmit={(event) => void create(event)}><div className="panel-heading"><div><h3>Nueva automatización</h3><p className="muted">Seleccione primero la cuenta; las publicaciones pertenecen a esa cuenta.</p></div></div><div className="seq-header"><span className="seq-num">1</span> Dónde responder</div><div className="form-grid"><Field label="Cuenta"><select id="auto-account" required value={accountId} onChange={(event) => { setAccountId(event.target.value); setMediaId(''); }}><option value="">Seleccione una cuenta</option>{accounts.map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select></Field><Field label="Publicación"><select required disabled={!accountId} value={mediaId} onChange={(event) => setMediaId(event.target.value)}><option value="">Seleccione una publicación</option><option value={GENERAL_MEDIA_OPTION}>Todas las publicaciones (general)</option>{ownMedia.map((item) => <option key={item.mediaId} value={item.mediaId}>{mediaLabel(item)}</option>)}</select>{mediaId === GENERAL_MEDIA_OPTION && <small className="hint">Se aplica a cualquier publicación de la cuenta que no tenga su propia automatización; solo comentarios posteriores a la activación.</small>}</Field><Field label="Nombre"><input required value={name} onChange={(event) => setName(event.target.value)} /></Field></div><div className="seq-header"><span className="seq-num">2</span> Cuándo</div><div className="form-grid"><Field label="Palabras clave · separadas por coma"><input required value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="guia, ebook" /></Field><Field label="Coincidencia"><select value={mode} onChange={(event) => setMode(event.target.value)}><option value="contains">Frase dentro del comentario</option><option value="exact">Comentario exacto</option></select></Field></div><div className="seq-header"><span className="seq-num">3</span> Qué responde</div><div className="form-grid full-width"><Field label="Respuesta · variables {{username}}, {{comment}}, {{keyword}}"><textarea required rows={4} value={replyText} onChange={(event) => setReplyText(event.target.value)} /></Field></div><div className="seq-header"><span className="seq-num">4</span> Botones (opcional)</div><div className="form-grid"><Field label="Botón URL opcional · título"><input maxLength={20} value={buttonTitle} onChange={(event) => setButtonTitle(event.target.value)} placeholder="Ver recurso" /></Field><Field label="URL HTTPS"><input type="url" value={buttonUrl} onChange={(event) => setButtonUrl(event.target.value)} placeholder="https://…" /></Field><Field label="Segundo botón · título opcional"><input maxLength={20} value={buttonTitle2} onChange={(event) => setButtonTitle2(event.target.value)} /></Field><Field label="Segundo botón · URL HTTPS"><input type="url" value={buttonUrl2} onChange={(event) => setButtonUrl2(event.target.value)} /></Field></div><p className="hint">{MEDIA_LINK_TIP}</p><div className="seq-header"><span className="seq-num">5</span> Respuesta pública (opcional)</div><PublicReplyFields idPrefix="new" enabled={publicEnabled} setEnabled={setPublicEnabled} text={publicVariants} setText={setPublicVariants} /><p className="hint">Puede añadir cero, uno o dos botones URL en esta pantalla. Las palabras clave son sinónimos: si varias aparecen en un mismo comentario, se procesa una sola coincidencia.</p><div><button className="btn-main" disabled={!accountId || !mediaId}>Guardar automatización</button></div></form>
-    </div>
-<aside className="side">
+    <div className="composer">
+      <form className="panel form-panel composer-form" onSubmit={(event) => void create(event)}><div className="panel-heading"><div><h3>Nueva automatización</h3><p className="muted">Seleccione primero la cuenta; las publicaciones pertenecen a esa cuenta.</p></div></div>
+        <div className="seq-header"><span className="seq-num">1</span> Dónde responder</div><div className="form-grid"><Field label="Cuenta"><select id="auto-account" required value={accountId} onChange={(event) => { setAccountId(event.target.value); setMediaId(''); }}><option value="">Seleccione una cuenta</option>{accounts.map((account) => <option key={account.accountId} value={account.accountId}>@{account.username}</option>)}</select></Field><Field label="Publicación"><select required disabled={!accountId} value={mediaId} onChange={(event) => setMediaId(event.target.value)}><option value="">Seleccione una publicación</option><option value={GENERAL_MEDIA_OPTION}>Todas las publicaciones (general)</option>{ownMedia.map((item) => <option key={item.mediaId} value={item.mediaId}>{mediaLabel(item)}</option>)}</select>{mediaId === GENERAL_MEDIA_OPTION && <small className="hint">Se aplica a cualquier publicación de la cuenta que no tenga su propia automatización; solo comentarios posteriores a la activación.</small>}</Field><Field label="Nombre"><input required value={name} onChange={(event) => setName(event.target.value)} /></Field></div>
+        <div className="seq-header"><span className="seq-num">2</span> Cuándo</div><div className="form-grid"><Field label="Palabras clave · separadas por coma"><input required value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="guia, ebook" /></Field><Field label="Coincidencia"><select value={mode} onChange={(event) => setMode(event.target.value)}><option value="contains">Frase dentro del comentario</option><option value="exact">Comentario exacto</option></select></Field></div>
+        <div className="seq-header"><span className="seq-num">3</span> Qué responde</div><div className="form-grid full-width"><Field label="Respuesta · variables {{username}}, {{comment}}, {{keyword}}"><textarea required rows={4} value={replyText} onChange={(event) => setReplyText(event.target.value)} /></Field></div>
+        <div className="seq-header"><span className="seq-num">4</span> Botones (opcional)</div><div className="form-grid"><Field label="Botón URL opcional · título"><input maxLength={20} value={buttonTitle} onChange={(event) => setButtonTitle(event.target.value)} placeholder="Ver recurso" /></Field><Field label="URL HTTPS"><input type="url" value={buttonUrl} onChange={(event) => setButtonUrl(event.target.value)} placeholder="https://…" /></Field><Field label="Segundo botón · título opcional"><input maxLength={20} value={buttonTitle2} onChange={(event) => setButtonTitle2(event.target.value)} /></Field><Field label="Segundo botón · URL HTTPS"><input type="url" value={buttonUrl2} onChange={(event) => setButtonUrl2(event.target.value)} /></Field></div><p className="hint">{MEDIA_LINK_TIP}</p>
+        <div className="seq-header"><span className="seq-num">5</span> Respuesta pública (opcional)</div><PublicReplyFields idPrefix="new" enabled={publicEnabled} setEnabled={setPublicEnabled} text={publicVariants} setText={setPublicVariants} /><p className="hint">Puede añadir cero, uno o dos botones URL en esta pantalla. Las palabras clave son sinónimos: si varias aparecen en un mismo comentario, se procesa una sola coincidencia.</p>
+        <div><button className="btn-main" disabled={!accountId || !mediaId}>Guardar automatización</button></div></form>
+      <aside className="composer-preview" aria-label="Vista previa del mensaje privado">
         <div className="phone">
           <div className="screen">
             <div className="chat-top">
-              <RingAvatar username={accounts.find(a => a.accountId === accountId)?.username} />
+              <RingAvatar username={previewUser} />
               <div>
                 <b>Vista previa</b>
-                <small>@{accounts.find(a => a.accountId === accountId)?.username ?? 'cuenta'}</small>
+                <small>@{previewUser ?? 'cuenta'}</small>
               </div>
             </div>
             <div className="chat">
@@ -435,8 +573,8 @@ function AutomationView({ accounts, media, rows, selected, api, act, confirm }: 
           </div>
         </div>
       </aside>
-</div>
-</div>;
+    </div>
+  </div>;
 }
 
 function AutomationEditDialog({ row, mediaOptions, onSave, onClose }: { row: Automation; mediaOptions: Array<{ id: string; label: string }>; onSave(values: { name: string; mediaId: string; keywords: string; replyText: string; matchMode: 'exact' | 'contains'; publicReplyEnabled: boolean; publicReplyVariants: string }): Promise<void>; onClose(): void }) {
@@ -525,7 +663,19 @@ function ConversationInspector({ item, api }: { item: QueueItem; api: Api }) {
 }
 
 function MonitorView({ accounts, status, onNavigate, api, act }: { accounts: Account[]; status: boolean; onNavigate(id: string): void; api: Api; act: Act }) {
-  return <div className="panel"><div className="panel-heading"><div><h3>Monitoreo</h3><p className="muted">El monitoreo siempre inicia apagado al reiniciar la aplicación.</p></div><Status value={status ? 'Activo' : 'Detenido'} tone={status ? 'good' : 'neutral'} /></div><div className="row-actions"><button className="btn-main" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'start' }), 'Monitoreo iniciado para cuentas validadas.')}>Iniciar todas</button><button className="btn" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'stop' }), 'Todo el monitoreo se detuvo.')}>Detener todas</button></div>{accounts.length ? <div className="table-wrap"><table><thead><tr><th>Cuenta</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.accountId}><td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={account.username}/> @{account.username}</div></td><td>{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : <Status value="En monitoreo" tone="good" />}</td><td><button className="btn small" onClick={() => void act(() => api(`/api/monitor/${account.accountId}`, 'POST', { action: account.monitoringPaused ? 'start' : 'stop' }), account.monitoringPaused ? 'Cuenta en monitoreo.' : 'Monitoreo pausado.')}>{account.monitoringPaused ? <><Play size={14}/> Reanudar</> : <><Pause size={14}/> Detener</>}</button></td></tr>)}</tbody></table></div> : <Empty title="Sin cuentas disponibles" detail="Valide y seleccione una cuenta antes de iniciar el monitoreo." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}</div>;
+  return <section aria-labelledby="monitor-title">
+    <PageActions><button className="btn-main" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'start' }), 'Monitoreo iniciado para cuentas validadas.')}><Play size={15} aria-hidden="true" /> Iniciar todas</button><button className="btn" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'stop' }), 'Todo el monitoreo se detuvo.')}><Pause size={15} aria-hidden="true" /> Detener todas</button></PageActions>
+    <div className={status ? 'monitor-hero on' : 'monitor-hero'}>
+      <span className="monitor-pulse" aria-hidden="true"><Radio size={20} /></span>
+      <div><h3 id="monitor-title">Monitoreo</h3><p className="muted">El monitoreo siempre inicia apagado al reiniciar la aplicación.</p></div>
+      <Status value={status ? 'Activo' : 'Detenido'} tone={status ? 'good' : 'neutral'} />
+    </div>
+    {accounts.length ? <div className="tile-grid">{accounts.map((account) => <article className={account.monitoringPaused ? 'tile monitor-tile' : 'tile monitor-tile live'} key={account.accountId}>
+      <div className="tile-head"><RingAvatar username={account.username} /><div className="tile-title"><strong>@{account.username}</strong><span className="muted">{account.last_sync ? <>Última sincronización <span className="mono nowrap">{formatDate(account.last_sync)}</span></> : 'Sin sincronización'}</span></div></div>
+      <div className="monitor-state"><span className="monitor-state-dot" aria-hidden="true" /><span className="monitor-state-text">{account.monitoringPaused ? 'Pausado' : 'En monitoreo'}</span></div>
+      <div className="tile-actions"><button className="btn small" onClick={() => void act(() => api(`/api/monitor/${account.accountId}`, 'POST', { action: account.monitoringPaused ? 'start' : 'stop' }), account.monitoringPaused ? 'Cuenta en monitoreo.' : 'Monitoreo pausado.')}>{account.monitoringPaused ? <><Play size={14}/> Reanudar</> : <><Pause size={14}/> Detener</>}</button></div>
+    </article>)}</div> : <Empty icon={Radio} title="Sin cuentas disponibles" detail="Valide y seleccione una cuenta antes de iniciar el monitoreo." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}
+  </section>;
 }
 
 const WINDOW_LABELS: Record<string, string> = { '2h': 'Últimas 2 horas', '24h': 'Últimas 24 horas', '3d': 'Últimos 3 días', '7d': 'Últimos 7 días', custom: 'Desde una fecha…' };
@@ -558,29 +708,34 @@ function BacklogView({ allAccounts, accounts, selected, onSelectAccount, job, se
     const ok = await act(() => api('/api/backlog/process', 'POST', { accountId: processAccount, automationId, commentIds: selectedIds, confirmed: true }), 'Selección explícita añadida a la cola.');
     if (ok) { setSelectedIds([]); await loadPending(); }
   }
-  return <div className="panel"><div className="panel-heading"><div><h3>Analizar comentarios</h3><p className="muted">El análisis solo clasifica; no añade mensajes a la cola ni los envía.</p></div></div><div className="form-grid compact"><Field label="Ventana"><select value={windowValue} onChange={(event) => setWindow(event.target.value)}>{['2h', '24h', '3d', '7d', 'custom'].map((value) => <option key={value} value={value}>{WINDOW_LABELS[value]}</option>)}</select></Field>{windowValue === 'custom' && <Field label="Desde"><input type="datetime-local" value={customSince} onChange={(event) => setCustomSince(event.target.value)} /></Field>}</div><div className="row-actions"><button id="backlog-start" className="btn-main" disabled={!!job && job.status === 'running'} onClick={() => void act(async () => { const result = await api('/api/backlog/jobs', 'POST', { accountId: selected, window: windowValue, ...(customSince ? { customSince: new Date(customSince).toISOString() } : {}) }); setJob({ id: result.jobId, status: 'running', createdAt: new Date().toISOString() }); }, 'Análisis iniciado; puede continuar usando otras secciones.')}>Iniciar análisis</button>{job?.status === 'running' && <button className="btn" disabled={cancelling} onClick={() => { setCancelling(true); void api(`/api/backlog/jobs/${job.id}/cancel`, 'POST', {}).catch(() => setCancelling(false)); }}>{cancelling ? 'Cancelando…' : 'Cancelar'}</button>}</div>
-    {!job && <p className="hint spaced">Sin análisis en esta sesión. Elija una ventana de tiempo e inicie el análisis para ver qué comentarios habrían coincidido.</p>}
-    {job && <div className="job-status">Análisis: {job.status === 'running' ? <Status value="En curso" tone="neutral" /> : job.status === 'complete' ? <Status value="Finalizado" tone="good" /> : job.status === 'partial' ? <Status value="Cobertura parcial" tone="warn" /> : job.status === 'cancelled' ? <Status value="Cancelado" tone="neutral" /> : <Status value="Error" tone="danger" />} <span>{job.status === 'partial' ? 'Una o más cuentas tuvieron cobertura incompleta.' : 'El análisis no envía mensajes.'}</span></div>}
-    {job && running && <ScanProgressPanel progress={job.progress} elapsedMs={tick - Date.parse(job.createdAt ?? '') || 0} />}
-    {job && !running && <ScanSummaryCard status={job.status} summary={summary} />}
-    <div className="pending-review">
-      <div className="panel-heading"><div><h3>Comentarios pendientes de revisión</h3><p className="muted">Resultados del último análisis completo; se conservan al recargar. Ya en cola o con más de 7 días no aparecen.</p></div>{pending && <span className="count-badge">{pending.total} pendientes</span>}</div>
-      {!processAccount ? (choices.length ? <div className="account-prompt" role="group" aria-labelledby="backlog-account-prompt"><strong id="backlog-account-prompt">Elija una cuenta para ver sus comentarios pendientes</strong><p className="muted">La revisión se hace de una cuenta a la vez.</p><div className="account-prompt-chips">{choices.map((account) => <button key={account.accountId} className="account-chip" onClick={() => onSelectAccount(account.accountId)}><RingAvatar username={account.username} /> @{account.username}</button>)}</div></div> : <p className="hint">Aún no hay cuentas disponibles.</p>)
+  return <div className="backlog-page">
+    <section className="panel analyze-panel" aria-labelledby="analyze-title">
+      <div className="panel-heading"><div><h3 id="analyze-title">Analizar comentarios</h3><p className="muted">El análisis solo clasifica; no añade mensajes a la cola ni los envía.</p></div></div>
+      <div className="analyze-bar"><div className="form-grid compact"><Field label="Ventana"><select value={windowValue} onChange={(event) => setWindow(event.target.value)}>{['2h', '24h', '3d', '7d', 'custom'].map((value) => <option key={value} value={value}>{WINDOW_LABELS[value]}</option>)}</select></Field>{windowValue === 'custom' && <Field label="Desde"><input type="datetime-local" value={customSince} onChange={(event) => setCustomSince(event.target.value)} /></Field>}</div><div className="row-actions"><button id="backlog-start" className="btn-main" disabled={!!job && job.status === 'running'} onClick={() => void act(async () => { const result = await api('/api/backlog/jobs', 'POST', { accountId: selected, window: windowValue, ...(customSince ? { customSince: new Date(customSince).toISOString() } : {}) }); setJob({ id: result.jobId, status: 'running', createdAt: new Date().toISOString() }); }, 'Análisis iniciado; puede continuar usando otras secciones.')}><ScanEye size={15} aria-hidden="true" /> Iniciar análisis</button>{job?.status === 'running' && <button className="btn" disabled={cancelling} onClick={() => { setCancelling(true); void api(`/api/backlog/jobs/${job.id}/cancel`, 'POST', {}).catch(() => setCancelling(false)); }}>{cancelling ? 'Cancelando…' : 'Cancelar'}</button>}</div></div>
+      {!job && <p className="hint spaced">Sin análisis en esta sesión. Elija una ventana de tiempo e inicie el análisis para ver qué comentarios habrían coincidido.</p>}
+      {job && <div className="job-status">Análisis: {job.status === 'running' ? <Status value="En curso" tone="neutral" /> : job.status === 'complete' ? <Status value="Finalizado" tone="good" /> : job.status === 'partial' ? <Status value="Cobertura parcial" tone="warn" /> : job.status === 'cancelled' ? <Status value="Cancelado" tone="neutral" /> : <Status value="Error" tone="danger" />} <span>{job.status === 'partial' ? 'Una o más cuentas tuvieron cobertura incompleta.' : 'El análisis no envía mensajes.'}</span></div>}
+      {job && running && <ScanProgressPanel progress={job.progress} elapsedMs={tick - Date.parse(job.createdAt ?? '') || 0} />}
+      {job && !running && <ScanSummaryCard status={job.status} summary={summary} />}
+    </section>
+    <section className="pending-review" aria-labelledby="pending-title">
+      <div className="section-h row"><div><h3 id="pending-title">Comentarios pendientes de revisión</h3><p className="muted">Resultados del último análisis completo; se conservan al recargar. Ya en cola o con más de 7 días no aparecen.</p></div>{pending && <span className="count-badge">{pending.total} pendientes</span>}</div>
+      {!processAccount ? (choices.length ? <AccountPrompt id="backlog-account-prompt" title="Elija una cuenta para ver sus comentarios pendientes" detail="La revisión se hace de una cuenta a la vez." choices={choices} onSelect={onSelectAccount} /> : <p className="hint">Aún no hay cuentas disponibles.</p>)
         : pendingError ? <p className="form-problem" role="alert">No se pudieron cargar los comentarios pendientes. <button className="btn-link text-button" onClick={() => void loadPending()}>Reintentar</button></p>
         : !pending ? <p className="hint">Cargando comentarios pendientes…</p>
         : <>
-          <p className="muted" role="status">{pending.lastAnalyzedAt ? `Última revisión: ${formatDate(pending.lastAnalyzedAt)}` : 'Esta cuenta aún no tiene un análisis completo.'} · {pending.total} {pending.total === 1 ? 'comentario pendiente' : 'comentarios pendientes'}</p>
+          <p className="muted status-line" role="status">{pending.lastAnalyzedAt ? `Última revisión: ${formatDate(pending.lastAnalyzedAt)}` : 'Esta cuenta aún no tiene un análisis completo.'} · {pending.total} {pending.total === 1 ? 'comentario pendiente' : 'comentarios pendientes'}</p>
           {items.length > 0 ? <>
-            <div className="table-wrap"><table><thead><tr><th>Seleccionar</th><th>Usuario</th><th>Comentario</th><th>Fecha</th><th>Automatización · publicación</th><th>Palabra clave</th><th>Vista previa del mensaje</th></tr></thead><tbody>{items.map((item) => <tr key={`${item.commentId}-${item.automationId}`}>
-              <td><input type="checkbox" aria-label={`Seleccionar comentario de @${item.username || 'usuario'}: ${item.commentText.slice(0, 40)}`} disabled={!eligibleForChoice(item)} checked={selectedIds.includes(item.commentId)} onChange={(event) => setSelectedIds(event.target.checked ? [...selectedIds, item.commentId] : selectedIds.filter((id) => id !== item.commentId))} /></td>
-              <td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={item.username}/> {item.username ? `@${item.username}` : '—'}</div></td><td className="comment-cell" title={item.commentText}>{item.commentText || '—'}</td><td>{item.commentCreatedAt ? formatDate(item.commentCreatedAt) : '—'}</td><td>{item.automationName}{item.scope === 'account' && <> <Status value="General" tone="neutral" /></>}<small className="muted cell-sub">{mediaLabel({ mediaId: item.mediaId, caption: item.mediaCaption, mediaType: item.mediaType, publishedAt: item.mediaPublishedAt })}</small></td><td>{item.matchedKeywords.join(', ') || '—'}</td>
+            <div className="process-bar"><div className="form-grid compact"><Field label="Cuenta"><input readOnly value={`@${accounts.find((item) => item.accountId === processAccount)?.username ?? choices.find((item) => item.accountId === processAccount)?.username ?? ''}`} /></Field><Field label="Procesar con automatización"><select value={automationId} onChange={(event) => { setAutomationId(event.target.value); setSelectedIds([]); }}><option value="">Seleccione</option>{rows.filter((row) => row.status === 'enabled' && row.accountId === processAccount).map((row) => <option key={row.automationId} value={row.automationId}>{row.name}</option>)}</select></Field></div><div className="row-actions"><span className="muted selection-count">{selectedIds.length} {selectedIds.length === 1 ? 'seleccionado' : 'seleccionados'}</span><button className="btn" disabled={!automationId} onClick={() => setSelectedIds(items.filter((item) => item.automationId === automationId).map((item) => item.commentId))}>Seleccionar todos los visibles</button><button className="btn-main" disabled={!selectedIds.length || !automationId || !processAccount} onClick={() => void processSelection()}>Procesar selección revisada</button></div></div>
+            <div className="table-wrap"><table className="dense-table"><thead><tr><th className="col-check"><span className="visually-hidden">Seleccionar</span></th><th>Usuario</th><th>Comentario</th><th>Fecha</th><th>Automatización · publicación</th><th>Palabra clave</th><th>Vista previa del mensaje</th></tr></thead><tbody>{items.map((item) => <tr key={`${item.commentId}-${item.automationId}`} className={selectedIds.includes(item.commentId) ? 'selected' : undefined}>
+              <td className="col-check"><input type="checkbox" aria-label={`Seleccionar comentario de @${item.username || 'usuario'}: ${item.commentText.slice(0, 40)}`} disabled={!eligibleForChoice(item)} checked={selectedIds.includes(item.commentId)} onChange={(event) => setSelectedIds(event.target.checked ? [...selectedIds, item.commentId] : selectedIds.filter((id) => id !== item.commentId))} /></td>
+              <td><div className="cell-user"><RingAvatar username={item.username} size="sm" /> {item.username ? `@${item.username}` : '—'}</div></td><td className="comment-cell" title={item.commentText}>{item.commentText || '—'}</td><td className="mono nowrap">{item.commentCreatedAt ? formatDate(item.commentCreatedAt) : '—'}</td><td>{item.automationName}{item.scope === 'account' && <> <Status value="General" tone="neutral" /></>}<small className="muted cell-sub">{mediaLabel({ mediaId: item.mediaId, caption: item.mediaCaption, mediaType: item.mediaType, publishedAt: item.mediaPublishedAt })}</small></td><td>{item.matchedKeywords.length ? item.matchedKeywords.map((keyword, index) => <span className="kw-chip" key={`${keyword}-${index}`}>{keyword}</span>) : '—'}</td>
               <td>{item.previewText ? <details className="message-preview"><summary>Ver mensaje</summary><div className="preview-box"><p>{item.previewText}</p>{item.previewButtons.length > 0 && <ul>{item.previewButtons.map((button) => <li key={button.url}>Botón «{button.title}» → {button.url}</li>)}</ul>}<small className="muted">Vista previa; nada se envía hasta procesar.</small></div></details> : <span className="muted">Sin vista previa</span>}</td>
             </tr>)}</tbody></table></div>
             {pending.total > PENDING_PAGE && <div className="pagination"><button className="btn" disabled={pendingOffset <= 0} onClick={() => setPendingOffset(Math.max(0, pendingOffset - PENDING_PAGE))}>Anterior</button><span>{pendingOffset + 1}–{pendingOffset + items.length} de {pending.total}</span><button className="btn" disabled={pendingOffset + items.length >= pending.total} onClick={() => setPendingOffset(pendingOffset + PENDING_PAGE)}>Siguiente</button></div>}
-            <div className="form-grid compact"><Field label="Cuenta"><input readOnly value={`@${accounts.find((item) => item.accountId === processAccount)?.username ?? choices.find((item) => item.accountId === processAccount)?.username ?? ''}`} /></Field><Field label="Procesar con automatización"><select value={automationId} onChange={(event) => { setAutomationId(event.target.value); setSelectedIds([]); }}><option value="">Seleccione</option>{rows.filter((row) => row.status === 'enabled' && row.accountId === processAccount).map((row) => <option key={row.automationId} value={row.automationId}>{row.name}</option>)}</select></Field><button className="btn" disabled={!automationId} onClick={() => setSelectedIds(items.filter((item) => item.automationId === automationId).map((item) => item.commentId))}>Seleccionar todos los visibles</button><button className="btn-main" disabled={!selectedIds.length || !automationId || !processAccount} onClick={() => void processSelection()}>Procesar selección revisada</button></div>
-          </> : <Empty title="No hay comentarios pendientes" detail="Analice los comentarios de esta cuenta para encontrar los que coinciden con una automatización." action={() => focusById('backlog-start')} actionLabel="Analizar comentarios" primary />}
+          </> : <Empty icon={Inbox} title="No hay comentarios pendientes" detail="Analice los comentarios de esta cuenta para encontrar los que coinciden con una automatización." action={() => focusById('backlog-start')} actionLabel="Analizar comentarios" primary />}
         </>}
-    </div></div>;
+    </section>
+  </div>;
 }
 
 function ScanProgressPanel({ progress, elapsedMs }: { progress?: ScanProgressDto; elapsedMs: number }) {
@@ -670,40 +825,42 @@ function QueueView({ items, total, offset, setOffset, state, setState, onNavigat
       setVerifying(false);
     }
   }
-  return <div className="panel">
-    <div className="panel-heading">
-      <div><h3>Cola e historial</h3><p className="muted">Los resultados ambiguos nunca son reintentables automáticamente.</p></div>
-      <span className="count-badge">{total} registros</span>
+  return <section className="queue-page" aria-labelledby="queue-title">
+    <div className="section-h row">
+      <div><h3 id="queue-title">Cola e historial</h3><p className="muted">Los resultados ambiguos nunca son reintentables automáticamente.</p></div>
+      <div className="queue-tools">
+        <label className="queue-filter"><ListFilter size={15} aria-hidden="true" /><span className="visually-hidden">Filtrar por estado</span>
+          <select value={state} onChange={(event) => setState(event.target.value)}>
+            <option value="all">Todos los estados</option>
+            {['SIMULATED', 'QUEUED', 'FAILED_RETRYABLE', 'FAILED_PERMANENT', 'UNKNOWN_OUTCOME', 'SENT', 'EXPIRED', 'SKIPPED'].map((value) => <option key={value} value={value}>{stateLabel(value)}</option>)}
+          </select>
+        </label>
+        <span className="count-badge">{total} registros</span>
+      </div>
     </div>
-    <label className="field queue-filter">Filtrar por estado
-      <select value={state} onChange={(event) => setState(event.target.value)}>
-        <option value="all">Todos los estados</option>
-        {['SIMULATED', 'QUEUED', 'FAILED_RETRYABLE', 'FAILED_PERMANENT', 'UNKNOWN_OUTCOME', 'SENT', 'EXPIRED', 'SKIPPED'].map((value) => <option key={value} value={value}>{stateLabel(value)}</option>)}
-      </select>
-    </label>
     {detailError && <p className="form-problem" role="alert">No se pudieron cargar los detalles del intento.</p>}
     {items.length ? <>
-      <div className="table-wrap"><table>
+      <div className="table-wrap"><table className="dense-table queue-table">
         <thead><tr><th>Cuenta</th><th>Autor</th><th>Comentario</th><th>Estado</th><th>Intentos</th><th>ID de mensaje</th><th>Código seguro</th><th>Fecha</th><th>Historial</th></tr></thead>
-        <tbody>{items.map((item) => <tr key={item.id}>
-          <td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={item.username}/> @{item.username}</div></td>
-<td><div style={{display:"flex", alignItems:"center", gap:"8px"}}><RingAvatar username={item.commentUsername}/> {item.commentUsername ? `@${item.commentUsername}` : '—'}</div></td>
+        <tbody>{items.map((item) => <tr key={item.id} className={expanded === item.id ? 'expanded' : undefined}>
+          <td><div className="cell-user"><RingAvatar username={item.username} size="sm" /> @{item.username}</div></td>
+<td><div className="cell-user"><RingAvatar username={item.commentUsername} size="sm" /> {item.commentUsername ? `@${item.commentUsername}` : '—'}</div></td>
 <td className="comment-cell" title={item.commentText || item.commentId}>{item.commentText || item.commentId}</td><td><Status value={stateLabel(item.state)} tone={queueTone(item.state)} />{item.state === 'UNKNOWN_OUTCOME' && <small className="state-hint">Revise manualmente en Instagram; nunca se reintenta.</small>}</td>
-          <td>{item.attemptCount}</td><td>{item.messageId ?? '—'}</td><td>{item.safeErrorCode ?? '—'}</td>
-          <td>{formatDate(item.createdAt)}</td><td><button className="btn-link text-button" onClick={() => void showAttempts(item)}>{expanded === item.id ? 'Ocultar' : 'Ver'}</button></td>
+          <td className="mono">{item.attemptCount}</td><td className="mono id-cell">{item.messageId ?? '—'}</td><td className="mono id-cell">{item.safeErrorCode ?? '—'}</td>
+          <td className="mono nowrap">{formatDate(item.createdAt)}</td><td><button className="btn-link text-button" onClick={() => void showAttempts(item)}>{expanded === item.id ? 'Ocultar' : 'Ver'}</button></td>
         </tr>).flatMap((row, index) => {
           const item = items[index]!;
-          return expanded === item.id ? [row, <tr key={`${item.id}-events`}><td colSpan={9}>{(() => { const message = describeQueuePayload(item); return <div className="queue-message"><strong>{message.label}</strong>{message.text ? <p className="preview-box">{message.text}</p> : <p className="muted">Sin texto de mensaje guardado.</p>}{message.buttons.length > 0 && <ul>{message.buttons.map((button) => <li key={button.url}>Botón «{button.title}» → {button.url}</li>)}</ul>}</div>; })()}<FollowGateDetail item={item} events={gateEvents} />{(() => { const reply = describePublicReply(item); if (!reply) return null; return <div className="queue-message public-reply-detail"><strong>{reply.label}</strong>{reply.text ? <p className="preview-box">{reply.text}</p> : <p className="muted">Sin texto guardado.</p>}{reply.hint && <small className="state-hint">{reply.hint}</small>}{item.publicReply?.safeErrorCode && !publicReplyErrorHint(item.publicReply.safeErrorCode) && <small className="muted">Código: {item.publicReply.safeErrorCode}</small>}{reply.canRetry && <div><button className="btn small" onClick={() => void retryPublic(item)}>Reintentar respuesta pública</button></div>}{publicEvents.length > 0 && <div className="attempt-list">{publicEvents.map((event, eventIndex) => <div key={`public-${event.at}-${eventIndex}`}><strong>público · {event.type}</strong><span>{formatDate(event.at)}</span><span>{event.replyId ?? event.safeErrorCode ?? 'Sin detalle adicional'}</span></div>)}</div>}</div>; })()}{item.state === 'SENT' && <div className="readback-check">
+          return expanded === item.id ? [row, <tr key={`${item.id}-events`} className="detail-row"><td colSpan={9}><div className="queue-detail">{(() => { const message = describeQueuePayload(item); return <div className="queue-message"><strong>{message.label}</strong>{message.text ? <p className="preview-box">{message.text}</p> : <p className="muted">Sin texto de mensaje guardado.</p>}{message.buttons.length > 0 && <ul>{message.buttons.map((button) => <li key={button.url}>Botón «{button.title}» → {button.url}</li>)}</ul>}</div>; })()}<FollowGateDetail item={item} events={gateEvents} />{(() => { const reply = describePublicReply(item); if (!reply) return null; return <div className="queue-message public-reply-detail"><strong>{reply.label}</strong>{reply.text ? <p className="preview-box">{reply.text}</p> : <p className="muted">Sin texto guardado.</p>}{reply.hint && <small className="state-hint">{reply.hint}</small>}{item.publicReply?.safeErrorCode && !publicReplyErrorHint(item.publicReply.safeErrorCode) && <small className="muted">Código: {item.publicReply.safeErrorCode}</small>}{reply.canRetry && <div><button className="btn small" onClick={() => void retryPublic(item)}>Reintentar respuesta pública</button></div>}{publicEvents.length > 0 && <div className="attempt-list">{publicEvents.map((event, eventIndex) => <div key={`public-${event.at}-${eventIndex}`}><strong>público · {event.type}</strong><span>{formatDate(event.at)}</span><span>{event.replyId ?? event.safeErrorCode ?? 'Sin detalle adicional'}</span></div>)}</div>}</div>; })()}{item.state === 'SENT' && <div className="readback-check">
             <button className="btn" disabled={verifying} onClick={() => void verifyReadback(item)}>{verifying ? 'Verificando…' : 'Verificar lectura'}</button>
             {verifyResult?.itemId === item.id && <span role="status">{verifyResult.text}</span>}
           </div>}{item.state === 'SENT' && <ConversationInspector key={`inspect-${item.id}`} item={item} api={api} />}<div className="attempt-list">
             {events.length ? events.map((event, eventIndex) => <div key={`${event.at}-${eventIndex}`}><strong>{event.type}</strong><span>{formatDate(event.at)}</span><span>{event.type === 'readback' ? readbackSummary(event) : (event.messageId ?? event.safeErrorCode ?? 'Sin detalle adicional')}</span></div>) : <span>{item.state === 'SIMULATED' ? 'Sin intentos: simulado, nada se envió.' : 'Sin intentos registrados.'}</span>}
-          </div></td></tr>] : [row];
+          </div></div></td></tr>] : [row];
         })}</tbody>
       </table></div>
       <div className="pagination"><button className="btn" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Anterior</button><span>{offset + 1}–{Math.min(offset + items.length, total)} de {total}</span><button className="btn" disabled={offset + items.length >= total} onClick={() => setOffset(offset + 50)}>Siguiente</button></div>
-    </> : <Empty title={state === 'all' ? 'La cola está vacía' : 'No hay registros con este estado'} detail={state === 'all' ? 'Los comentarios nuevos y los seleccionados manualmente aparecerán aquí.' : 'Pruebe con otro estado o con «Todos los estados».'} action={state === 'all' ? () => onNavigate('backlog') : () => setState('all')} actionLabel={state === 'all' ? 'Revisar comentarios pendientes' : 'Ver todos los estados'} primary />}
-  </div>;
+    </> : <Empty icon={History} title={state === 'all' ? 'La cola está vacía' : 'No hay registros con este estado'} detail={state === 'all' ? 'Los comentarios nuevos y los seleccionados manualmente aparecerán aquí.' : 'Pruebe con otro estado o con «Todos los estados».'} action={state === 'all' ? () => onNavigate('backlog') : () => setState('all')} actionLabel={state === 'all' ? 'Revisar comentarios pendientes' : 'Ver todos los estados'} primary />}
+  </section>;
 }
 
 /**
@@ -740,11 +897,14 @@ function SettingsView({ mode, api, act, confirm, features }: { mode: 'checking' 
     if (!(await confirm({ title: 'Importar .env del proyecto', body: 'Se leerá una vez el archivo .env configurado en SOCIAL_DESK_IMPORT_ENV_PATH y se importarán únicamente credenciales Meta permitidas, cifradas como una conexión nueva. El archivo no se modifica y el secreto no se muestra.', confirmLabel: 'Importar credenciales' }))) return;
     await act(() => api('/api/settings/import-root-env', 'POST', { confirmed: true }), 'Conexión importada de forma cifrada. Valídela y seleccione la cuenta.');
   }
-  return <div className="panel"><div className="panel-heading"><div><h3>Seguridad y configuración</h3><p className="muted">La aplicación se ejecuta solo en este equipo; el monitoreo no se reactiva al reiniciar.</p></div></div>
-    <div className="settings-row"><div><strong>Modo de envío</strong><span className="muted">{mode === 'checking' ? 'Verificando el modo de envío…' : mode === 'dry' ? 'Dry Run activo: no se envían respuestas.' : 'Modo real activo; requiere automatizaciones autorizadas.'}</span></div>{mode === 'checking' ? <Status value="Verificando…" tone="neutral" /> : mode === 'dry' ? <Status value="Dry Run" tone="good" /> : <Status value="Modo real" tone="warn" />}</div>
-    <div className="settings-row"><div><strong>Importar configuración existente</strong><span className="muted">{features.envImport ? 'Lee únicamente variables permitidas del archivo .env configurado y cifra el token como una conexión nueva. No modifica el archivo ni muestra el secreto.' : ENV_IMPORT_DISABLED_HINT}</span></div>{features.envImport ? <button className="btn" onClick={() => void importEnv()}>Importar .env del proyecto</button> : <Status value="Desactivada" tone="neutral" />}</div>
-    <div className="settings-row"><div><strong>Protección de cuenta heredada</strong><span className="muted">{features.legacyInterlock ? 'Los bloqueos previos se verifican antes de cualquier modo real. La aplicación nunca elimina bloqueos ni contadores externos.' : 'Desactivada: no se lee ninguna carpeta de otra herramienta. Se activa con SOCIAL_DESK_LEGACY_ACCOUNTS_DIR o SOCIAL_DESK_LEGACY_HOLD_USERNAMES.'}</span></div>{features.legacyInterlock ? <Status value="Interlock local activo" tone="good" /> : <Status value="No configurada" tone="neutral" />}</div>
-  </div>;
+  return <section className="settings-page" aria-labelledby="settings-title">
+    <div className="section-h"><h3 id="settings-title">Seguridad y configuración</h3><p className="muted">La aplicación se ejecuta solo en este equipo; el monitoreo no se reactiva al reiniciar.</p></div>
+    <div className="settings-list">
+      <div className="settings-row"><span className={mode === 'real' ? 'ic bad' : 'ic warn'} aria-hidden="true">{mode === 'real' ? <Siren size={17} /> : <FlaskConical size={17} />}</span><div><strong>Modo de envío</strong><span className="muted">{mode === 'checking' ? 'Verificando el modo de envío…' : mode === 'dry' ? 'Dry Run activo: no se envían respuestas.' : 'Modo real activo; requiere automatizaciones autorizadas.'}</span></div>{mode === 'checking' ? <Status value="Verificando…" tone="neutral" /> : mode === 'dry' ? <Status value="Dry Run" tone="good" /> : <Status value="Modo real" tone="warn" />}</div>
+      <div className="settings-row"><span className="ic accent" aria-hidden="true"><FileDown size={17} /></span><div><strong>Importar configuración existente</strong><span className="muted">{features.envImport ? 'Lee únicamente variables permitidas del archivo .env configurado y cifra el token como una conexión nueva. No modifica el archivo ni muestra el secreto.' : ENV_IMPORT_DISABLED_HINT}</span></div>{features.envImport ? <button className="btn" onClick={() => void importEnv()}>Importar .env del proyecto</button> : <Status value="Desactivada" tone="neutral" />}</div>
+      <div className="settings-row"><span className="ic ok" aria-hidden="true"><Lock size={17} /></span><div><strong>Protección de cuenta heredada</strong><span className="muted">{features.legacyInterlock ? 'Los bloqueos previos se verifican antes de cualquier modo real. La aplicación nunca elimina bloqueos ni contadores externos.' : 'Desactivada: no se lee ninguna carpeta de otra herramienta. Se activa con SOCIAL_DESK_LEGACY_ACCOUNTS_DIR o SOCIAL_DESK_LEGACY_HOLD_USERNAMES.'}</span></div>{features.legacyInterlock ? <Status value="Interlock local activo" tone="good" /> : <Status value="No configurada" tone="neutral" />}</div>
+    </div>
+  </section>;
 }
 
 function MediaThumb({ item }: { item: Media }) {
@@ -756,13 +916,14 @@ function MediaThumb({ item }: { item: Media }) {
   </div>;
 }
 
-function MiniThumb({ item, size }: { item?: Media; size?: 'small' | 'mid' }) {
+function MiniThumb({ item, size }: { item?: Media | { mediaType?: string | null; thumbnailUrl?: string | null } | null; size?: 'small' | 'mid' | 'recipe' | 'post' }) {
   const [error, setError] = useState(false);
-  const cls = size === 'mid' ? 'media-thumb-mid' : 'media-thumb-small';
-  if (!item) return <div className={cls}><ImageIcon size={size === 'mid' ? 24 : 16} strokeWidth={1.5} /></div>;
+  const cls = size === 'recipe' ? 'recipe-thumb' : size === 'post' ? 'post-thumb' : size === 'mid' ? 'media-thumb-mid' : 'media-thumb-small';
+  const iconSize = size === 'small' || !size ? 16 : 22;
+  if (!item) return <span className={`${cls} ph`}><ImageIcon size={iconSize} strokeWidth={1.5} aria-hidden="true" /></span>;
   const TypeIcon = item.mediaType === 'VIDEO' || item.mediaType === 'REELS' ? Clapperboard : item.mediaType === 'CAROUSEL_ALBUM' ? Layers : ImageIcon;
   if (item.thumbnailUrl && !error) return <img src={item.thumbnailUrl} alt="" className={cls} loading="lazy" onError={() => setError(true)} />;
-  return <div className={cls}><TypeIcon size={size === 'mid' ? 24 : 16} strokeWidth={1.5} /></div>;
+  return <span className={`${cls} ph`}><TypeIcon size={iconSize} strokeWidth={1.5} aria-hidden="true" /></span>;
 }
 /* ---------- Shared pieces ---------- */
 
@@ -796,11 +957,11 @@ function ConnectionBadge({ status }: { status: string }) {
   if (status === 'disconnected') return <Status value="Desconectada" tone="neutral" />;
   return <Status value={status} tone="warn" />;
 }
-function Empty({ title, detail, action, actionLabel, primary }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean }) { return <div className="empty-state"><div className="empty-icon"><Circle size={24} strokeWidth={2} aria-hidden="true" /></div><strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
+function Empty({ title, detail, action, actionLabel, primary, icon: Icon = Inbox }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean; icon?: any }) { return <div className="empty-state"><div className="empty-icon"><Icon size={20} strokeWidth={1.9} aria-hidden="true" /></div><strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }); }
 function safeErrorLabel(code: string) { const labels: Record<string, string> = { account_not_found: 'La cuenta indicada no existe.', connection_not_found: 'La conexión indicada no existe.', invalid_request: 'Revise los campos e inténtelo de nuevo.', origin_or_csrf_rejected: 'La solicitud local no superó la protección de origen.', operation_rejected: 'La operación fue rechazada por una condición de seguridad o estado.', account_scan_failed: 'No se pudo completar el análisis para una cuenta.', follow_gate_invalid: 'La opción «Pedir primero que me sigan» no es válida.', follow_gate_message_invalid: 'Revise el «Mensaje previo»: es obligatorio, de hasta 640 caracteres y solo admite las variables indicadas.', follow_gate_button_title_invalid: 'Revise el «Título del botón»: de 1 a 20 caracteres, sin enlaces ni saltos de línea.', follow_gate_retired: FOLLOW_GATE_RETIRED_LABEL, interactive_mode_retired: INTERACTIVE_RETIRED_LABEL, ...ATTACHMENT_ERROR_LABELS, ...AI_ERROR_LABELS }; return labels[code] ?? 'Revise el estado de la cuenta y vuelva a intentarlo.'; }
 
-export function ModerationView({ accountFilter, allAccounts, onSelectAccount, onNavigate, api, act, confirm, mode }: { accountFilter: string; allAccounts: any[]; onSelectAccount: (id: string) => void; onNavigate: (id: string) => void; api: any; act: any; confirm: any; mode: string }) {
+export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelectAccount, onNavigate, api, act, confirm, mode }: { flagCounts?: Dashboard['moderation']; accountFilter: string; allAccounts: any[]; onSelectAccount: (id: string) => void; onNavigate: (id: string) => void; api: any; act: any; confirm: any; mode: string }) {
   const [settings, setSettings] = useState<any>(null);
   const [flags, setFlags] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -808,7 +969,14 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
   const [flagState, setFlagState] = useState('all');
   const [flagSource, setFlagSource] = useState('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  
+  // Presentational only: the flag shown in the detail pane, the mobile sheet, the left pane tab and the terms editor.
+  const [activeId, setActiveId] = useState('');
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [pane, setPane] = useState<'views' | 'rules' | 'ai'>('views');
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [aiRow, setAiRow] = useState<HTMLDivElement | null>(null);
+  const slots = useContext(SlotContext);
+
   // Form fields
   const [enabled, setEnabled] = useState(false);
   const [blockedTerms, setBlockedTerms] = useState('');
@@ -947,160 +1115,207 @@ export function ModerationView({ accountFilter, allAccounts, onSelectAccount, on
     }, 'Comentario descartado.');
   }
 
+  const active = flags.find((flag) => flag.flagId === activeId) ?? flags[0];
+  const termChips = blockedTerms.split(/[\n,]+/).map((term) => term.trim()).filter(Boolean);
+
+  // Presentational: a row with an action in flight ignores repeated shortcuts (the ref guards before React re-renders).
+  const [busyId, setBusyId] = useState('');
+  const busyRef = useRef('');
+  async function runRowAction(flagId: string, action: (id: string) => Promise<void>) {
+    if (busyRef.current) return;
+    busyRef.current = flagId; setBusyId(flagId);
+    try { await action(flagId); } finally { busyRef.current = ''; setBusyId(''); }
+  }
+  // Switching account never keeps the previous account's list, selection or open sheet on screen.
+  useEffect(() => { setFlags([]); setTotal(0); setSelectedIds([]); setActiveId(''); setSheetOpen(false); }, [accountFilter]);
+
+  // Optional shortcuts: H hides, D dismisses — only on an explicitly selected, visible flag (see shouldHandleShortcut).
+  useEffect(() => {
+    if (accountFilter === 'all') return;
+    function onKey(event: globalThis.KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const selected = flags.find((flag) => flag.flagId === activeId);
+      const action = shouldHandleShortcut({
+        key: event.key, repeat: event.repeat, modifier: event.metaKey || event.ctrlKey || event.altKey,
+        typing: Boolean(target && (target.closest('input, textarea, select, [contenteditable="true"]') || target.isContentEditable)),
+        dialogOpen: Boolean(document.querySelector('.modal')), accountFilter, selectedId: activeId,
+        visibleIds: flags.map((flag) => flag.flagId), state: selected?.state ?? '', busy: Boolean(busyRef.current),
+        narrow: window.matchMedia('(max-width: 760px)').matches, sheetOpen,
+      });
+      if (!action || !selected) return;
+      event.preventDefault();
+      void runRowAction(selected.flagId, action === 'hide' ? hideFlag : dismissFlag);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+
   if (accountFilter === 'all') {
-    return <div className="panel">
-      <div className="panel-heading">
-        <div><h3>Reglas de moderación</h3><p className="muted">Elija una cuenta para configurar sus reglas.</p></div>
-      </div>
-      {allAccounts.length ? <div className="account-prompt" role="group" aria-labelledby="mod-account-prompt">
-        <strong id="mod-account-prompt">Elija una cuenta para moderar</strong>
-        <p className="muted">Las reglas se aplican individualmente.</p>
-        <div className="account-prompt-chips">
-          {allAccounts.map((account) => <button key={account.accountId} className="account-chip" onClick={() => onSelectAccount(account.accountId)}><RingAvatar username={account.username} /> @{account.username}</button>)}
-        </div>
-      </div> : <Empty title="Aún no hay cuentas" detail="Conecte Meta y elija una cuenta antes de configurar moderación." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}
-    </div>;
+    return <section className="narrow-col" aria-labelledby="mod-all-title">
+      <div className="section-h"><h3 id="mod-all-title">Reglas de moderación</h3><p className="muted">Elija una cuenta para configurar sus reglas.</p></div>
+      {allAccounts.length ? <AccountPrompt id="mod-account-prompt" title="Elija una cuenta para moderar" detail="Las reglas se aplican individualmente." choices={allAccounts} onSelect={onSelectAccount} />
+        : <Empty icon={ShieldCheck} title="Aún no hay cuentas" detail="Conecte Meta y elija una cuenta antes de configurar moderación." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}
+    </section>;
   }
 
-  return <div className="mod-layout">
-    <div>
-      <form className="panel form-panel mod-rules" onSubmit={saveSettings}>
-        <div className="panel-heading">
-          <div>
-            <h3>Reglas de moderación</h3>
-            <p className="muted">Defina qué comentarios se marcan en esta cuenta. Marcar no oculta nada por sí solo.</p>
+  const paneTabs: Array<[typeof pane, string]> = [['views', 'Vistas'], ['rules', 'Reglas'], ['ai', 'IA']];
+  return <SlotContext.Provider value={{ topbar: slots.topbar, aiRow }}>
+  <div className="inbox">
+    <aside className="mod-pane" aria-label="Vistas y reglas de moderación">
+      <div className="pane-tabs" role="tablist" aria-label="Panel de moderación">
+        {paneTabs.map(([id, label]) => <button key={id} type="button" role="tab" id={`mod-tab-${id}`} aria-selected={pane === id} aria-controls={`mod-pane-${id}`} className={pane === id ? 'pane-tab active' : 'pane-tab'} onClick={() => setPane(id)}>{label}</button>)}
+      </div>
+      <div className="pane-body" id="mod-pane-views" role="tabpanel" aria-labelledby="mod-tab-views" hidden={pane !== 'views'}>
+        <div className="views" role="group" aria-label="Estado de la marca">
+          {MOD_VIEWS.map(([value, label, Icon]) => <button key={value} type="button" className={flagState === value ? 'view-item active' : 'view-item'} aria-pressed={flagState === value} onClick={() => { setFlagState(value); setOffset(0); }}><Icon size={15} aria-hidden="true" /><span>{label}</span>{/* Counts come from every source: shown only with «Todas» so they never contradict the filtered list. */}{flagCounts && flagSource === 'all' && <span className="view-count">{flagCount(flagCounts, value)}</span>}</button>)}
+        </div>
+        <div className="pane-group">
+          <span className="pane-label">Origen</span>
+          <div className="segmented" role="group" aria-label="Origen de la marca">
+            {([['all', 'Todas'], ['rules', 'Reglas'], ['ai', 'IA']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={flagSource === value} className={flagSource === value ? 'seg active' : 'seg'} onClick={() => { setFlagSource(value); setOffset(0); }}>{value === 'ai' && <Sparkles size={13} aria-hidden="true" />}{label}</button>)}
           </div>
         </div>
-        <div className="mod-rules-body">
-          <label className="toggle-row">
-            <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-            <span className="toggle-row-text"><strong>Activar moderación en esta cuenta</strong><span>Cada escaneo revisa los comentarios nuevos con estas reglas.</span></span>
+      </div>
+      <form className="pane-body mod-rules" id="mod-pane-rules" role="tabpanel" aria-labelledby="mod-tab-rules" hidden={pane !== 'rules'} onSubmit={saveSettings}>
+        <div className="pane-intro">
+          <h3>Reglas de moderación</h3>
+          <p className="muted">Defina qué comentarios se marcan en esta cuenta. Marcar no oculta nada por sí solo.</p>
+        </div>
+        <label className="switch-row strong">
+          <span className="switch-row-text"><strong>Activar moderación en esta cuenta</strong><span>Cada escaneo revisa los comentarios nuevos con estas reglas.</span></span>
+          <input type="checkbox" role="switch" className="switch" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+        </label>
+        <div className="pane-group">
+          <span className="pane-label">Detectores automáticos</span>
+          <label className="switch-row"><span className="switch-row-text"><strong>Enlaces</strong><span>Detecta URLs (http, www, bit.ly)</span></span><input type="checkbox" role="switch" className="switch" checked={detectLinks} onChange={e => setDetectLinks(e.target.checked)} /></label>
+          <label className="switch-row"><span className="switch-row-text"><strong>Teléfonos</strong><span>Detecta secuencias de números</span></span><input type="checkbox" role="switch" className="switch" checked={detectPhones} onChange={e => setDetectPhones(e.target.checked)} /></label>
+          <label className="switch-row"><span className="switch-row-text"><strong>Menciones</strong><span>Detecta 3 o más cuentas @mencionadas</span></span><input type="checkbox" role="switch" className="switch" checked={detectMentions} onChange={e => setDetectMentions(e.target.checked)} /></label>
+          <label className="switch-row"><span className="switch-row-text"><strong>Emojis</strong><span>Detecta spam visual o emojis repetidos</span></span><input type="checkbox" role="switch" className="switch" checked={detectEmoji} onChange={e => setDetectEmoji(e.target.checked)} /></label>
+        </div>
+        <div className="pane-group">
+          <div className="pane-label-row"><span className="pane-label">Palabras o frases prohibidas</span><button type="button" className="btn-link text-button" aria-expanded={termsOpen} aria-controls="mod-terms-editor" onClick={() => setTermsOpen((value) => !value)}>{termsOpen ? 'Listo' : 'Editar'}</button></div>
+          {termChips.length ? <div className="term-chips">{termChips.map((term, index) => <span className="kw-chip" key={`${term}-${index}`}>{term}</span>)}</div> : <p className="hint">Aún no hay palabras prohibidas.</p>}
+          <div id="mod-terms-editor" hidden={!termsOpen}>
+            <Field label="Palabras o frases prohibidas">
+              <textarea value={blockedTerms} onChange={e => setBlockedTerms(e.target.value)} placeholder="estafa, ladrones..." rows={4} />
+            </Field>
+            <p className="hint mod-hint">Una por línea o separadas por coma. No importan mayúsculas ni tildes.</p>
+          </div>
+        </div>
+        <div className="pane-group mod-auto">
+          <label className="switch-row">
+            <span className="switch-row-text"><strong>Ocultar automáticamente</strong><span>Solo con el modo real activo. Nunca se borra nada solo.</span></span>
+            <input type="checkbox" role="switch" className="switch" disabled={!enabled} checked={enabled && autoHideEnabled} onChange={e => setAutoHideEnabled(e.target.checked)} />
           </label>
-          <Field label="Palabras o frases prohibidas">
-            <textarea value={blockedTerms} onChange={e => setBlockedTerms(e.target.value)} placeholder="estafa, ladrones..." rows={3} />
-          </Field>
-          <p className="hint mod-hint">Una por línea o separadas por coma. No importan mayúsculas ni tildes.</p>
-          <div>
-            <strong>Detectores automáticos</strong>
-            <div className="mod-detectors">
-              <label className="toggle-row">
-                <input type="checkbox" checked={detectLinks} onChange={e => setDetectLinks(e.target.checked)} />
-                <span className="toggle-row-text"><strong>Enlaces</strong><span>Detecta URLs (http, www, bit.ly)</span></span>
-              </label>
-              <label className="toggle-row">
-                <input type="checkbox" checked={detectPhones} onChange={e => setDetectPhones(e.target.checked)} />
-                <span className="toggle-row-text"><strong>Teléfonos</strong><span>Detecta secuencias de números</span></span>
-              </label>
-              <label className="toggle-row">
-                <input type="checkbox" checked={detectMentions} onChange={e => setDetectMentions(e.target.checked)} />
-                <span className="toggle-row-text"><strong>Menciones</strong><span>Detecta 3 o más cuentas @mencionadas</span></span>
-              </label>
-              <label className="toggle-row">
-                <input type="checkbox" checked={detectEmoji} onChange={e => setDetectEmoji(e.target.checked)} />
-                <span className="toggle-row-text"><strong>Emojis</strong><span>Detecta spam visual o emojis repetidos</span></span>
-              </label>
-            </div>
-          </div>
-          <div className="mod-auto">
-            <label className="toggle-row">
-              <input type="checkbox" disabled={!enabled} checked={enabled && autoHideEnabled} onChange={e => setAutoHideEnabled(e.target.checked)} />
-              <span className="toggle-row-text"><strong>Ocultar automáticamente</strong><span>Solo con el modo real activo. Nunca se borra nada solo.</span></span>
-            </label>
-            {enabled && autoHideEnabled && <div className="mod-auto-cats">
-              {AUTO_HIDE_OPTIONS.map((option) => <label key={option.value} className="checkbox-row"><input type="checkbox" checked={autoHideCategories.includes(option.value)} onChange={() => toggleAutoCategory(option.value)} /> {option.label}</label>)}
-              <p className="hint mod-auto-note">Las categorías «(IA)» vienen de la revisión con IA. IA puede equivocarse: active estas solo si revisó varios resultados. Las quejas legítimas nunca se ocultan solas.</p>
-            </div>}
-          </div>
+          {enabled && autoHideEnabled && <div className="mod-auto-cats">
+            {AUTO_HIDE_OPTIONS.map((option) => <label key={option.value} className={autoHideCategories.includes(option.value) ? 'cat-chip on' : 'cat-chip'}><input type="checkbox" checked={autoHideCategories.includes(option.value)} onChange={() => toggleAutoCategory(option.value)} /> {option.label}</label>)}
+            <p className="hint mod-auto-note">Las categorías «(IA)» vienen de la revisión con IA. IA puede equivocarse: active estas solo si revisó varios resultados. Las quejas legítimas nunca se ocultan solas.</p>
+          </div>}
         </div>
-        <div>
+        <div className="pane-save">
           <button className="btn-main" type="submit">Guardar reglas</button>
         </div>
       </form>
-      <AiReviewPanel key={accountFilter} accountId={accountFilter} api={api} act={act} confirm={confirm} onShowAiFlags={showAiFlags} onFlagsChanged={loadFlags} />
-    </div>
-    <div>
-      <div className="panel mod-flags">
-        <div className="panel-heading">
-          <div>
-            <h3>Comentarios marcados <span className="count-badge">{total}</span></h3>
-            {mode === 'dry' && <p className="muted" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={14} /> Modo prueba: las acciones se simulan, no se ocultan ni borran comentarios reales.</p>}
-          </div>
-        </div>
-        <div className="filters-row mod-filters">
-          <label className="mod-select-all">
-            <input type="checkbox" checked={flags.length > 0 && selectedIds.length === flags.length} onChange={e => setSelectedIds(e.target.checked ? flags.map(f => f.flagId) : [])} />
-            Seleccionar todo
-          </label>
-          <select value={flagState} onChange={e => { setFlagState(e.target.value); setOffset(0); }}>
-            <option value="all">Todos los estados</option>
-            <option value="PENDING">Pendientes</option>
-            <option value="HIDDEN">Ocultos</option>
-            <option value="SIMULATED">Simulados</option>
-            <option value="FAILED">Fallidos</option>
-            <option value="UNKNOWN_OUTCOME">Por revisar</option>
-            <option value="DISMISSED">Descartados</option>
-            <option value="DELETED">Borrados</option>
-            <option value="VISIBLE">Visibles</option>
-          </select>
-          <select value={flagSource} aria-label="Origen de la marca" onChange={e => { setFlagSource(e.target.value); setOffset(0); }}>
-            <option value="all">Todas</option>
-            <option value="rules">Reglas</option>
-            <option value="ai">IA</option>
-          </select>
-          <button className="btn icon-only" onClick={() => loadFlags()} title="Actualizar" aria-label="Actualizar"><RefreshCw size={16} /></button>
-        </div>
-        {selectedIds.length > 0 && <div className="mod-bulkbar" role="toolbar" aria-label="Acciones para los seleccionados">
-          <strong>{selectedIds.length} seleccionados</strong>
-          <div className="mod-bulkbar-actions">
-            {bulkAllowed('dismiss', selectedStates) && <button className="btn small" onClick={() => bulkAction('dismiss')}>Descartar</button>}
-            {bulkAllowed('hide', selectedStates) && <button className="btn small" onClick={() => bulkAction('hide')}><EyeOff size={16} /> Ocultar</button>}
-            {bulkAllowed('unhide', selectedStates) && <button className="btn small" onClick={() => bulkAction('unhide')}><Eye size={16} /> Mostrar</button>}
-            {bulkAllowed('delete', selectedStates) && <button className="btn small danger" onClick={() => bulkAction('delete')}><Trash2 size={16} /> Borrar</button>}
-          </div>
-        </div>}
-        {!flags.length ? <Empty title="No hay comentarios marcados" detail="Active la moderación y defina palabras prohibidas; los comentarios marcados aparecerán aquí tras el próximo escaneo." /> : 
-          <div className="list-group">
-            {flags.map(flag => (
-              <div className="mod-row" key={flag.flagId}>
-                <div className="mod-row-check">
-                  <input type="checkbox" aria-label={`Seleccionar comentario de @${flag.comment?.username || 'usuario'}`} checked={selectedIds.includes(flag.flagId)} onChange={e => setSelectedIds(e.target.checked ? [...selectedIds, flag.flagId] : selectedIds.filter(id => id !== flag.flagId))} />
-                </div>
-                <MiniThumb size="mid" item={flag.media} />
-                <div className="mod-row-body">
-                  <div className="mod-row-head">
-                    <RingAvatar username={flag.comment?.username} />
-                    <strong>@{flag.comment?.username || 'Usuario'}</strong>
-                    <span className="muted">{formatDate(flag.createdAt)}</span>
-                  </div>
-                  <p className="comment-clamp">{flag.comment?.text}</p>
-                  <div className="mod-row-meta">
-                    {flag.source === 'ai' && <span className="ai-chip"><Sparkles size={12} aria-hidden="true" /> IA</span>}
-                    <span className="kw-chip">{categoryLabel(flag.category)}</span>
-                    <span className="muted text-small">{reasonsText(flag.reasons)}</span>
-                    <Status value={moderationStateLabel(flag.state)} tone={flag.state === 'PENDING' ? 'warn' : flag.state === 'HIDDEN' || flag.state === 'DELETED' || flag.state === 'DISMISSED' ? 'good' : flag.state === 'SIMULATED' ? 'neutral' : 'danger'} />
-                    {flag.safeErrorCode && <span className="muted text-small">({flag.safeErrorCode})</span>}
-                  </div>
-                  {flag.category === 'ai_complaint' && <p className="ai-complaint-hint">{AI_COMPLAINT_HINT}</p>}
-                </div>
-                {(() => { const allowed = availableActions(flag.state); return <div className="row-actions mod-row-actions">
-                  {allowed.unhide && <button className="btn small" onClick={() => unhideFlag(flag.flagId)} title="Mostrar" aria-label="Mostrar"><Eye size={16} /> Mostrar</button>}
-                  {allowed.hide && <button className="btn small" onClick={() => hideFlag(flag.flagId)} title="Ocultar" aria-label="Ocultar"><EyeOff size={16} /> Ocultar</button>}
-                  {allowed.delete && <button className="btn-icon danger" onClick={() => deleteFlag(flag.flagId)} title="Borrar" aria-label="Borrar"><Trash2 size={16} /></button>}
-                  {allowed.dismiss && <button className="btn-icon" onClick={() => dismissFlag(flag.flagId)} title="Descartar" aria-label="Descartar"><XCircle size={16} /></button>}
-                  {flag.media?.permalink && <a href={flag.media.permalink} target="_blank" rel="noreferrer" className="btn-icon" title="Ver en Instagram" aria-label="Ver en Instagram"><ExternalLink size={16} /></a>}
-                </div>; })()}
-              </div>
-            ))}
-          </div>
-        }
-        {total > 50 && <div className="pagination">
-          <button className="btn" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Anteriores</button>
-          <span>Mostrando {offset + 1} - {Math.min(offset + 50, total)} de {total}</span>
-          <button className="btn" disabled={offset + 50 >= total} onClick={() => setOffset(offset + 50)}>Siguientes</button>
-        </div>}
+      <div className="pane-body" id="mod-pane-ai" role="tabpanel" aria-labelledby="mod-tab-ai" hidden={pane !== 'ai'}>
+        <AiReviewPanel key={accountFilter} accountId={accountFilter} api={api} act={act} confirm={confirm} onShowAiFlags={showAiFlags} onFlagsChanged={loadFlags} onConfigure={() => setPane('ai')} />
       </div>
-    </div>
-  </div>;
+    </aside>
+    <section className="mod-list" aria-labelledby="flags-title">
+      <div className="list-h">
+        <input type="checkbox" aria-label="Seleccionar todo" checked={flags.length > 0 && selectedIds.length === flags.length} onChange={e => setSelectedIds(e.target.checked ? flags.map(f => f.flagId) : [])} />
+        <h3 id="flags-title" className="list-h-title">Comentarios marcados <span className="count-badge">{total}</span>{selectedIds.length > 0 && <span className="list-h-selected">{selectedIds.length} seleccionados</span>}</h3>
+        <div className="list-h-actions" role="toolbar" aria-label="Acciones para los seleccionados">
+          {selectedIds.length > 0 && <>
+            {bulkAllowed('hide', selectedStates) && <button className="btn-icon ghost" onClick={() => bulkAction('hide')} title="Ocultar seleccionados" aria-label="Ocultar seleccionados"><EyeOff size={16} /></button>}
+            {bulkAllowed('unhide', selectedStates) && <button className="btn-icon ghost" onClick={() => bulkAction('unhide')} title="Mostrar seleccionados" aria-label="Mostrar seleccionados"><Eye size={16} /></button>}
+            {bulkAllowed('dismiss', selectedStates) && <button className="btn-icon ghost" onClick={() => bulkAction('dismiss')} title="Descartar seleccionados" aria-label="Descartar seleccionados"><Check size={16} /></button>}
+            {bulkAllowed('delete', selectedStates) && <button className="btn-icon ghost danger" onClick={() => bulkAction('delete')} title="Borrar seleccionados" aria-label="Borrar seleccionados"><Trash2 size={16} /></button>}
+            <span className="list-h-sep" aria-hidden="true" />
+          </>}
+          <button className="btn-icon ghost" onClick={() => loadFlags()} title="Actualizar" aria-label="Actualizar"><RefreshCw size={16} /></button>
+        </div>
+      </div>
+      <div className="ai-row" ref={setAiRow} />
+      {mode === 'dry' && <p className="mod-dry-note"><FlaskConical size={13} aria-hidden="true" /> Modo prueba: las acciones se simulan, no se ocultan ni borran comentarios reales.</p>}
+      {!flags.length ? <Empty icon={ShieldCheck} title="No hay comentarios marcados" detail="Active la moderación y defina palabras prohibidas; los comentarios marcados aparecerán aquí tras el próximo escaneo." action={() => setPane('rules')} actionLabel="Revisar reglas" /> :
+        <div className="mod-rows">
+          {flags.map(flag => {
+            const isActive = active?.flagId === flag.flagId;
+            return <div className={isActive ? 'mod-row active' : selectedIds.includes(flag.flagId) ? 'mod-row checked' : 'mod-row'} key={flag.flagId}>
+              <input type="checkbox" aria-label={`Seleccionar comentario de @${flag.comment?.username || 'usuario'}`} checked={selectedIds.includes(flag.flagId)} onChange={e => setSelectedIds(e.target.checked ? [...selectedIds, flag.flagId] : selectedIds.filter(id => id !== flag.flagId))} />
+              <button type="button" className="mod-row-main" aria-pressed={isActive} onClick={() => { setActiveId(flag.flagId); setSheetOpen(true); }}>
+                <RingAvatar username={flag.comment?.username} />
+                <span className="mod-row-body">
+                  <span className="mod-row-head"><b>@{flag.comment?.username || 'Usuario'}</b><span className="mono time" title={formatDate(flag.createdAt)}>{shortAgo(flag.comment?.createdAt ?? flag.createdAt)}</span></span>
+                  <span className="mod-row-text">{flag.comment?.text}</span>
+                  <span className="chips">
+                    <span className={flag.category === 'ai_complaint' ? 'chip warn' : 'chip bad'}>{categoryLabel(flag.category)}</span>
+                    {flag.source === 'ai' && <span className="chip ai"><Sparkles size={11} aria-hidden="true" /> IA</span>}
+                    {flag.state !== 'PENDING' && <span className={`chip ${flagTone(flag.state)}`}>{moderationStateLabel(flag.state)}</span>}
+                  </span>
+                </span>
+              </button>
+            </div>;
+          })}
+        </div>
+      }
+      {total > 50 && <div className="pagination">
+        <button className="btn small" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Anteriores</button>
+        <span className="mono">Mostrando {offset + 1} - {Math.min(offset + 50, total)} de {total}</span>
+        <button className="btn small" disabled={offset + 50 >= total} onClick={() => setOffset(offset + 50)}>Siguientes</button>
+      </div>}
+    </section>
+    <section className={sheetOpen ? 'mod-detail open' : 'mod-detail'} aria-label="Detalle del comentario">
+      {active ? (() => {
+        const flag = active;
+        const explicit = flag.flagId === activeId;
+        const allowed = availableActions(flag.state);
+        const reasons = reasonsText(flag.reasons);
+        return <>
+          <button type="button" className="btn small sheet-close" onClick={() => setSheetOpen(false)}><ArrowLeft size={15} aria-hidden="true" /> Volver a la lista</button>
+          <div className="post-card">
+            <MiniThumb size="post" item={flag.media ?? null} />
+            <div className="post-card-body">
+              <span className="muted small">En tu publicación{flag.media?.caption ? <> «{shortCaption(flag.media.caption, 60)}»</> : ''}{flag.media?.permalink && <> · <a href={flag.media.permalink} target="_blank" rel="noreferrer">Ver en Instagram</a></>}</span>
+              <div className="comment-bubble"><RingAvatar username={flag.comment?.username} /><div><b>@{flag.comment?.username || 'Usuario'}</b> <span className="muted mono small">{formatDate(flag.comment?.createdAt ?? flag.createdAt)}</span><p>{flag.comment?.text}</p></div></div>
+            </div>
+          </div>
+          <div className={flag.category === 'ai_complaint' ? 'why complaint' : 'why'}><ShieldAlert size={16} aria-hidden="true" /><span><b>Por qué se marcó:</b> {categoryLabel(flag.category)}{reasons ? ` — ${reasons}` : ''}.</span></div>
+          {flag.category === 'ai_complaint' && <p className="ai-complaint-hint">{AI_COMPLAINT_HINT}</p>}
+          <div className="acts">
+            {allowed.hide && <button className="button primary" disabled={busyId === flag.flagId} onClick={() => void runRowAction(flag.flagId, hideFlag)}><EyeOff size={16} aria-hidden="true" /> Ocultar {explicit && <kbd aria-hidden="true">H</kbd>}</button>}
+            {allowed.unhide && <button className="btn" disabled={busyId === flag.flagId} onClick={() => void runRowAction(flag.flagId, unhideFlag)}><Eye size={16} aria-hidden="true" /> Mostrar</button>}
+            {allowed.dismiss && <button className="btn" disabled={busyId === flag.flagId} onClick={() => void runRowAction(flag.flagId, dismissFlag)}><Check size={16} aria-hidden="true" /> Está bien, descartar {explicit && <kbd aria-hidden="true">D</kbd>}</button>}
+            {allowed.delete && <button className="btn btn-danger" disabled={busyId === flag.flagId} onClick={() => void runRowAction(flag.flagId, deleteFlag)}><Trash2 size={16} aria-hidden="true" /> Borrar</button>}
+          </div>
+          <div className="history">
+            <b>Historial</b>
+            <div><Flag size={14} aria-hidden="true" /> Marcado por {flag.source === 'ai' ? 'IA' : 'reglas'} · <span className="mono">{formatDate(flag.createdAt)}</span></div>
+            {flag.lastAction && <div><History size={14} aria-hidden="true" /> Última acción: {MOD_ACTION_LABELS[flag.lastAction] ?? flag.lastAction} · <span className="mono">{formatDate(flag.updatedAt)}</span></div>}
+            <div><Circle size={14} aria-hidden="true" /> Estado: <Status value={moderationStateLabel(flag.state)} tone={flag.state === 'PENDING' ? 'warn' : flag.state === 'HIDDEN' || flag.state === 'DELETED' || flag.state === 'DISMISSED' ? 'good' : flag.state === 'SIMULATED' ? 'neutral' : 'danger'} />{flag.safeErrorCode && <span className="muted mono small">({flag.safeErrorCode})</span>}</div>
+          </div>
+        </>;
+      })() : <Empty icon={ShieldCheck} title="Nada seleccionado" detail="Elija un comentario de la lista para ver por qué se marcó y decidir qué hacer." />}
+    </section>
+  </div>
+  </SlotContext.Provider>;
+}
+
+/** Moderation views: the same state filter values the API accepts. */
+const MOD_VIEWS: ReadonlyArray<[string, string, any]> = [
+  ['all', 'Todos los estados', ListFilter], ['PENDING', 'Pendientes', Flag], ['HIDDEN', 'Ocultos', EyeOff], ['SIMULATED', 'Simulados', FlaskConical],
+  ['FAILED', 'Fallidos', XCircle], ['UNKNOWN_OUTCOME', 'Por revisar', AlertTriangle], ['DISMISSED', 'Descartados', Archive], ['DELETED', 'Borrados', Trash2], ['VISIBLE', 'Visibles', Eye],
+];
+const MOD_ACTION_LABELS: Record<string, string> = { hide: 'ocultar', unhide: 'mostrar', delete: 'borrar', dismiss: 'descartar' };
+function flagTone(state: string) { return state === 'HIDDEN' || state === 'DELETED' || state === 'DISMISSED' ? 'ok' : state === 'SIMULATED' || state === 'VISIBLE' ? 'neutral' : state === 'UNKNOWN_OUTCOME' ? 'warn' : 'bad'; }
+/** Compact relative time for dense rows ("2 h", "3 d"); the full date stays in the title. */
+function shortAgo(value?: string | null) {
+  const time = value ? Date.parse(value) : Number.NaN;
+  if (Number.isNaN(time)) return '—';
+  const minutes = Math.max(0, Math.round((Date.now() - time) / 60000));
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h`;
+  return `${Math.round(minutes / 1440)}d`;
 }
 
 type LocalStatusView = { models: Array<LocalModelEntryView & { label: string }>; download?: DownloadView | null };
@@ -1108,7 +1323,7 @@ type LocalStatusView = { models: Array<LocalModelEntryView & { label: string }>;
 type AiJobView = { state: string; errorCode?: string; progress?: { chunksDone: number; chunksTotal: number; commentsSent: number; flagged: number; invalidOutput: number; chunksFailed?: number; commentsTotal?: number; truncated?: boolean } };
 
 /** "Revisión con IA": engine selector (off by default), Gemini key/model, privacy notice and the batch review job. */
-function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsChanged }: { accountId: string; api: Api; act: Act; confirm: Confirm; onShowAiFlags(): void; onFlagsChanged(): void }) {
+function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsChanged, onConfigure }: { accountId: string; api: Api; act: Act; confirm: Confirm; onShowAiFlags(): void; onFlagsChanged(): void; onConfigure?(): void }) {
   const [settings, setSettings] = useState<{ engine: string; model: string; localModel?: string; localModelInstalled?: boolean; hasApiKey: boolean; apiKeyHint: string | null; consentAt: string | null; availableModels: string[] } | null>(null);
   const [localStatus, setLocalStatus] = useState<LocalStatusView | null>(null);
   // "Modelo local" was picked but no model is installed yet: show the cards without saving the engine.
@@ -1277,12 +1492,10 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
     { value: 'local', label: 'Modelo local' },
   ];
 
-  return <section className="panel ai-panel" aria-labelledby="ai-review-title">
-    <div className="panel-heading">
-      <div>
-        <h3 id="ai-review-title"><Sparkles size={18} aria-hidden="true" /> Revisión con IA</h3>
-        <p className="muted">Marca insultos, odio, spam y quejas. Solo marca: ocultar o borrar sigue siendo su decisión.</p>
-      </div>
+  return <section className="ai-panel" aria-labelledby="ai-review-title">
+    <div className="pane-intro">
+      <h3 id="ai-review-title"><Sparkles size={16} aria-hidden="true" /> Revisión con IA</h3>
+      <p className="muted">Marca insultos, odio, spam y quejas. Solo marca: ocultar o borrar sigue siendo su decisión.</p>
     </div>
     <div className="ai-engines" role="radiogroup" aria-label="Motor de IA">
       {engines.map((option) => <button key={option.value} type="button" role="radio" aria-checked={engine === option.value} disabled={option.disabled || !settings || running}
@@ -1344,29 +1557,29 @@ function AiReviewPanel({ accountId, api, act, confirm, onShowAiFlags, onFlagsCha
         </select>
       </Field>
     </div>}
-    <div className="ai-run">
-      <button className="btn-main" type="button" disabled={!canReview} onClick={startReview}><Sparkles size={16} aria-hidden="true" /> Revisar comentarios negativos</button>
-      <label className="ai-window">
-        <span>Comentarios de</span>
-        <select value={reviewWindow} onChange={(event) => setReviewWindow(event.target.value)} disabled={running}>
-          {Object.entries(AI_WINDOW_LABELS).map(([value, label]) => <option key={value} value={value}>Últimos {label}</option>)}
-        </select>
-      </label>
-    </div>
-    {!canReview && !running && disabledHint && <p className="hint">{disabledHint}</p>}
-    {running && job?.progress && <div className="scan-progress">
-      <div className="progress-track" role="progressbar" aria-label="Progreso de la revisión con IA" aria-valuemin={0} aria-valuemax={100} aria-valuenow={aiProgressPercent(job.progress)} aria-valuetext={aiProgressText(job.progress)}>
-        <div className="progress-fill" style={{ width: `${aiProgressPercent(job.progress)}%` }} />
+    <PageActions><button className="button primary" type="button" aria-label="Revisar comentarios negativos" title={!canReview && disabledHint ? disabledHint : undefined} disabled={!canReview} onClick={startReview}><Sparkles size={15} aria-hidden="true" /> <span className="btn-label">Revisar comentarios negativos</span></button></PageActions>
+    <AiRowSlot>
+      <div className="ai-run">
+        <span className="ai-run-label"><Sparkles size={13} aria-hidden="true" /> Revisión con IA</span>
+        <label className="ai-window">
+          <span>Comentarios de</span>
+          <select value={reviewWindow} onChange={(event) => setReviewWindow(event.target.value)} disabled={running}>
+            {Object.entries(AI_WINDOW_LABELS).map(([value, label]) => <option key={value} value={value}>Últimos {label}</option>)}
+          </select>
+        </label>
+        {!canReview && !running && disabledHint && <span className="hint ai-run-hint">{disabledHint}{onConfigure && <> <button type="button" className="btn-link text-button" onClick={onConfigure}>Configurar IA</button></>}</span>}
+        {job && !running && job.progress && <span className="ai-summary">{aiJobSummary({ state: job.state, errorCode: job.errorCode, progress: job.progress })}{job.progress.flagged > 0 && <button className="chip-button" type="button" onClick={onShowAiFlags}>Ver solo los marcados por IA</button>}</span>}
       </div>
-      <div className="ai-progress-row">
-        <p className="progress-text"><strong>{aiProgressText(job.progress)}</strong></p>
-        <button className="btn small" type="button" onClick={stopReview}><Pause size={14} aria-hidden="true" /> Detener</button>
-      </div>
-      <p className="hint">{savedEngine === 'local' ? 'El modelo local revisa los lotes en este equipo, uno tras otro.' : 'Se envía un lote cada pocos segundos para respetar el límite gratuito.'}</p>
-    </div>}
-    {job && !running && job.progress && <div className="ai-summary">
-      <p>{aiJobSummary({ state: job.state, errorCode: job.errorCode, progress: job.progress })}</p>
-      {job.progress.flagged > 0 && <button className="btn small" type="button" onClick={onShowAiFlags}>Ver solo los marcados por IA</button>}
-    </div>}
+      {running && job?.progress && <div className="scan-progress ai-progress">
+        <div className="progress-track" role="progressbar" aria-label="Progreso de la revisión con IA" aria-valuemin={0} aria-valuemax={100} aria-valuenow={aiProgressPercent(job.progress)} aria-valuetext={aiProgressText(job.progress)}>
+          <div className="progress-fill" style={{ width: `${aiProgressPercent(job.progress)}%` }} />
+        </div>
+        <div className="ai-progress-row">
+          <p className="progress-text"><strong>{aiProgressText(job.progress)}</strong></p>
+          <button className="btn small" type="button" onClick={stopReview}><Pause size={14} aria-hidden="true" /> Detener</button>
+        </div>
+        <p className="hint">{savedEngine === 'local' ? 'El modelo local revisa los lotes en este equipo, uno tras otro.' : 'Se envía un lote cada pocos segundos para respetar el límite gratuito.'}</p>
+      </div>}
+    </AiRowSlot>
   </section>;
 }
