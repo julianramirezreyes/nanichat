@@ -15,8 +15,12 @@ import { ATTACHMENT_ERROR_LABELS, attachmentErrorHint, attachmentPartStateLabel,
 import {
   FOLLOW_GATE_RETIRED_LABEL, MEDIA_LINK_TIP, followGateErrorHint, followGateEventLabel, followGateStateLabel, showFollowGateDetail,
 } from './follow-gate';
-import { House, Plug, PlugZap, Images, Zap, Radio, Inbox, History, Settings2, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff, Sparkles, KeyRound, Download, Cpu, ChevronsUpDown, FlaskConical, MessageCircleHeart, Menu, X, Siren, ArrowRight, Send, Clock, Flag, Check, ScanEye, Undo2, ListFilter, FileDown, Lock, Rocket, ArrowLeft, BellDot, Users } from 'lucide-react';
+import { House, Plug, PlugZap, Images, Zap, Radio, Inbox, History, Settings2, CheckCircle2, AlertTriangle, XCircle, Circle, Image as ImageIcon, Clapperboard, Layers, RefreshCw, Pencil, Pause, Play, Archive, Trash2, Unplug, Search, ExternalLink, ShieldCheck, ShieldOff, Plus, ChevronRight, ShieldAlert, Eye, EyeOff, Sparkles, KeyRound, Download, Cpu, ChevronsUpDown, FlaskConical, MessageCircleHeart, Menu, X, Siren, ArrowRight, Send, Clock, Flag, Check, ScanEye, Undo2, ListFilter, FileDown, Lock, Rocket, ArrowLeft, BellDot, Users, Sun, Moon, CircleHelp } from 'lucide-react';
 import { AiRowSlot, PageActions, SlotContext } from './components/slots';
+import { Nani } from './components/Nani';
+import { LiveFlow } from './components/LiveFlow';
+import { ModerationDeck } from './components/ModerationDeck';
+import { type NaniState, accountErrorLabel, accountProblems, coverageLabel, enabledKeywords, flowEntries, heroCopy, naniState, watchedPosts } from './nani-labels';
 import { PUBLIC_REPLY_SAMPLE_USERNAME, describePublicReply, parseVariantLines, previewExamples, publicReplyErrorHint, type PublicReplyDto, variantCountLabel } from './public-reply';
 
 type Account = { accountId: string; connectionId: string; username: string; status: string; monitoringPaused: boolean; sendHoldReason?: string | null; last_sync?: string; last_error?: string; coverage?: string };
@@ -91,6 +95,15 @@ export default function HomePage() {
   const [features, setFeatures] = useState<Features>(DISABLED_FEATURES);
   // Presentational only: mobile drawer and the element that hosts each page's topbar actions.
   const [navOpen, setNavOpen] = useState(false);
+  const [queueScope, setQueueScope] = useState('');
+  // Presentational: Nani hops for a moment after a success (a reply shows up in the flow, the deck is cleared).
+  const [happy, setHappy] = useState(false);
+  const happyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const celebrate = useCallback(() => {
+    setHappy(true);
+    if (happyTimer.current) clearTimeout(happyTimer.current);
+    happyTimer.current = setTimeout(() => setHappy(false), 1300);
+  }, []);
   const [topbarSlot, setTopbarSlot] = useState<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -149,6 +162,8 @@ export default function HomePage() {
       ]);
       setDashboard(home); setConnections(conn.connections); setAccounts(home.accounts); if (accountFilter === 'all') setAllAccounts(home.accounts); setMedia(mediaResult.media);
       setAutomations(autoResult.automations); setQueue(queueResult.items); setQueueTotal(queueResult.total);
+      // Presentational: which account/page the loaded queue belongs to (the live flow restarts without animating on change).
+      setQueueScope(`${accountFilter}|${queueState}|${queueOffset}`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'request_failed'); }
     finally { setLoading(false); }
   }, [accountFilter, api, csrf, queueOffset, queueState]);
@@ -225,11 +240,15 @@ export default function HomePage() {
   const accountTotal = (allAccounts.length ? allAccounts : accounts).length;
   function go(id: string) { setSection(id); setNavOpen(false); }
   const pendingFlags = flagCount(dashboard?.moderation, 'PENDING');
+  const reviewItems = (dashboard?.queue ?? []).filter((row) => row.state === 'UNKNOWN_OUTCOME' || row.state === 'FAILED_PERMANENT').reduce((sum, row) => sum + row.count, 0);
+  const problems = accountProblems(accounts);
+  const dataState = naniState({ monitoringEnabled: dashboard?.monitoringEnabled ?? false, pendingFlags, reviewItems, accountProblems: problems.length });
+  const nani: NaniState = happy ? 'happy' : dataState;
 
   return <SlotContext.Provider value={{ topbar: topbarSlot, aiRow: null }}>
     <div className={navOpen ? 'app nav-open' : 'app'}>
       <aside className="sidebar" id="app-sidebar" ref={sidebarRef} aria-label="Menú">
-        <div className="brand"><span className="brand-mark" aria-hidden="true"><MessageCircleHeart size={16} strokeWidth={2} /></span><span className="brand-name">Social Desk</span>
+        <div className="brand"><Nani state={nani} size={30} decorative className="brand-nani" /><span className="brand-name">nanichat</span>
           <button type="button" className="btn-icon ghost drawer-close" aria-label="Cerrar menú" onClick={() => setNavOpen(false)}><X size={18} /></button></div>
         <label className="account-switch">
           <RingAvatar username={selectedUsername} />
@@ -248,14 +267,13 @@ export default function HomePage() {
           </div>)}
         </nav>
         <div className={`mode-block ${mode}`}>
-          <span className="mode-block-icon" aria-hidden="true">{mode === 'real' ? <Siren size={16} /> : <FlaskConical size={16} />}</span>
-          <span className="mode-block-text">
+          <span className="mode-block-head">
+            <span className="mode-block-icon" aria-hidden="true">{mode === 'real' ? <Siren size={16} /> : <FlaskConical size={16} />}</span>
             {mode === 'checking'
               ? <button className="mode-pill checking-pill" disabled aria-disabled="true">Verificando modo…</button>
               : <button className={mode === 'dry' ? 'mode-pill dry-pill' : 'mode-pill real-pill'} title={mode === 'dry' ? 'Cambiar a modo real (pide confirmación)' : 'Volver a Dry Run'} onClick={() => void toggleDryRun()}>{mode === 'dry' ? 'Dry Run · Activo' : 'Modo real · Activo'}</button>}
-            <small>{mode === 'dry' ? 'Nada se envía' : mode === 'real' ? 'Envíos reales' : 'Un momento'}</small>
           </span>
-          <span className={mode === 'real' ? 'mode-switch on' : 'mode-switch'} aria-hidden="true" />
+          <p>{mode === 'dry' ? 'Nani practica: simula las respuestas, no envía nada a Instagram.' : mode === 'real' ? 'Nani envía mensajes privados reales a Instagram.' : 'Un momento…'}</p>
         </div>
       </aside>
       <button type="button" className="nav-scrim" aria-label="Cerrar menú" tabIndex={-1} onClick={() => setNavOpen(false)} />
@@ -272,11 +290,11 @@ export default function HomePage() {
         </div>
         {loading && <div className="loading-line" role="status"><span>Actualizando datos locales…</span></div>}
         <div className={`content content-${section}`}>
-          {section === 'dashboard' && <DashboardView data={dashboard} accounts={accounts} connections={connections} automations={automations} media={media} accountFilter={accountFilter} accountCount={allAccounts.length} accountLabel={accountLabel} onNavigate={setSection} onRefresh={() => void refresh()} />}
+          {section === 'dashboard' && <DashboardView data={dashboard} accounts={accounts} connections={connections} automations={automations} queue={queue} mode={mode} nani={nani} pendingFlags={pendingFlags} reviewItems={reviewItems} accountFilter={accountFilter} accountCount={allAccounts.length} accountLabel={accountLabel} queueFiltered={queueState !== 'all' || queueOffset > 0} queueScope={queueScope} onNavigate={setSection} onRefresh={() => void refresh()} onCelebrate={celebrate} api={api} act={act} />}
           {section === 'connections' && <ConnectionsView connections={connections} accounts={accounts} candidates={candidates} setCandidates={setCandidates} api={api} act={act} confirm={confirm} features={features} />}
           {section === 'media' && <MediaView accounts={accounts} allAccounts={allAccounts} onSelectAccount={chooseAccount} media={media} selected={accountFilter} onNavigate={setSection} api={api} act={act} />}
           {section === 'automations' && <AutomationView accounts={accounts} media={media} rows={automations} selected={accountFilter} api={api} act={act} confirm={confirm} />}
-          {section === 'moderation' && <ModerationView flagCounts={dashboard?.moderation} accountFilter={accountFilter} allAccounts={allAccounts} onSelectAccount={chooseAccount} onNavigate={setSection} api={api} act={act} confirm={confirm} mode={mode} />}
+          {section === 'moderation' && <ModerationView onCelebrate={celebrate} flagCounts={dashboard?.moderation} accountFilter={accountFilter} allAccounts={allAccounts} onSelectAccount={chooseAccount} onNavigate={setSection} api={api} act={act} confirm={confirm} mode={mode} />}
           {section === 'monitor' && <MonitorView accounts={accounts} status={dashboard?.monitoringEnabled ?? false} onNavigate={setSection} api={api} act={act} />}
           {section === 'backlog' && <BacklogView allAccounts={allAccounts} accounts={accounts} onSelectAccount={chooseAccount} selected={accountFilter} job={scanJob} setJob={setScanJob} rows={automations} api={api} act={act} confirm={confirm} />}
           {section === 'queue' && <QueueView items={queue} total={queueTotal} offset={queueOffset} setOffset={setQueueOffset} state={queueState} setState={(value) => { setQueueOffset(0); setQueueState(value); }} onNavigate={setSection} api={api} act={act} />}
@@ -286,11 +304,33 @@ export default function HomePage() {
       </main>
     </div>
     <div className="toast-region">
-      <div role="alert" aria-live="assertive" aria-atomic="true">{error && <div className="toast error"><div><strong>La acción no se completó</strong><span>{safeErrorLabel(error)}</span></div><button onClick={() => setError('')} aria-label="Cerrar aviso de error">×</button></div>}</div>
-      <div role="status" aria-live="polite" aria-atomic="true">{notice && <div className="toast success"><div><span>{notice}</span></div><button onClick={() => setNotice('')} aria-label="Cerrar aviso">×</button></div>}</div>
+      <div role="alert" aria-live="assertive" aria-atomic="true"><ToastItem kind="error" content={error ? <><strong>La acción no se completó</strong><span>{safeErrorLabel(error)}</span></> : null} closeLabel="Cerrar aviso de error" onClose={() => setError('')} /></div>
+      <div role="status" aria-live="polite" aria-atomic="true"><ToastItem kind="success" content={notice ? <span>{notice}</span> : null} closeLabel="Cerrar aviso" onClose={() => setNotice('')} /></div>
     </div>
     {dialog && <ConfirmDialog options={dialog} onResult={settleDialog} />}
   </SlotContext.Provider>;
+}
+
+/** One toast slot with an exit transition: the last content stays on screen (without the .toast class) while leaving. */
+function ToastItem({ kind, content, closeLabel, onClose }: { kind: 'error' | 'success'; content: ReactNode | null; closeLabel: string; onClose(): void }) {
+  const [leaving, setLeaving] = useState<ReactNode | null>(null);
+  const last = useRef<ReactNode | null>(null);
+  useEffect(() => {
+    if (content) { last.current = content; setLeaving(null); return; }
+    if (!last.current) return;
+    setLeaving(last.current); last.current = null;
+    const timer = setTimeout(() => setLeaving(null), 200);
+    return () => clearTimeout(timer);
+  }, [content]);
+  if (content) return <div className={`toast ${kind}`}><div>{content}</div><button onClick={onClose} aria-label={closeLabel}>×</button></div>;
+  return leaving ? <div className={`toast-leaving ${kind}`} aria-hidden="true"><div>{leaving}</div><span className="toast-x">×</span></div> : null;
+}
+
+/** Start or stop monitoring for every validated account: shared by Monitoreo and the Resumen wake button. */
+function monitorAll(api: Api, act: Act, action: 'start' | 'stop') {
+  return action === 'start'
+    ? act(() => api('/api/monitor/all', 'POST', { action: 'start' }), 'Monitoreo iniciado para cuentas validadas.')
+    : act(() => api('/api/monitor/all', 'POST', { action: 'stop' }), 'Todo el monitoreo se detuvo.');
 }
 
 /* ---------- Dialogs ---------- */
@@ -341,67 +381,84 @@ function sampleReply(text: string | undefined, keyword?: string) {
   return (text ?? '').replace(/{{username}}/g, 'ana').replace(/{{keyword}}/g, keyword || 'palabra');
 }
 
-function DashboardView({ data, accounts, connections, automations, media, accountFilter, accountCount, accountLabel, onNavigate, onRefresh }: { data: Dashboard | null; accounts: Account[]; connections: Connection[]; automations: Automation[]; media: Media[]; accountFilter: string; accountCount: number; accountLabel: string; onNavigate(id: string): void; onRefresh(): void }) {
+/** Count-up runs once per page load, the first time Resumen shows real numbers. */
+let statsCounted = false;
+function CountUp({ value }: { value: number }) {
+  // The number is written through the ref only (React renders no text child), so React never holds a stale text node.
+  const ref = useRef<HTMLSpanElement>(null);
+  const animate = useRef(!statsCounted);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    if (!animate.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches || value === 0) { node.textContent = String(value); return; }
+    animate.current = false;
+    const start = performance.now(); let frame = 0;
+    const step = (now: number) => { const k = Math.min(1, (now - start) / 900); node.textContent = String(Math.round(value * (1 - Math.pow(1 - k, 3)))); if (k < 1) frame = requestAnimationFrame(step); };
+    frame = requestAnimationFrame(step);
+    return () => { cancelAnimationFrame(frame); node.textContent = String(value); };
+  }, [value]);
+  return <span ref={ref} className="stat-v" aria-label={String(value)} />;
+}
+
+function DashboardView({ data, accounts, connections, automations, queue, mode, nani, pendingFlags, reviewItems, accountFilter, accountCount, accountLabel, queueFiltered, queueScope, onNavigate, onRefresh, onCelebrate, api, act }: { data: Dashboard | null; accounts: Account[]; connections: Connection[]; automations: Automation[]; queue: QueueItem[]; mode: 'checking' | 'dry' | 'real'; nani: NaniState; pendingFlags: number; reviewItems: number; accountFilter: string; accountCount: number; accountLabel: string; queueFiltered: boolean; queueScope: string; onNavigate(id: string): void; onRefresh(): void; onCelebrate(): void; api: Api; act: Act }) {
+  useEffect(() => { if (data) statsCounted = true; }, [data]);
   if (!data) return <Empty title="Cargando datos locales…" detail="Si este mensaje no desaparece, revise que la aplicación local siga en ejecución." />;
   const total = (states: string[]) => data.queue.filter((row) => states.includes(row.state)).reduce((sum, row) => sum + row.count, 0);
   const onboarding = deriveOnboarding({ connections, accounts, automations, monitoringEnabled: data.monitoringEnabled });
-  const next = onboarding.steps.find((step) => step.state === 'current');
-  const toReview = total(['UNKNOWN_OUTCOME', 'FAILED_PERMANENT']);
-  const queued = total(['QUEUED', 'FAILED_RETRYABLE']);
-  const recipes = automations.filter((row) => row.status !== 'archived').slice(0, 6);
-  const pendingFlags = flagCount(data.moderation, 'PENDING');
+  const problems = accountProblems(accounts);
+  const dataState = naniState({ monitoringEnabled: data.monitoringEnabled, pendingFlags, reviewItems, accountProblems: problems.length });
+  const copy = heroCopy({ state: dataState, watch: watchedPosts(automations), pendingFlags, reviewItems, problem: problems[0] ?? null });
+  const keywords = enabledKeywords(automations);
+  const shown = keywords.slice(0, 5);
+  const sleeping = !data.monitoringEnabled;
   return <>
     <PageActions><button className="btn" aria-label="Actualizar datos" onClick={onRefresh}><RefreshCw size={15} aria-hidden="true" /> <span className="btn-label">Actualizar datos</span></button></PageActions>
-    <div className="hello">
-      <h2>{greeting()}</h2>
-      <p className="muted">{data.monitoringEnabled ? 'El monitoreo está encendido: los comentarios nuevos se revisan solos.' : 'El monitoreo está apagado: los comentarios nuevos no se responden.'} <span className="hello-scope">{accountLabel}</span></p>
+    <section className={`hero ${dataState}`} aria-labelledby="hero-say">
+      <div className="hero-avatar"><span className="hero-glow" aria-hidden="true" /><Nani state={nani} size={180} follow /></div>
+      <div className="speech">
+        <h2 className="say" id="hero-say" key={dataState}>{copy.lead}<em>{copy.accent}</em>{copy.tail}</h2>
+        <p>{shown.length ? <>Cuando alguien comente {shown.map((keyword, index) => <span key={keyword}>{index > 0 && (index === shown.length - 1 && keywords.length <= 5 ? ' o ' : ', ')}<span className="kw-chip">{keyword}</span></span>)}{keywords.length > 5 ? ` y ${keywords.length - 5} más` : ''}, le escribo por privado.{mode === 'real' ? ' Estoy en modo real: envío de verdad.' : ' En modo prueba solo lo simulo.'}</> : 'Aún no tengo palabras clave: crea una automatización activa y sabré qué responder.'}</p>
+        <div className="hero-actions">
+          {copy.target && <button className="button primary big" onClick={() => onNavigate(copy.target!)}><ShieldAlert size={17} aria-hidden="true" /> {copy.target === 'moderation' ? 'Revisar comentarios' : copy.target === 'connections' ? 'Revisar conexión' : 'Revisar envíos'}</button>}
+          {sleeping
+            ? <button className={copy.target ? 'btn big' : 'button primary big'} onClick={() => void monitorAll(api, act, 'start')}><Sun size={17} aria-hidden="true" /> Despertar a Nani</button>
+            : <button className="btn big" onClick={() => void monitorAll(api, act, 'stop')}><Moon size={17} aria-hidden="true" /> Dormir a Nani</button>}
+          <button className="btn big ghost" onClick={() => onNavigate('automations')}><Zap size={17} aria-hidden="true" /> Ver lo que respondo</button>
+        </div>
+      </div>
+    </section>
+    <p className="scope-line">Cifras de <strong>{accountLabel}</strong></p>
+    <div className="stats stagger">
+      <div className="stat mint"><CountUp value={total(['SENT'])} /><span className="stat-l"><Send size={14} aria-hidden="true" /> Enviadas</span></div>
+      <div className="stat lilac"><CountUp value={total(['QUEUED', 'FAILED_RETRYABLE'])} /><span className="stat-l"><Clock size={14} aria-hidden="true" /> En cola</span></div>
+      <div className="stat pink"><CountUp value={pendingFlags} /><span className="stat-l"><ShieldAlert size={14} aria-hidden="true" /> Por revisar</span></div>
+      <div className="stat sun"><CountUp value={reviewItems} /><span className="stat-l"><CircleHelp size={14} aria-hidden="true" /> Sin confirmar</span></div>
+      <div className="stat muted-stat"><CountUp value={total(['EXPIRED'])} /><span className="stat-l"><History size={14} aria-hidden="true" /> Expirados (&gt; 7 días)</span></div>
     </div>
-    <div className="metrics-strip">
-      <div className="metric-cell"><span className="metric-label"><Send size={14} aria-hidden="true" /> Enviadas</span><span className="metric-val">{total(['SENT'])}</span><small>Confirmadas por API</small></div>
-      <div className="metric-cell"><span className="metric-label"><Clock size={14} aria-hidden="true" /> En cola</span><span className="metric-val">{queued}</span><small>Pendientes</small></div>
-      <div className="metric-cell"><span className="metric-label"><AlertTriangle size={14} aria-hidden="true" /> Revisión</span><span className={toReview ? 'metric-val warn' : 'metric-val'}>{toReview}</span><small>Atención requerida</small></div>
-      <div className="metric-cell"><span className="metric-label"><History size={14} aria-hidden="true" /> Expirados</span><span className="metric-val">{total(['EXPIRED'])}</span><small>&gt; 7 días</small></div>
-    </div>
+    {accounts.length > 0 && <section aria-labelledby="accounts-title" className="account-strip-section">
+      <h3 id="accounts-title" className="sec-title small">Estado por cuenta</h3>
+      <div className="account-strip stagger">{accounts.map((account) => {
+        const problem = problems.find((item) => item.username === account.username);
+        const state: NaniState = problem ? 'alert' : !data.monitoringEnabled || account.monitoringPaused ? 'sleep' : 'awake';
+        return <article className={problem ? 'account-card problem' : 'account-card'} key={account.accountId}>
+          <Nani state={state} size={40} />
+          <div className="account-card-text">
+            <strong>@{account.username}</strong>
+            <span className="muted">{account.last_sync ? <>Sincronizada <span className="mono nowrap">{formatDate(account.last_sync)}</span></> : 'Sin sincronización'}{coverageLabel(account.coverage) ? ` · ${coverageLabel(account.coverage)}` : ''}</span>
+            {account.last_error && <span className="account-error"><AlertTriangle size={13} aria-hidden="true" /> {accountErrorLabel(account.last_error)}</span>}
+          </div>
+        </article>;
+      })}</div>
+    </section>}
     {shouldShowOnboarding({ allDone: onboarding.allDone, filter: accountFilter, accountCount }) && <section className="box onboarding" aria-labelledby="onboarding-title">
-      <div className="box-h"><Rocket size={16} aria-hidden="true" /><h3 id="onboarding-title">Primeros pasos</h3><span className="box-h-note">{onboarding.steps.filter((step) => step.state === 'done').length} de {onboarding.steps.length} listos · Mientras Dry Run esté activo, nada se envía de verdad.</span></div>
+      <div className="box-h"><Nani state="awake" size={28} decorative /><h3 id="onboarding-title">Primeros pasos</h3><span className="box-h-note">Me faltan {onboarding.steps.filter((step) => step.state !== 'done').length} de {onboarding.steps.length} pasos para trabajar sola · {onboarding.steps.filter((step) => step.state === 'done').length} de {onboarding.steps.length} listos</span></div>
       <ol className="steps">{onboarding.steps.map((step, index) => <li key={step.id} className={`step ${step.state}`} aria-current={step.state === 'current' ? 'step' : undefined}>
         <span className="num" aria-hidden="true">{step.state === 'done' ? <Check size={13} strokeWidth={3} /> : index + 1}</span>
         <div className="step-text"><strong>{step.label}<span className="visually-hidden"> — {step.state === 'done' ? 'listo' : step.state === 'current' ? 'siguiente paso' : 'pendiente'}</span></strong><span className="muted">{step.detail}</span>
           <button className={step.state === 'current' ? 'button primary small' : 'btn-link text-button'} onClick={() => onNavigate(step.target)}>{step.state === 'done' ? 'Revisar' : step.actionLabel}</button></div>
       </li>)}</ol>
     </section>}
-    <div className="home-grid">
-      <section className="box" aria-labelledby="todo-title">
-        <div className="box-h"><BellDot size={16} aria-hidden="true" /><h3 id="todo-title">Para hacer</h3></div>
-        <div className="todo">
-          <button className="todo-tile" onClick={() => onNavigate('moderation')}><span className={pendingFlags ? 'ic bad' : 'ic ok'}>{pendingFlags ? <ShieldAlert size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}</span><span><b>{pendingFlags ? `${pendingFlags} ${pendingFlags === 1 ? 'comentario marcado' : 'comentarios marcados'}` : 'Sin comentarios marcados'}</b><small>{pendingFlags ? 'Ocultar o descartar lo que marcaron las reglas' : 'Nada pendiente de moderar'}</small></span><ChevronRight size={16} aria-hidden="true" /></button>
-          <button className="todo-tile" onClick={() => onNavigate('queue')}><span className={toReview ? 'ic warn' : 'ic ok'}>{toReview ? <AlertTriangle size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</span><span><b>{toReview ? `${toReview} ${toReview === 1 ? 'envío por revisar' : 'envíos por revisar'}` : 'Nada por revisar'}</b><small>{toReview ? 'Resultado desconocido o fallido' : `${queued} en cola`}</small></span><ChevronRight size={16} aria-hidden="true" /></button>
-          {next ? <button className="todo-tile" onClick={() => onNavigate(next.target)}><span className="ic accent"><Rocket size={16} aria-hidden="true" /></span><span><b>{next.label}</b><small>{next.detail}</small></span><ChevronRight size={16} aria-hidden="true" /></button>
-            : <button className="todo-tile" onClick={() => onNavigate('backlog')}><span className="ic ok"><Inbox size={16} aria-hidden="true" /></span><span><b>Revisar pendientes</b><small>Analizar sin enviar</small></span><ChevronRight size={16} aria-hidden="true" /></button>}
-          <button className="todo-tile" onClick={() => onNavigate('moderation')}><span className="ic ai"><Sparkles size={16} aria-hidden="true" /></span><span><b>Revisión con IA</b><small>Marca insultos, spam y quejas</small></span><ChevronRight size={16} aria-hidden="true" /></button>
-        </div>
-      </section>
-      <section className="box" aria-labelledby="accounts-title">
-        <div className="box-h"><Radio size={16} aria-hidden="true" /><h3 id="accounts-title">Estado por cuenta</h3><button className="btn-link text-button box-h-end" onClick={() => onNavigate('monitor')}>Abrir monitoreo</button></div>
-        {!accounts.length ? <Empty title="No hay cuentas conectadas" detail="Añada una conexión y seleccione una cuenta descubierta." action={() => onNavigate('connections')} actionLabel="Configurar conexión" /> : <div className="account-tiles">{accounts.map((account) => <div className="account-tile" key={account.accountId}>
-          <RingAvatar username={account.username} />
-          <div className="account-tile-text"><strong>@{account.username}</strong>
-            <div className="meta">{account.monitoringPaused ? <Status value="Pausado" tone="neutral" /> : account.status === 'valid' ? <Status value="Validada" tone="good" /> : <Status value="No validada" tone="warn" />}</div>
-            <small className="muted">{account.last_sync ? <>Última sincronización: <span className="mono">{formatDate(account.last_sync)}</span></> : 'Sin sincronización'}{account.coverage ? ` · ${account.coverage}` : ''}</small>
-            {account.last_error && <small className="tile-error">{account.last_error}</small>}
-          </div>
-        </div>)}</div>}
-      </section>
-    </div>
-    <section className="box" aria-labelledby="recipes-title">
-      <div className="box-h"><Zap size={16} aria-hidden="true" /><h3 id="recipes-title">Automatizaciones</h3><button className="btn small box-h-end" onClick={() => onNavigate('automations')}><Plus size={14} aria-hidden="true" /> Nueva</button></div>
-      {recipes.length ? <div className="recipes">{recipes.map((row) => <button className="recipe" key={row.automationId} onClick={() => onNavigate('automations')}>
-        {row.scope === 'account' ? <span className="recipe-thumb ph"><Layers size={18} aria-hidden="true" /></span> : <MiniThumb size="recipe" item={media.find((item) => item.mediaId === row.mediaId)} />}
-        <ArrowRight size={16} className="recipe-arrow" aria-hidden="true" />
-        <span className="recipe-body"><b>{row.name}</b><span className="dm">{sampleReply(row.replyText, row.keywords[0]?.phrase) || 'Sin mensaje'}</span>
-          <span className="recipe-meta">{row.keywords.slice(0, 3).map((keyword) => <span className="kw-chip" key={keyword.phrase}>{keyword.phrase}</span>)}<Status value={row.status === 'enabled' ? 'Activa' : 'Pausada'} tone={row.status === 'enabled' ? 'good' : 'neutral'} />{row.realEnabled && <Status value="Real" tone="warn" />}</span></span>
-      </button>)}</div> : <Empty title="Aún no hay automatizaciones" detail="Cree una regla que responda por mensaje privado a ciertas palabras." action={() => onNavigate('automations')} actionLabel="Crear automatización" primary />}
-    </section>
+    <LiveFlow key={queueScope} entries={flowEntries(queue, keywords, 6)} nani={nani} sleeping={sleeping} stateLabel={stateLabel} onReply={onCelebrate} partial={queueFiltered} />
   </>;
 }
 
@@ -434,7 +491,7 @@ function ConnectionsView({ connections, accounts, candidates, setCandidates, api
     <PageActions><button className="button primary" aria-label="Nueva conexión" onClick={() => focusById('conn-name')}><Plus size={15} aria-hidden="true" /> <span className="btn-label">Nueva conexión</span></button></PageActions>
     <section aria-labelledby="conn-title">
       <div className="section-h"><h3 id="conn-title">Conexiones Meta</h3><p className="muted">Los tokens se cifran en el servidor y nunca se vuelven a mostrar.</p></div>
-      {!connections.length ? <Empty icon={PlugZap} title="Aún no hay conexiones" detail="Guarde un token de Meta con el formulario «Nueva conexión»; después valídelo para descubrir sus cuentas." action={() => focusById('conn-name')} actionLabel="Crear la primera conexión" primary /> : <div className="tile-grid">{connections.map((connection) => <article className="tile conn-tile" key={connection.id}>
+      {!connections.length ? <Empty nani="sleep" title="Todavía no tengo conexiones. Pásame un token de Meta y empiezo." detail="Guarde un token de Meta con el formulario «Nueva conexión»; después valídelo para descubrir sus cuentas." action={() => focusById('conn-name')} actionLabel="Crear la primera conexión" primary /> : <div className="tile-grid stagger">{connections.map((connection) => <article className="tile conn-tile" key={connection.id}>
         <div className="tile-head"><span className="ic accent"><PlugZap size={17} aria-hidden="true" /></span><div className="tile-title"><strong>{connection.name}</strong><span className="muted">{connection.login_kind === 'instagram_login' ? 'Instagram Login' : 'Facebook Login'} · <span className="mono">{connection.graph_version}</span></span></div><ConnectionBadge status={connection.status} /></div>
         <div className="tile-actions"><button className="btn-main small" onClick={() => void discover(connection.id)}><Search size={14} aria-hidden="true" /> Probar y descubrir</button>
           <span className="tile-actions-icons">
@@ -469,12 +526,12 @@ function MediaView({ accounts, allAccounts, onSelectAccount, media, selected, on
   return <section aria-labelledby="media-title">
     {current && <PageActions><button className="btn" aria-label="Actualizar publicaciones" onClick={reload}><RefreshCw size={15} aria-hidden="true" /> <span className="btn-label">Actualizar publicaciones</span></button></PageActions>}
     <div className="section-h"><h3 id="media-title">Publicaciones de la cuenta</h3><p className="muted">{current && own.length ? `${own.length} ${own.length === 1 ? 'publicación' : 'publicaciones'} guardadas en este equipo.` : 'Elija una cuenta para cargar sus publicaciones autorizadas.'}</p></div>
-    {current ? own.length ? <div className="media-grid">{own.map((item) => { const caption = shortCaption(item.caption, 80); return <article className="media-card" key={item.mediaId}><MediaThumb item={item} />
+    {current ? own.length ? <div className="media-grid stagger">{own.map((item) => { const caption = shortCaption(item.caption, 80); return <article className="media-card" key={item.mediaId}><MediaThumb item={item} />
 <div className="media-card-body">
   <strong className={caption ? 'media-caption' : 'media-caption muted-text'}>{caption ?? `Sin texto · ${shortId(item.mediaId)}`}</strong>
   <div className="media-meta"><span className="mono">{item.publishedAt ? formatDate(item.publishedAt) : 'Sin fecha'}</span>{item.permalink && <a className="media-link" href={item.permalink} target="_blank" rel="noreferrer"><ExternalLink size={12} aria-hidden="true" /> Ver en Instagram</a>}</div>
 </div></article>; })}</div>
-      : <Empty icon={Images} title="Sin publicaciones guardadas" detail="Descargue las publicaciones de esta cuenta para poder crear automatizaciones." action={reload} actionLabel="Actualizar publicaciones" primary />
+      : <Empty nani="awake" title="Aún no veo tus publicaciones. Descárgalas y las vigilo." detail="Descargue las publicaciones de esta cuenta para poder crear automatizaciones." action={reload} actionLabel="Actualizar publicaciones" primary />
       : choices.length ? <AccountPrompt id="media-account-prompt" title="Elija una cuenta para ver sus publicaciones" detail="Las publicaciones se cargan de una cuenta a la vez." choices={choices} onSelect={onSelectAccount} />
         : <Empty title="Aún no hay cuentas" detail="Conecte Meta y elija una cuenta antes de ver sus publicaciones." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}</section>;
 }
@@ -509,7 +566,7 @@ function AutomationView({ accounts, media, rows, selected, api, act, confirm }: 
     <PageActions><button className="button primary" aria-label="Nueva automatización" onClick={() => focusById('auto-account')}><Plus size={15} aria-hidden="true" /> <span className="btn-label">Nueva automatización</span></button></PageActions>
     <section aria-labelledby="auto-list-title">
       <div className="section-h"><h3 id="auto-list-title">Tus automatizaciones</h3><p className="muted">Cada regla responde por mensaje privado cuando un comentario contiene sus palabras clave.</p></div>
-      {rows.length ? <div className="recipe-grid">{rows.map((row) => { const owner = accounts.find((item) => item.accountId === row.accountId)?.username; return <article className="automation-row tile" key={row.automationId}>
+      {rows.length ? <div className="recipe-grid stagger">{rows.map((row) => { const owner = accounts.find((item) => item.accountId === row.accountId)?.username; return <article className="automation-row tile" key={row.automationId}>
         <div className="recipe-flow">
           {row.scope === 'account' ? <span className="recipe-thumb ph"><Layers size={18} aria-hidden="true" /></span> : <MiniThumb size="recipe" item={media.find(m => m.mediaId === row.mediaId)} />}
           <ArrowRight size={16} className="recipe-arrow" aria-hidden="true" />
@@ -534,7 +591,7 @@ function AutomationView({ accounts, media, rows, selected, api, act, confirm }: 
             <button className="btn-icon danger" title="Archivar" aria-label="Archivar" onClick={() => void archive(row)}><Archive size={15} /></button>
           </span>
         </div>
-      </article>; })}</div> : <Empty icon={Zap} title="Aún no hay automatizaciones" detail="Cree una automatización asociada a una de sus publicaciones. Empieza en modo prueba." action={() => focusById('auto-account')} actionLabel="Crear la primera automatización" primary />}
+      </article>; })}</div> : <Empty nani="awake" title="Aún no sé qué responder. Enséñame con una automatización." detail="Cree una automatización asociada a una de sus publicaciones. Empieza en modo prueba." action={() => focusById('auto-account')} actionLabel="Crear la primera automatización" primary />}
     </section>
     {editing && <AutomationEditDialog row={editing} mediaOptions={media.filter((item) => item.accountId === editing.accountId).map((item) => ({ id: item.mediaId, label: mediaLabel(item) }))} onClose={() => setEditing(null)} onSave={async (values) => {
       const saved = await act(() => api(`/api/automations/${editing.automationId}`, 'PUT', { accountId: editing.accountId, mediaId: editing.scope === 'account' ? null : values.mediaId, name: values.name, replyText: values.replyText, matchMode: values.matchMode, buttons: editing.buttons ?? [], keywords: values.keywords.split(',').map((keyword) => keyword.trim()).filter(Boolean), publicReplyEnabled: values.publicReplyEnabled, publicReplyVariants: parseVariantLines(values.publicReplyVariants) }), 'Automatización actualizada; se invalidaron elementos con plantilla anterior.');
@@ -664,17 +721,17 @@ function ConversationInspector({ item, api }: { item: QueueItem; api: Api }) {
 
 function MonitorView({ accounts, status, onNavigate, api, act }: { accounts: Account[]; status: boolean; onNavigate(id: string): void; api: Api; act: Act }) {
   return <section aria-labelledby="monitor-title">
-    <PageActions><button className="btn-main" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'start' }), 'Monitoreo iniciado para cuentas validadas.')}><Play size={15} aria-hidden="true" /> Iniciar todas</button><button className="btn" onClick={() => void act(() => api('/api/monitor/all', 'POST', { action: 'stop' }), 'Todo el monitoreo se detuvo.')}><Pause size={15} aria-hidden="true" /> Detener todas</button></PageActions>
+    <PageActions><button className="btn-main" onClick={() => void monitorAll(api, act, 'start')}><Play size={15} aria-hidden="true" /> Iniciar todas</button><button className="btn" onClick={() => void monitorAll(api, act, 'stop')}><Pause size={15} aria-hidden="true" /> Detener todas</button></PageActions>
     <div className={status ? 'monitor-hero on' : 'monitor-hero'}>
-      <span className="monitor-pulse" aria-hidden="true"><Radio size={20} /></span>
+      <Nani state={status ? 'awake' : 'sleep'} size={48} decorative />
       <div><h3 id="monitor-title">Monitoreo</h3><p className="muted">El monitoreo siempre inicia apagado al reiniciar la aplicación.</p></div>
       <Status value={status ? 'Activo' : 'Detenido'} tone={status ? 'good' : 'neutral'} />
     </div>
-    {accounts.length ? <div className="tile-grid">{accounts.map((account) => <article className={account.monitoringPaused ? 'tile monitor-tile' : 'tile monitor-tile live'} key={account.accountId}>
+    {accounts.length ? <div className="tile-grid stagger">{accounts.map((account) => <article className={account.monitoringPaused ? 'tile monitor-tile' : 'tile monitor-tile live'} key={account.accountId}>
       <div className="tile-head"><RingAvatar username={account.username} /><div className="tile-title"><strong>@{account.username}</strong><span className="muted">{account.last_sync ? <>Última sincronización <span className="mono nowrap">{formatDate(account.last_sync)}</span></> : 'Sin sincronización'}</span></div></div>
-      <div className="monitor-state"><span className="monitor-state-dot" aria-hidden="true" /><span className="monitor-state-text">{account.monitoringPaused ? 'Pausado' : 'En monitoreo'}</span></div>
+      <div className="monitor-state"><Nani state={status && !account.monitoringPaused ? 'awake' : 'sleep'} size={56} /><span className="monitor-state-text">{account.monitoringPaused ? 'Pausado' : 'En monitoreo'}</span></div>
       <div className="tile-actions"><button className="btn small" onClick={() => void act(() => api(`/api/monitor/${account.accountId}`, 'POST', { action: account.monitoringPaused ? 'start' : 'stop' }), account.monitoringPaused ? 'Cuenta en monitoreo.' : 'Monitoreo pausado.')}>{account.monitoringPaused ? <><Play size={14}/> Reanudar</> : <><Pause size={14}/> Detener</>}</button></div>
-    </article>)}</div> : <Empty icon={Radio} title="Sin cuentas disponibles" detail="Valide y seleccione una cuenta antes de iniciar el monitoreo." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}
+    </article>)}</div> : <Empty nani="sleep" title="No tengo cuentas que vigilar todavía." detail="Valide y seleccione una cuenta antes de iniciar el monitoreo." action={() => onNavigate('connections')} actionLabel="Ir a Conexiones" primary />}
   </section>;
 }
 
@@ -732,7 +789,7 @@ function BacklogView({ allAccounts, accounts, selected, onSelectAccount, job, se
               <td>{item.previewText ? <details className="message-preview"><summary>Ver mensaje</summary><div className="preview-box"><p>{item.previewText}</p>{item.previewButtons.length > 0 && <ul>{item.previewButtons.map((button) => <li key={button.url}>Botón «{button.title}» → {button.url}</li>)}</ul>}<small className="muted">Vista previa; nada se envía hasta procesar.</small></div></details> : <span className="muted">Sin vista previa</span>}</td>
             </tr>)}</tbody></table></div>
             {pending.total > PENDING_PAGE && <div className="pagination"><button className="btn" disabled={pendingOffset <= 0} onClick={() => setPendingOffset(Math.max(0, pendingOffset - PENDING_PAGE))}>Anterior</button><span>{pendingOffset + 1}–{pendingOffset + items.length} de {pending.total}</span><button className="btn" disabled={pendingOffset + items.length >= pending.total} onClick={() => setPendingOffset(pendingOffset + PENDING_PAGE)}>Siguiente</button></div>}
-          </> : <Empty icon={Inbox} title="No hay comentarios pendientes" detail="Analice los comentarios de esta cuenta para encontrar los que coinciden con una automatización." action={() => focusById('backlog-start')} actionLabel="Analizar comentarios" primary />}
+          </> : <Empty nani="awake" title="No encontré comentarios pendientes." detail="Analice los comentarios de esta cuenta para encontrar los que coinciden con una automatización." action={() => focusById('backlog-start')} actionLabel="Analizar comentarios" primary />}
         </>}
     </section>
   </div>;
@@ -859,7 +916,7 @@ function QueueView({ items, total, offset, setOffset, state, setState, onNavigat
         })}</tbody>
       </table></div>
       <div className="pagination"><button className="btn" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - 50))}>Anterior</button><span>{offset + 1}–{Math.min(offset + items.length, total)} de {total}</span><button className="btn" disabled={offset + items.length >= total} onClick={() => setOffset(offset + 50)}>Siguiente</button></div>
-    </> : <Empty icon={History} title={state === 'all' ? 'La cola está vacía' : 'No hay registros con este estado'} detail={state === 'all' ? 'Los comentarios nuevos y los seleccionados manualmente aparecerán aquí.' : 'Pruebe con otro estado o con «Todos los estados».'} action={state === 'all' ? () => onNavigate('backlog') : () => setState('all')} actionLabel={state === 'all' ? 'Revisar comentarios pendientes' : 'Ver todos los estados'} primary />}
+    </> : <Empty nani="awake" title={state === 'all' ? 'Todavía no he respondido a nadie.' : 'No hay registros con este estado'} detail={state === 'all' ? 'Los comentarios nuevos y los seleccionados manualmente aparecerán aquí.' : 'Pruebe con otro estado o con «Todos los estados».'} action={state === 'all' ? () => onNavigate('backlog') : () => setState('all')} actionLabel={state === 'all' ? 'Revisar comentarios pendientes' : 'Ver todos los estados'} primary />}
   </section>;
 }
 
@@ -957,22 +1014,25 @@ function ConnectionBadge({ status }: { status: string }) {
   if (status === 'disconnected') return <Status value="Desconectada" tone="neutral" />;
   return <Status value={status} tone="warn" />;
 }
-function Empty({ title, detail, action, actionLabel, primary, icon: Icon = Inbox }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean; icon?: any }) { return <div className="empty-state"><div className="empty-icon"><Icon size={20} strokeWidth={1.9} aria-hidden="true" /></div><strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
+function Empty({ title, detail, action, actionLabel, primary, icon: Icon = Inbox, nani }: { title: string; detail: string; action?: () => void; actionLabel?: string; primary?: boolean; icon?: any; nani?: NaniState }) { return <div className={nani ? 'empty-state with-nani' : 'empty-state'}>{nani ? <Nani state={nani} size={84} decorative /> : <div className="empty-icon"><Icon size={20} strokeWidth={1.9} aria-hidden="true" /></div>}<strong>{title}</strong><p>{detail}</p>{action && <button className={primary ? 'button primary' : 'button secondary'} onClick={action}>{actionLabel}</button>}</div>; }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }); }
 function safeErrorLabel(code: string) { const labels: Record<string, string> = { account_not_found: 'La cuenta indicada no existe.', connection_not_found: 'La conexión indicada no existe.', invalid_request: 'Revise los campos e inténtelo de nuevo.', origin_or_csrf_rejected: 'La solicitud local no superó la protección de origen.', operation_rejected: 'La operación fue rechazada por una condición de seguridad o estado.', account_scan_failed: 'No se pudo completar el análisis para una cuenta.', follow_gate_invalid: 'La opción «Pedir primero que me sigan» no es válida.', follow_gate_message_invalid: 'Revise el «Mensaje previo»: es obligatorio, de hasta 640 caracteres y solo admite las variables indicadas.', follow_gate_button_title_invalid: 'Revise el «Título del botón»: de 1 a 20 caracteres, sin enlaces ni saltos de línea.', follow_gate_retired: FOLLOW_GATE_RETIRED_LABEL, interactive_mode_retired: INTERACTIVE_RETIRED_LABEL, ...ATTACHMENT_ERROR_LABELS, ...AI_ERROR_LABELS }; return labels[code] ?? 'Revise el estado de la cuenta y vuelva a intentarlo.'; }
 
-export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelectAccount, onNavigate, api, act, confirm, mode }: { flagCounts?: Dashboard['moderation']; accountFilter: string; allAccounts: any[]; onSelectAccount: (id: string) => void; onNavigate: (id: string) => void; api: any; act: any; confirm: any; mode: string }) {
+export function ModerationView({ onCelebrate, flagCounts, accountFilter, allAccounts, onSelectAccount, onNavigate, api, act, confirm, mode }: { onCelebrate?: () => void; flagCounts?: Dashboard['moderation']; accountFilter: string; allAccounts: any[]; onSelectAccount: (id: string) => void; onNavigate: (id: string) => void; api: any; act: any; confirm: any; mode: string }) {
   const [settings, setSettings] = useState<any>(null);
   const [flags, setFlags] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
-  const [flagState, setFlagState] = useState('all');
+  // The default view is the «Mesa de revisión» deck, which shows PENDING flags; the list starts from every state.
+  const [view, setView] = useState<'deck' | 'list'>('deck');
+  const [flagState, setFlagState] = useState('PENDING');
   const [flagSource, setFlagSource] = useState('all');
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   // Presentational only: the flag shown in the detail pane, the mobile sheet, the left pane tab and the terms editor.
   const [activeId, setActiveId] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [pane, setPane] = useState<'views' | 'rules' | 'ai'>('views');
+  const [pane, setPane] = useState<'views' | 'rules' | 'ai'>('rules');
   const [termsOpen, setTermsOpen] = useState(false);
   const [aiRow, setAiRow] = useState<HTMLDivElement | null>(null);
   const slots = useContext(SlotContext);
@@ -1015,6 +1075,7 @@ export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelec
       setFlags(data.items);
       setTotal(data.total);
       setSelectedIds([]);
+      setFlagsLoaded(true);
     } catch {
       // Ignored
     }
@@ -1127,11 +1188,22 @@ export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelec
     try { await action(flagId); } finally { busyRef.current = ''; setBusyId(''); }
   }
   // Switching account never keeps the previous account's list, selection or open sheet on screen.
-  useEffect(() => { setFlags([]); setTotal(0); setSelectedIds([]); setActiveId(''); setSheetOpen(false); }, [accountFilter]);
+  useEffect(() => { setFlags([]); setTotal(0); setSelectedIds([]); setActiveId(''); setSheetOpen(false); setFlagsLoaded(false); }, [accountFilter]);
+
+  function showList() { setView('list'); setFlagState('all'); setFlagSource('all'); setOffset(0); setPane('views'); }
+  function showDeck() { setView('deck'); setFlagState('PENDING'); setFlagSource('all'); setOffset(0); setPane((value) => value === 'views' ? 'rules' : value); }
+
+  /** Deck delete: the 1.2 s hold is the explicit confirmation, so it calls the same endpoint with confirmed: true. */
+  async function deleteFlagHeld(flagId: string) {
+    await act(async () => {
+      await api(`/api/moderation/flags/${flagId}/delete`, 'POST', { accountId: accountFilter, confirmed: true });
+      await loadFlags();
+    }, 'Intento de borrar registrado.');
+  }
 
   // Optional shortcuts: H hides, D dismisses — only on an explicitly selected, visible flag (see shouldHandleShortcut).
   useEffect(() => {
-    if (accountFilter === 'all') return;
+    if (accountFilter === 'all' || view === 'deck') return;
     function onKey(event: globalThis.KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const selected = flags.find((flag) => flag.flagId === activeId);
@@ -1158,9 +1230,10 @@ export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelec
     </section>;
   }
 
-  const paneTabs: Array<[typeof pane, string]> = [['views', 'Vistas'], ['rules', 'Reglas'], ['ai', 'IA']];
+  const paneTabs: Array<[typeof pane, string]> = view === 'deck' ? [['rules', 'Reglas'], ['ai', 'IA']] : [['views', 'Vistas'], ['rules', 'Reglas'], ['ai', 'IA']];
   return <SlotContext.Provider value={{ topbar: slots.topbar, aiRow }}>
-  <div className="inbox">
+  {view === 'list' && <PageActions><button className="btn" onClick={showDeck}><Layers size={15} aria-hidden="true" /> <span className="btn-label">Mesa de revisión</span></button></PageActions>}
+  <div className={view === 'deck' ? 'inbox deck-mode' : 'inbox'}>
     <aside className="mod-pane" aria-label="Vistas y reglas de moderación">
       <div className="pane-tabs" role="tablist" aria-label="Panel de moderación">
         {paneTabs.map(([id, label]) => <button key={id} type="button" role="tab" id={`mod-tab-${id}`} aria-selected={pane === id} aria-controls={`mod-pane-${id}`} className={pane === id ? 'pane-tab active' : 'pane-tab'} onClick={() => setPane(id)}>{label}</button>)}
@@ -1220,6 +1293,9 @@ export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelec
         <AiReviewPanel key={accountFilter} accountId={accountFilter} api={api} act={act} confirm={confirm} onShowAiFlags={showAiFlags} onFlagsChanged={loadFlags} onConfigure={() => setPane('ai')} />
       </div>
     </aside>
+    {view === 'deck' ? <ModerationDeck flags={flags.filter((flag) => flag.state === 'PENDING')} total={flagState === 'PENDING' ? total : 0} loaded={flagsLoaded && flagState === 'PENDING'} accountFilter={accountFilter} busyId={busyId} mode={mode}
+      onHide={(id) => runRowAction(id, hideFlag)} onDismiss={(id) => runRowAction(id, dismissFlag)} onDelete={(id) => runRowAction(id, deleteFlagHeld)}
+      onShowList={showList} onCleared={() => onCelebrate?.()} setAiRow={setAiRow} ago={shortAgo} category={categoryLabel} reasons={reasonsText} complaintHint={AI_COMPLAINT_HINT} /> : <>
     <section className="mod-list" aria-labelledby="flags-title">
       <div className="list-h">
         <input type="checkbox" aria-label="Seleccionar todo" checked={flags.length > 0 && selectedIds.length === flags.length} onChange={e => setSelectedIds(e.target.checked ? flags.map(f => f.flagId) : [])} />
@@ -1237,7 +1313,7 @@ export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelec
       </div>
       <div className="ai-row" ref={setAiRow} />
       {mode === 'dry' && <p className="mod-dry-note"><FlaskConical size={13} aria-hidden="true" /> Modo prueba: las acciones se simulan, no se ocultan ni borran comentarios reales.</p>}
-      {!flags.length ? <Empty icon={ShieldCheck} title="No hay comentarios marcados" detail="Active la moderación y defina palabras prohibidas; los comentarios marcados aparecerán aquí tras el próximo escaneo." action={() => setPane('rules')} actionLabel="Revisar reglas" /> :
+      {!flags.length ? <Empty nani="happy" title="No tengo comentarios marcados." detail="Active la moderación y defina palabras prohibidas; los comentarios marcados aparecerán aquí tras el próximo escaneo." action={() => setPane('rules')} actionLabel="Revisar reglas" /> :
         <div className="mod-rows">
           {flags.map(flag => {
             const isActive = active?.flagId === flag.flagId;
@@ -1297,6 +1373,7 @@ export function ModerationView({ flagCounts, accountFilter, allAccounts, onSelec
         </>;
       })() : <Empty icon={ShieldCheck} title="Nada seleccionado" detail="Elija un comentario de la lista para ver por qué se marcó y decidir qué hacer." />}
     </section>
+    </>}
   </div>
   </SlotContext.Provider>;
 }

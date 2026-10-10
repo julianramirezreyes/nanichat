@@ -268,16 +268,27 @@ export type ShortcutInput = {
   key: string; repeat: boolean; modifier: boolean; typing: boolean; dialogOpen: boolean;
   accountFilter: string; selectedId: string; visibleIds: readonly string[]; state: string;
   busy: boolean; narrow: boolean; sheetOpen: boolean;
+  /** 'deck' (Mesa de revisión: ← hides, → dismisses the top card) or 'list' (H/D on the selected row). Default 'list'. */
+  mode?: 'list' | 'deck';
+  /** Deck only: the deck has keyboard focus or the pointer over it. */
+  deckActive?: boolean;
 };
 
 /**
- * Moderation keyboard shortcuts (H hides, D dismisses). They act only on a flag the operator selected explicitly,
+ * Moderation keyboard shortcuts (list: H hides, D dismisses; deck: ← hides, → dismisses). They act only on a flag the operator selected explicitly,
  * that is still in the visible list of a single account, never while typing, with a dialog open, on key repeat, while
  * an action for that row is in flight, or (on narrow screens) while the detail sheet is closed.
  */
 export function shouldHandleShortcut(input: ShortcutInput): 'hide' | 'dismiss' | null {
   if (input.repeat || input.modifier || input.typing || input.dialogOpen || input.busy) return null;
   if (input.accountFilter === 'all' || !input.selectedId || !input.visibleIds.includes(input.selectedId)) return null;
+  const allowedDeck = availableActions(input.state);
+  if (input.mode === 'deck') {
+    if (!input.deckActive) return null;
+    if (input.key === 'ArrowLeft' && allowedDeck.hide) return 'hide';
+    if (input.key === 'ArrowRight' && allowedDeck.dismiss) return 'dismiss';
+    return null;
+  }
   if (input.narrow && !input.sheetOpen) return null;
   const key = input.key.toLowerCase();
   const allowed = availableActions(input.state);

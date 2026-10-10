@@ -306,7 +306,7 @@ async function phaseA(browser) {
   await browser.shot('01-dashboard-onboarding');
 
   await browser.nav('Conexiones');
-  await browser.waitFor('window.__h.find("strong", "Aún no hay conexiones")');
+  await browser.waitFor('window.__h.find("strong", "Todavía no tengo conexiones. Pásame un token de Meta y empiezo.")');
   await browser.settle();
   await browser.shot('02-connections-empty');
 

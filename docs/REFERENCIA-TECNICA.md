@@ -551,7 +551,7 @@ Todas exigen `accountId` y comprueban que la marca pertenece a esa cuenta; las e
 - `GET /api/moderation/settings?accountId=` → configuración (valores por defecto si no hay fila).
 - `PUT /api/moderation/settings` `{ accountId, enabled, blockedTerms[], detectLinks, detectPhones, detectMentions, detectEmoji, autoHideEnabled, autoHideCategories[], confirmed? }`.
 - `GET /api/moderation/flags?accountId=&state=&source=&limit=&offset=` → `{ items, total }` (límite por defecto 50, máximo 100; `state` debe ser un estado conocido u omitirse para «Todos»; `source` es `rules` o `ai`, u omitido para «Todas»). Cada elemento incluye `source`.
-- `POST /api/moderation/flags/{flagId}/hide`, `/unhide`, `/dismiss` `{ accountId }` y `/delete` `{ accountId, confirmed: true }`.
+- `POST /api/moderation/flags/{flagId}/hide`, `/unhide`, `/dismiss` `{ accountId }` y `/delete` `{ accountId, confirmed: true }`. En la interfaz, la lista pide confirmación antes de borrar; en la «Mesa de revisión» la confirmación explícita es mantener presionado «Borrar» 1,2 s (soltar antes cancela).
 - `POST /api/moderation/flags/bulk` `{ accountId, flagIds, action: 'hide' | 'unhide' | 'delete' | 'dismiss', confirmed? }`:
   - `flagIds`: de 1 a 100 IDs **únicos**. `delete` exige `confirmed: true`.
   - **Todo o nada en la pertenencia:** si un solo ID no existe o es de otra cuenta → 404 `not_found` y no se actúa sobre ninguno.
@@ -573,7 +573,7 @@ Códigos de error: 400 `confirmation_required`, `blocked_term_invalid` o `invali
 
 ### Revisión con IA
 
-Botón «Revisar comentarios negativos» en la barra superior de la sección «Moderación»; el motor, la key y los modelos se eligen en la pestaña «IA» del panel izquierdo, y el periodo, el progreso y el resumen aparecen sobre la lista de comentarios marcados. **Desactivada por defecto.** Solo **crea marcas**: nunca llama a Meta; ocultar, borrar o descartar siguen siendo las acciones de arriba.
+Botón «Revisar comentarios negativos» en la barra superior de la sección «Moderación»; el motor, la key y los modelos se eligen en la pestaña «IA» del panel lateral (a la derecha en la Mesa de revisión, a la izquierda en «Ver en lista»), y el periodo, el progreso y el resumen aparecen sobre la lista de comentarios marcados. **Desactivada por defecto.** Solo **crea marcas**: nunca llama a Meta; ocultar, borrar o descartar siguen siendo las acciones de arriba.
 
 - **Motores:** `off` (por defecto), `gemini` (API key gratuita de Google AI Studio de la persona) y `local` (modelo que corre dentro de este proceso; ver [Modelo local](#modelo-local)). Cambiar de motor conserva la key y el modelo de Gemini.
 - **Privacidad:** antes de activar Gemini la interfaz muestra este aviso, que también queda junto al selector (salvo con el modelo local, que muestra «Todo se procesa en este equipo; ningún comentario sale de él.»), y la API exige `confirmed: true` (estricto) la primera vez: «Con la API gratuita, Google puede usar el contenido enviado para mejorar sus productos. Los comentarios de sus clientes saldrán de este equipo. Para que nada salga del equipo use el modelo local.» Se guarda `consent_at`.

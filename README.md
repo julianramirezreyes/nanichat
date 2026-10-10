@@ -69,11 +69,11 @@ Todo corre en tu máquina: la interfaz web, la base de datos, la bóveda de cred
 - **Nada se borra nunca automáticamente.** Lo único automático es «Ocultar automáticamente» (opcional, por categorías, con confirmación), que solo actúa en modo real, con el Monitoreo encendido y en cuentas que no estén pausadas, de a un comentario cada 10 segundos como mínimo. No es retroactivo: solo oculta comentarios **publicados** desde que lo activas (aunque una revisión con IA marque hoy comentarios más viejos, esos no se ocultan solos).
 - **Todo queda registrado:** cada acción, incluido descartar, queda en el historial de moderación.
 - **Resultado dudoso:** si Meta no responde con claridad, el comentario queda «Por revisar»; revísalo en Instagram y descártalo a mano. No se reintenta solo.
-- **Dónde se configura:** sección «Moderación» → pestaña «Reglas» del panel izquierdo, con una cuenta elegida. Detalles técnicos en [REFERENCIA-TECNICA.md](docs/REFERENCIA-TECNICA.md#19-moderación-de-comentarios).
+- **Dónde se decide y se configura:** sección «Moderación», con una cuenta elegida. La vista por defecto es la **Mesa de revisión** (un comentario pendiente a la vez: arrastrar a la izquierda o «Ocultar» oculta, a la derecha o «Está bien» descarta, mantener «Borrar» 1,2 s borra; ← y → con el teclado). «Ver en lista» abre la lista completa con filtros. Las reglas están en la pestaña «Reglas» del panel lateral. Detalles técnicos en [REFERENCIA-TECNICA.md](docs/REFERENCIA-TECNICA.md#19-moderación-de-comentarios).
 
 ### Revisión con IA
 
-- **Desactivada por defecto.** En la sección «Moderación», la pestaña «IA» del panel izquierdo permite elegir **Gemini** con tu propia API key gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey) o el **Modelo local**.
+- **Desactivada por defecto.** En la sección «Moderación», la pestaña «IA» del panel lateral permite elegir **Gemini** con tu propia API key gratuita de [Google AI Studio](https://aistudio.google.com/app/apikey) o el **Modelo local**.
 - **Aviso de privacidad:** con la API gratuita, Google puede usar el contenido enviado para mejorar sus productos, y los comentarios de tus clientes salen de este equipo. Por eso activarla pide confirmación. Para que nada salga del equipo usa el modelo local.
 - **Modelo local: gratis y 100 % privado.** Corre dentro de la propia aplicación: ningún comentario sale del equipo y no necesita cuenta ni key. Se descarga **una vez** desde el panel (barra de progreso, «Cancelar» y reanudar donde quedó) y se verifica con su huella SHA-256:
   - **Qwen2.5 1.5B** (recomendado): «Rápido», ~1,1 GB de descarga, pensado para equipos con **8 GB de RAM**.
