@@ -5,6 +5,18 @@ export class RepositoryConflictError extends Error {
   }
 }
 
+/**
+ * The account already exists under a disconnected or deleted connection. It can be adopted by the new connection,
+ * but only after an explicit confirmation; the caller must repeat the selection with adoption allowed.
+ */
+export class AccountAdoptionRequiredError extends RepositoryConflictError {
+  readonly code = 'account_adoption_required';
+  constructor() {
+    super('This Instagram account is already managed under a disconnected connection; adoption must be confirmed');
+    this.name = 'AccountAdoptionRequiredError';
+  }
+}
+
 export class VaultKeyMissingError extends Error {
   constructor() {
     super('Vault key is missing while encrypted credentials exist; restore the key before continuing');

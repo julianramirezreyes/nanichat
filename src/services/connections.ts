@@ -6,7 +6,7 @@ import type {
   MetaLoginKind,
   SocialProvider,
 } from '../core/domain.ts';
-import { RepositoryConflictError } from '../core/errors.ts';
+import { AccountAdoptionRequiredError, RepositoryConflictError } from '../core/errors.ts';
 import type { CredentialVault } from '../security/vault.ts';
 import {
   addDiscoveredAccount,
@@ -136,7 +136,7 @@ export class ConnectionService {
     return safeAccounts;
   }
 
-  async selectAccount(id: string, candidate: DiscoveredAccount) {
+  async selectAccount(id: string, candidate: DiscoveredAccount, options: { adopt?: boolean } = {}) {
     const connection = getConnectionSummary(this.database, id);
     if (connection.status !== 'valid' || connection.monitoring_paused) {
       throw new Error('Validate the connection before selecting an account');
@@ -148,11 +148,20 @@ export class ConnectionService {
       && normalizeUsername(account.username) === normalized);
     if (!verified) throw new Error('Select an account from the latest provider discovery results');
 
-    const matches = this.database.prepare(`SELECT account_id, connection_id
-      FROM social_accounts WHERE provider_account_id = ? OR normalized_username = ?`)
-      .all(verified.providerAccountId, normalized) as Array<{ account_id: string; connection_id: string }>;
-    if (matches.length > 1 || matches.some((row) => row.connection_id !== id)) {
+    const matches = this.database.prepare(`SELECT s.account_id, s.connection_id, c.status AS owner_status
+      FROM social_accounts s LEFT JOIN connections c ON c.id = s.connection_id
+      WHERE s.provider_account_id = ? OR s.normalized_username = ?`)
+      .all(verified.providerAccountId, normalized) as Array<{ account_id: string; connection_id: string; owner_status: string | null }>;
+    if (matches.length > 1) {
       throw new RepositoryConflictError('This physical Instagram account is already managed or tombstoned under another connection');
+    }
+    // Only a disconnected (or deleted) owner can hand its account over, and only after explicit confirmation.
+    const foreign = matches.find((row) => row.connection_id !== id);
+    if (foreign) {
+      if (foreign.owner_status !== 'disconnected') {
+        throw new RepositoryConflictError('This physical Instagram account is already managed or tombstoned under another connection');
+      }
+      if (!options.adopt) throw new AccountAdoptionRequiredError();
     }
 
     const accountId = matches[0]?.account_id ?? randomUUID();
@@ -161,19 +170,28 @@ export class ConnectionService {
       throw new Error('Connection changed during account validation; retry after revalidation');
     }
 
-    addDiscoveredAccount(this.database, {
-      accountId,
-      connectionId: id,
-      providerAccountId: verified.providerAccountId,
-      username: verified.username,
-      displayName: verified.displayName,
-      accountType: verified.accountType,
-      relatedPageId: verified.relatedPageId,
-      status: 'valid',
-      capabilities: verified.capabilities,
-    });
-    if (derivedToken) {
-      saveAccountPageToken(this.database, accountId, this.vault.encrypt(`account:${accountId}`, derivedToken));
+    // One transaction: the ownership change and its page token land together or not at all.
+    this.database.exec('BEGIN IMMEDIATE');
+    try {
+      addDiscoveredAccount(this.database, {
+        accountId,
+        connectionId: id,
+        providerAccountId: verified.providerAccountId,
+        username: verified.username,
+        displayName: verified.displayName,
+        accountType: verified.accountType,
+        relatedPageId: verified.relatedPageId,
+        status: 'valid',
+        capabilities: verified.capabilities,
+        adopt: options.adopt === true,
+      });
+      if (derivedToken) {
+        saveAccountPageToken(this.database, accountId, this.vault.encrypt(`account:${accountId}`, derivedToken));
+      }
+      this.database.exec('COMMIT');
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
     }
     return getAccountSummary(this.database, accountId);
   }

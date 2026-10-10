@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { RepositoryConflictError } from '../core/errors.ts';
+import { AccountAdoptionRequiredError, RepositoryConflictError } from '../core/errors.ts';
 import type {
   AccountStatus,
   ConnectionStatus,
@@ -30,6 +30,8 @@ export type NewDiscoveredAccount = {
   relatedPageId?: string | null;
   status: AccountStatus;
   capabilities?: string[];
+  /** Allow taking over an account whose current owner connection is disconnected or deleted. */
+  adopt?: boolean;
 };
 
 export type ConnectionSummary = {
@@ -176,16 +178,25 @@ export function addDiscoveredAccount(database: DatabaseSync, input: NewDiscovere
     }>;
 
   if (matches.length) {
-    if (matches.length !== 1 || matches[0]!.account_id !== input.accountId
-      || matches[0]!.connection_id !== input.connectionId) {
+    if (matches.length !== 1 || matches[0]!.account_id !== input.accountId) {
       throw new RepositoryConflictError('This physical Instagram account is already managed or tombstoned under another connection');
     }
+    const previousConnectionId = matches[0]!.connection_id;
+    if (previousConnectionId !== input.connectionId) {
+      const owner = database.prepare('SELECT status FROM connections WHERE id = ?').get(previousConnectionId) as { status: string } | undefined;
+      if (owner?.status !== 'disconnected') {
+        throw new RepositoryConflictError('This physical Instagram account is already managed or tombstoned under another connection');
+      }
+      if (!input.adopt) throw new AccountAdoptionRequiredError();
+    }
     const now = new Date().toISOString();
-    database.prepare(`UPDATE social_accounts SET provider_account_id = ?, username = ?, normalized_username = ?,
+    // Adoption only moves connection_id: the account_id (and every row that references it) stays untouched.
+    database.prepare(`UPDATE social_accounts SET connection_id = ?, provider_account_id = ?, username = ?, normalized_username = ?,
         display_name = ?, account_type = ?, related_page_id = ?, status = ?, capabilities_json = ?,
         last_validated_at = ?, monitoring_paused = 0, last_validation_error_code = NULL, updated_at = ?
       WHERE account_id = ? AND connection_id = ?`)
       .run(
+        input.connectionId,
         input.providerAccountId,
         username,
         normalized,
@@ -197,7 +208,7 @@ export function addDiscoveredAccount(database: DatabaseSync, input: NewDiscovere
         now,
         now,
         input.accountId,
-        input.connectionId,
+        previousConnectionId,
       );
     return;
   }
