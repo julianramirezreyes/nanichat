@@ -425,7 +425,8 @@ test('L5: moderation tests carry no console debug output', () => {
 });
 
 test('L6: the diagnostics JSDoc sits directly above diagnoseConversation', () => {
-  const source = readFileSync(new URL('../src/providers/meta/provider.ts', import.meta.url), 'utf8');
+  // Normalize CRLF: Windows checkouts convert line endings.
+  const source = readFileSync(new URL('../src/providers/meta/provider.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   assert.match(source, /Calls are spaced \(Meta documents 2 calls\/s for this API\)\.\n\s*\*\/\n\s*async diagnoseConversation\(/);
 });
 
