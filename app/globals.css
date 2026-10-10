@@ -461,3 +461,11 @@ body, html, .app-container {
   .mod-row-head { flex-wrap: wrap; row-gap: 2px; }
   .mod-row-head .muted { flex-basis: 100%; }
 }
+
+/* Tabs: fit nine sections without a visible scrollbar */
+.tabs-inner { gap: 2px; scrollbar-width: none; -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%); mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%); }
+.tabs-inner::-webkit-scrollbar { display: none; }
+.tab { padding: 12px 10px; font-size: 14px; }
+.tab svg { width: 16px; height: 16px; }
+.tab { padding: 12px 8px; }
+@media (min-width: 1260px) { .tabs-inner { max-width: none; justify-content: center; -webkit-mask-image: none; mask-image: none; } }
