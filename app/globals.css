@@ -235,3 +235,4 @@ tbody tr:last-child td{border-bottom:0}
 .public-reply-fields .check-row{display:flex;gap:8px;align-items:center;font-weight:600}
 .public-reply-fields .preview-box{max-width:100%}
 .public-reply-detail{margin-top:10px}
+.notice-inline{border:1px solid var(--border,#d0d7de);border-radius:8px;padding:12px;margin-top:12px;font-size:13px}

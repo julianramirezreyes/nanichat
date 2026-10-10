@@ -1,3 +1,4 @@
+import { AccountAdoptionRequiredError } from '../core/errors.ts';
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
@@ -73,6 +74,7 @@ export function createApiHandler(deps: ApiDependencies) {
       if (error instanceof QueueReadbackError) return send(response, error.status, { error: error.code });
       const status = error instanceof ApiError ? error.status : error instanceof TypeError ? 400 : 409;
       const code = error instanceof ApiError ? error.code
+        : error instanceof AccountAdoptionRequiredError ? error.code
         : error instanceof FollowGateConfigError || error instanceof ResourceAttachmentError || error instanceof InteractiveModeRetiredError ? error.code
           : error instanceof TypeError ? 'invalid_request' : 'operation_rejected';
       send(response, status, { error: code });
@@ -136,7 +138,7 @@ async function route(
       const account = await service.selectAccount(connectionId, {
         providerAccountId: text(candidate.providerAccountId), username: text(candidate.username),
         capabilities: [],
-      } as never);
+      } as never, { adopt: body.confirmed === true });
       // Opt-in legacy interlock: without configuration nothing is inspected and no account starts held.
       const legacyState = deps.legacy?.inspect(account.username);
       if (legacyState?.blocked) {
@@ -155,6 +157,7 @@ async function route(
     if (action === 'disconnect' && method === 'POST') { await service.disconnect(connectionId); return send(response, 200, { ok: true }); }
     if (action === 'delete' && method === 'POST') { await service.delete(connectionId); return send(response, 200, { ok: true }); }
   }
+  if (path === '/api/accounts/orphaned' && method === 'GET') return send(response, 200, { accounts: listOrphanedAccounts(db) });
   if (path === '/api/accounts' && method === 'GET') return send(response, 200, { accounts: listAccounts(db, accountFilter(url)) });
   if (path === '/api/media' && method === 'GET') {
     const accountIdValue = accountFilter(url);
@@ -384,6 +387,17 @@ function dashboard(db: DatabaseSync, selected?: string) {
   const dryRunRow = db.prepare(`SELECT state_value FROM app_state WHERE state_key='dry_run'`).get() as { state_value: string } | undefined;
   const monitor = db.prepare(`SELECT state_value FROM app_state WHERE state_key='monitoring_enabled'`).get() as { state_value: string } | undefined;
   return { accounts: accounts.map((account) => ({ ...account, ...scans.find((scan) => scan.account_id === account.accountId) })), queue, automations, dryRun: dryRunRow?.state_value !== 'false', monitoringEnabled: monitor?.state_value === 'true' };
+}
+
+/** Accounts whose owner connection is disconnected or deleted: safe fields only, never credentials. */
+function listOrphanedAccounts(db: DatabaseSync) {
+  const rows = db.prepare(`SELECT a.account_id AS accountId, a.username, a.display_name AS displayName,
+      c.name AS previousConnectionName, c.deleted_at AS deletedAt,
+      (SELECT COUNT(*) FROM queue_items q WHERE q.account_id = a.account_id) AS queueItems,
+      (SELECT COUNT(*) FROM automations m WHERE m.account_id = a.account_id) AS automations
+      FROM social_accounts a JOIN connections c ON c.id = a.connection_id
+      WHERE c.status = 'disconnected' ORDER BY a.username, a.account_id`).all() as Array<Record<string, unknown>>;
+  return rows.map(({ deletedAt, ...row }) => ({ ...row, connectionDeleted: deletedAt != null }));
 }
 
 function listAccounts(db: DatabaseSync, selected?: string): Array<Record<string, unknown> & { accountId: string }> {

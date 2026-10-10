@@ -184,6 +184,7 @@ El [manual de usuario](#manual-de-usuario-pdf) explica cada pantalla con captura
 
 1. **Conexiones:** crea una conexión con un nombre, el tipo de inicio de sesión (Instagram Login o Facebook Login), la versión de Graph API y tu token de acceso (`TU_TOKEN`). El token se envía una sola vez y nunca se vuelve a mostrar.
 2. Pulsa **Probar y descubrir**, revisa las cuentas encontradas (por ejemplo `@tu_cuenta`) y selecciona la que quieres administrar.
+   Si eliminaste o desconectaste una conexión y vuelves a conectar la misma cuenta con una conexión nueva, **Seleccionar** te ofrecerá **Adoptar**: la cuenta conserva su historial, cola y automatizaciones. Solo se pueden adoptar cuentas de conexiones desconectadas o eliminadas, y siempre con confirmación. Ajustes lista esas cuentas.
 3. **Publicaciones:** pulsa **Actualizar publicaciones** para traer tus publicaciones.
 4. **Automatizaciones:** crea una regla (palabras clave, texto de respuesta, botones opcionales) y actívala. Solo los comentarios posteriores a la activación son candidatos.
 5. **Monitoreo:** enciéndelo por cuenta o para todas. **Siempre arranca apagado**, también después de cada reinicio.
